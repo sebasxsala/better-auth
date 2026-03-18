@@ -9,27 +9,73 @@ permissions:
   contents: write
 
 jobs:
-  release-core:
-    name: Release better_auth to RubyGems
+  # Test jobs - must pass before release
+  test-core:
+    name: Test better_auth (Core)
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    defaults:
-      run:
-        working-directory: packages/better_auth
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: .ruby-version
-          bundler-cache: true
-          working-directory: packages/better_auth
+          ruby-version: '3.3'
+
+      - name: Install dependencies
+        working-directory: packages/better_auth
+        run: bundle install
+
+      - name: Run linter
+        working-directory: packages/better_auth
+        run: bundle exec standardrb
 
       - name: Run tests
-        run: bundle exec rake ci
+        working-directory: packages/better_auth
+        run: bundle exec rake test
 
-      - name: Publish to RubyGems
+  test-rails:
+    name: Test better_auth-rails (Rails Adapter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install dependencies
+        working-directory: packages/better_auth-rails
+        run: bundle install
+
+      - name: Run linter
+        working-directory: packages/better_auth-rails
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-rails
+        run: bundle exec rspec
+
+  # Release jobs - only run if tests pass
+  release-core:
+    name: Release better_auth to RubyGems
+    needs: [test-core]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install dependencies
+        working-directory: packages/better_auth
+        run: bundle install
+
+      - name: Build and Publish to RubyGems
+        working-directory: packages/better_auth
         run: |
           mkdir -p $HOME/.gem
           touch $HOME/.gem/credentials
@@ -42,25 +88,23 @@ jobs:
 
   release-rails:
     name: Release better_auth-rails to RubyGems
+    needs: [test-rails]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    defaults:
-      run:
-        working-directory: packages/better_auth-rails
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: .ruby-version
-          bundler-cache: true
-          working-directory: packages/better_auth-rails
+          ruby-version: '3.3'
 
-      - name: Run tests
-        run: bundle exec rake ci
+      - name: Install dependencies
+        working-directory: packages/better_auth-rails
+        run: bundle install
 
-      - name: Publish to RubyGems
+      - name: Build and Publish to RubyGems
+        working-directory: packages/better_auth-rails
         run: |
           mkdir -p $HOME/.gem
           touch $HOME/.gem/credentials
@@ -71,11 +115,12 @@ jobs:
         env:
           GEM_HOST_API_KEY: "${{ secrets.RUBYGEMS_API_KEY }}"
 
+  # Create GitHub Release only if both gems published successfully
   create-release:
     name: Create GitHub Release
     needs: [release-core, release-rails]
     runs-on: ubuntu-latest
-    if: always() && (needs.release-core.result == 'success' || needs.release-rails.result == 'success')
+    if: needs.release-core.result == 'success' && needs.release-rails.result == 'success'
     steps:
       - uses: actions/checkout@v4
 

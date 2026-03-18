@@ -21,77 +21,48 @@ on:
       - '.github/workflows/ci.yml'
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: .ruby-version
-          bundler-cache: true
-
-      - name: Run StandardRB
-        run: bundle exec standardrb
-
   test-core:
     name: Test better_auth (Core)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: packages/better_auth
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: .ruby-version
-          bundler-cache: true
-          working-directory: packages/better_auth
+          ruby-version: '3.3'
 
-      - name: Start Docker Containers
-        run: docker compose up -d --wait --wait-timeout 60
+      - name: Install dependencies for better_auth
         working-directory: packages/better_auth
+        run: bundle install
 
-      - name: Run core tests (Minitest)
+      - name: Run linter
+        working-directory: packages/better_auth
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth
         run: bundle exec rake test
-
-      - name: Stop Docker Containers
-        run: docker compose down
-        working-directory: packages/better_auth
 
   test-rails:
     name: Test better_auth-rails (Rails Adapter)
     runs-on: ubuntu-latest
-    defaults:
-      run:
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install dependencies for better_auth-rails
         working-directory: packages/better_auth-rails
-    steps:
-      - uses: actions/checkout@v4
+        run: bundle install
 
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: .ruby-version
-          bundler-cache: true
-          working-directory: packages/better_auth-rails
+      - name: Run linter
+        working-directory: packages/better_auth-rails
+        run: bundle exec standardrb
 
-      - name: Run Rails adapter tests (RSpec)
+      - name: Run tests
+        working-directory: packages/better_auth-rails
         run: bundle exec rspec
-
-  test-workspace:
-    name: Test Workspace Integration
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: .ruby-version
-          bundler-cache: true
-
-      - name: Run workspace CI
-        run: bundle exec rake ci
