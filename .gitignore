@@ -1,0 +1,19 @@
+# Ignore bundler
+/.bundle
+Gemfile.lock
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore IDE
+.idea
+.vscode/*
+!.vscode/settings.json
+
+# Ignore coverage
+coverage/
+
+# Ignore temp files
+tmp/
+*.log
