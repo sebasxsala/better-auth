@@ -183,25 +183,23 @@ git push origin feat/new-feature
 
 **Automatic Release (GitHub Actions):**
 
-Release is triggered automatically when you create a git tag:
+Release is triggered on `push` to `main` when `lib/better_auth/version.rb` changes.
 
 ```bash
 # STEP 1: Update version in lib/better_auth/version.rb
 # Example: VERSION = "0.1.1"
 
-# STEP 2: Commit the version change
+# STEP 2: Commit and push to main
 git add lib/better_auth/version.rb
 git commit -m "chore: bump version to 0.1.1"
+git push origin main
 
-# STEP 3: Create and push the tag
-git tag -a v0.1.1 -m "Release v0.1.1"
-git push origin main --tags
-
-# STEP 4: GitHub Actions automatically:
+# STEP 3: GitHub Actions automatically:
 # - Runs tests
 # - Builds the gem
-# - Publishes to RubyGems
-# - Creates GitHub Release with changelog
+# - Publishes to RubyGems (if version is new)
+# - Creates and pushes git tag (v0.1.1)
+# - Creates GitHub Release
 ```
 
 **Required GitHub Configuration:**
@@ -209,6 +207,16 @@ git push origin main --tags
 1. Go to Settings → Secrets and variables → Actions
 2. Add `RUBYGEMS_API_KEY` with your RubyGems API key
 3. The workflow `.github/workflows/release.yml` does the rest
+
+**Dry-run options:**
+
+```bash
+# Local packaging dry-run
+make release-check
+
+# CI dry-run from GitHub Actions
+# Actions -> Release -> Run workflow -> dry_run=true
+```
 
 ### Manual Release (without GitHub Actions)
 

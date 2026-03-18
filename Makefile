@@ -80,6 +80,17 @@ ci:
 	bundle exec rake ci
 
 # =============================================
+# RELEASE
+# =============================================
+
+.PHONY: release-check
+release-check:
+	@echo "$(BLUE)📦 Validando build de gemas (sin publicar)...$(NC)"
+	cd packages/better_auth && rm -f better_auth-*.gem && bundle install && gem build better_auth.gemspec
+	cd packages/better_auth-rails && rm -f better_auth-rails-*.gem && bundle install && gem build better_auth-rails.gemspec
+	@echo "$(GREEN)✓ Build OK en ambas gemas (dry-run local)$(NC)"
+
+# =============================================
 # BASES DE DATOS
 # =============================================
 
@@ -129,6 +140,9 @@ help:
 	@echo "  make test-core     - Solo better_auth (core)"
 	@echo "  make test-rails    - Solo better_auth-rails"
 	@echo "  make ci            - CI completo (lint + test)"
+	@echo ""
+	@echo "$(YELLOW)Release:$(NC)"
+	@echo "  make release-check - Construye gemas sin publicar (dry-run local)"
 	@echo ""
 	@echo "$(YELLOW)Bases de datos:$(NC)"
 	@echo "  make db-up         - Inicia PostgreSQL, MySQL, Redis"

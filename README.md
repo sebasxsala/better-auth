@@ -165,25 +165,53 @@ git commit -m "chore: update upstream to latest canary"
 
 ### Automatic Release (GitHub Actions)
 
-Release is triggered by creating a tag:
+Release now runs on `push` to `main` and follows this flow:
+
+1. Run lint + tests for `better_auth` and `better_auth-rails`
+2. Detect if `version.rb` changed in either package
+3. Build gems and publish changed packages to RubyGems
+4. Create and push git tag automatically (`vX.Y.Z`)
+5. Create GitHub Release automatically
+
+If no version changed, release jobs are skipped after tests.
 
 ```bash
-# 1. Update version in the corresponding package
-#    packages/better_auth/lib/better_auth/version.rb
-#    or packages/better_auth-rails/lib/better_auth/rails/version.rb
+# 1. Bump one or both versions
+# packages/better_auth/lib/better_auth/version.rb
+# packages/better_auth-rails/lib/better_auth/rails/version.rb
 
-# 2. Commit the change
-git add packages/better_auth/lib/better_auth/version.rb
-git commit -m "chore: bump better_auth to v0.1.1"
+# 2. Commit and push to main
+git add packages/better_auth/lib/better_auth/version.rb packages/better_auth-rails/lib/better_auth/rails/version.rb
+git commit -m "chore: bump versions to 0.1.1"
+git push origin main
 
-# 3. Create and push the tag
-git tag -a v0.1.1 -m "Release v0.1.1"
-git push origin main --tags
-
-# GitHub Actions automatically publishes to RubyGems!
+# GitHub Actions handles publish + tag + GitHub Release
 ```
 
-**Note:** Each package has its own independent versioning.
+**Note:** If both versions are changed in the same release commit, they must match.
+
+### Dry-run Release Validation
+
+Use these to verify release packaging without publishing:
+
+```bash
+# Local dry-run build
+make release-check
+
+# CI dry-run (manual): Actions -> Release -> Run workflow -> dry_run=true
+```
+
+### Preview / Pre-release Versions
+
+RubyGems supports pre-release versions like `0.2.0.beta.1` or `0.2.0.rc.1`.
+
+To publish a preview:
+
+1. Bump version(s) to a pre-release suffix
+2. Push to `main`
+3. Release workflow publishes that exact pre-release version
+
+Clients can install with `--pre`.
 
 ### RubyGems Configuration
 
