@@ -10,8 +10,9 @@ permissions:
 
 jobs:
   release-core:
-    name: Release better_auth
+    name: Release better_auth to RubyGems
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
     defaults:
       run:
         working-directory: packages/better_auth
@@ -24,9 +25,6 @@ jobs:
           ruby-version: .ruby-version
           bundler-cache: true
           working-directory: packages/better_auth
-
-      - name: Install dependencies
-        run: bundle install
 
       - name: Run tests
         run: bundle exec rake ci
@@ -43,8 +41,9 @@ jobs:
           GEM_HOST_API_KEY: "${{ secrets.RUBYGEMS_API_KEY }}"
 
   release-rails:
-    name: Release better_auth-rails
+    name: Release better_auth-rails to RubyGems
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
     defaults:
       run:
         working-directory: packages/better_auth-rails
@@ -57,9 +56,6 @@ jobs:
           ruby-version: .ruby-version
           bundler-cache: true
           working-directory: packages/better_auth-rails
-
-      - name: Install dependencies
-        run: bundle install
 
       - name: Run tests
         run: bundle exec rake ci
@@ -79,12 +75,12 @@ jobs:
     name: Create GitHub Release
     needs: [release-core, release-rails]
     runs-on: ubuntu-latest
+    if: always() && (needs.release-core.result == 'success' || needs.release-rails.result == 'success')
     steps:
       - uses: actions/checkout@v4
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
         with:
           generate_release_notes: true
           name: "Better Auth Ruby ${{ github.ref_name }}"
@@ -96,3 +92,5 @@ jobs:
             ### Packages
             - `better_auth` - Core authentication library
             - `better_auth-rails` - Rails adapter
+            
+            ${{ github.event.head_commit.message }}

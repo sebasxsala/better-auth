@@ -5,10 +5,20 @@ on:
     types:
       - opened
       - synchronize
+    paths:
+      - 'packages/**'
+      - 'Gemfile'
+      - 'Rakefile'
+      - '.github/workflows/ci.yml'
   push:
     branches:
       - main
       - canary
+    paths:
+      - 'packages/**'
+      - 'Gemfile'
+      - 'Rakefile'
+      - '.github/workflows/ci.yml'
 
 jobs:
   lint:
@@ -25,29 +35,63 @@ jobs:
       - name: Run StandardRB
         run: bundle exec standardrb
 
-  test:
+  test-core:
+    name: Test better_auth (Core)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        ruby-version: ['3.2', '3.3']
+    defaults:
+      run:
+        working-directory: packages/better_auth
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Ruby ${{ matrix.ruby-version }}
+      - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: ${{ matrix.ruby-version }}
+          ruby-version: .ruby-version
           bundler-cache: true
+          working-directory: packages/better_auth
 
       - name: Start Docker Containers
         run: docker compose up -d --wait --wait-timeout 60
+        working-directory: packages/better_auth
 
       - name: Run core tests (Minitest)
         run: bundle exec rake test
 
+      - name: Stop Docker Containers
+        run: docker compose down
+        working-directory: packages/better_auth
+
+  test-rails:
+    name: Test better_auth-rails (Rails Adapter)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/better_auth-rails
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-rails
+
       - name: Run Rails adapter tests (RSpec)
         run: bundle exec rspec
 
-      - name: Stop Docker Containers
-        run: docker compose down
+  test-workspace:
+    name: Test Workspace Integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+
+      - name: Run workspace CI
+        run: bundle exec rake ci
