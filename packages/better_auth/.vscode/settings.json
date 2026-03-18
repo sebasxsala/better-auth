@@ -1,0 +1,22 @@
+{
+  "rubyLsp.enabled": true,
+  "rubyLsp.formatter": "standard",
+  "rubyLsp.linters": ["standard"],
+  "editor.formatOnSave": true,
+  "editor.insertSpaces": true,
+  "editor.tabSize": 2,
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "[ruby]": {
+    "editor.defaultFormatter": "Shopify.ruby-lsp",
+    "editor.formatOnSave": true,
+    "editor.rulers": [120]
+  },
+  "search.exclude": {
+    "**/.bundle": true,
+    "**/vendor": true,
+    "**/coverage": true,
+    "**/doc": true,
+    "**/*.gem": true
+  }
+}

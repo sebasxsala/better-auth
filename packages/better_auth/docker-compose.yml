@@ -1,0 +1,63 @@
+# Services for testing database adapters
+# These are used in CI for testing various database backends
+
+x-postgres-healthcheck: &postgres-healthcheck
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U user -d better_auth"]
+    interval: 1s
+    timeout: 5s
+    retries: 10
+
+x-mysql-healthcheck: &mysql-healthcheck
+  healthcheck:
+    test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uuser", "-ppassword"]
+    interval: 1s
+    timeout: 5s
+    retries: 10
+    start_period: 30s
+
+services:
+  redis:
+    image: redis:latest
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 5s
+      retries: 10
+
+  postgres:
+    <<: *postgres-healthcheck
+    image: postgres:latest
+    container_name: postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: better_auth
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+  mysql:
+    <<: *mysql-healthcheck
+    image: mysql:latest
+    container_name: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: better_auth
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+volumes:
+  redis_data:
+  postgres_data:
+  mysql_data:

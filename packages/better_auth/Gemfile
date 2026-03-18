@@ -1,0 +1,12 @@
+source "https://rubygems.org"
+
+ruby file: ".ruby-version"
+
+gemspec
+
+group :development, :test do
+  gem "standardrb", "~> 1.0"
+  gem "minitest", "~> 5.25"
+  gem "rake", "~> 13.2"
+  gem "simplecov", "~> 0.22", require: false
+end
