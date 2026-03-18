@@ -19,9 +19,6 @@ task "lint:fix" do
   sh "bundle exec standardrb --fix"
 end
 
-desc "Run all tests"
-task test: :test
-
 desc "Run full CI check (lint + test)"
 task ci: [:lint, :test]
 

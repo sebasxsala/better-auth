@@ -4,6 +4,9 @@ source "https://rubygems.org"
 
 ruby file: ".ruby-version"
 
+# Use local better_auth for development
+gem "better_auth", path: "../better_auth"
+
 gemspec
 
 group :development, :test do
