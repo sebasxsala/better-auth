@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
 
@@ -9,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  # Test jobs - must pass before release
+  # Test jobs - must pass before any release
   test-core:
     name: Test better_auth (Core)
     runs-on: ubuntu-latest
@@ -56,12 +58,12 @@ jobs:
         working-directory: packages/better_auth-rails
         run: bundle exec rspec
 
-  # Release jobs - only run if tests pass
+  # Release jobs - only run on tags and only if tests pass
   release-core:
     name: Release better_auth to RubyGems
     needs: [test-core]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
 
@@ -88,9 +90,9 @@ jobs:
 
   release-rails:
     name: Release better_auth-rails to RubyGems
-    needs: [test-rails]
+    needs: [test-rails, release-core]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
 
@@ -120,7 +122,7 @@ jobs:
     name: Create GitHub Release
     needs: [release-core, release-rails]
     runs-on: ubuntu-latest
-    if: needs.release-core.result == 'success' && needs.release-rails.result == 'success'
+    if: github.ref_type == 'tag' && needs.release-core.result == 'success' && needs.release-rails.result == 'success'
     steps:
       - uses: actions/checkout@v4
 
