@@ -30,22 +30,22 @@ Better Auth Ruby is a comprehensive authentication and authorization library for
 ## Monorepo Structure
 
 ```
-better-auth/                    # Workspace principal (este repo)
-├── upstream/                   # Submódulo: better-auth TypeScript original
+better-auth/                    # Main workspace (this repo)
+├── upstream/                   # Submodule: original better-auth TypeScript
 ├── packages/
-│   ├── better_auth/            # Gema: better_auth (core)
+│   ├── better_auth/            # Gem: better_auth (core)
 │   │   ├── lib/better_auth/
-│   │   ├── test/               # Tests con Minitest
+│   │   ├── test/               # Tests with Minitest
 │   │   └── better_auth.gemspec
 │   │
-│   └── better_auth-rails/      # Gema: better_auth-rails (adapter)
+│   └── better_auth-rails/      # Gem: better_auth-rails (adapter)
 │       ├── lib/better_auth/rails/
-│       ├── spec/               # Tests con RSpec
+│       ├── spec/               # Tests with RSpec
 │       └── better_auth-rails.gemspec
 │
-├── Gemfile                     # Workspace Gemfile (referencia packages)
-├── Rakefile                    # Tareas del workspace
-└── Makefile                    # Comandos de desarrollo
+├── Gemfile                     # Workspace Gemfile (references packages)
+├── Rakefile                    # Workspace tasks
+└── Makefile                    # Development commands
 ```
 
 ## Installation
@@ -59,7 +59,7 @@ gem 'better_auth'
 ### With Rails
 
 ```ruby
-gem 'better_auth-rails'  # Incluye better_auth automáticamente
+gem 'better_auth-rails'  # Includes better_auth automatically
 ```
 
 ## Development
@@ -67,94 +67,94 @@ gem 'better_auth-rails'  # Incluye better_auth automáticamente
 ### Quick Start
 
 ```bash
-# 1. Clona el repositorio
+# 1. Clone the repository
 git clone --recursive https://github.com/sebasxsala/better-auth.git
 cd better-auth
 
-# 2. Instala dependencias de todo el workspace
+# 2. Install dependencies for the entire workspace
 make install
 
-# 3. Corre tests para verificar todo funciona
+# 3. Run tests to verify everything works
 make ci
 ```
 
-### Comandos del Workspace
+### Workspace Commands
 
 ```bash
-# Ver todos los comandos
+# View all commands
 make help
 
-# Desarrollo
-make console          # Consola con todos los packages cargados
-make lint            # Linting en todos los packages
-make lint-fix        # Auto-fix de linting
+# Development
+make console          # Console with all packages loaded
+make lint            # Linting in all packages
+make lint-fix        # Auto-fix linting issues
 
 # Testing
-make test            # Tests de todo el workspace
-make test-core       # Solo better_auth (Minitest)
-make test-rails      # Solo better_auth-rails (RSpec)
-make ci              # CI completo
+make test            # Tests for entire workspace
+make test-core       # Only better_auth (Minitest)
+make test-rails      # Only better_auth-rails (RSpec)
+make ci              # Full CI
 
-# Bases de datos
-make db-up           # Inicia PostgreSQL, MySQL, Redis
-make db-down         # Detiene contenedores
+# Databases
+make db-up           # Start PostgreSQL, MySQL, Redis
+make db-down         # Stop containers
 ```
 
-### Trabajando en un Package Específico
+### Working on a Specific Package
 
 ```bash
-# Entra al package
+# Enter the package
 cd packages/better_auth
 
-# Instala dependencias locales
+# Install local dependencies
 bundle install
 
-# Corre tests
+# Run tests
 bundle exec rake test
 
-# Vuelve al workspace
+# Return to workspace
 cd ../..
 ```
 
 ## Git Workflow
 
-### Estructura de Ramas
+### Branch Structure
 
-- **`main`** - Código estable, releases
-- **`canary`** - Rama de desarrollo/integración
-  - Los PRs de features van a `canary`
-  - Cuando está estable, merge a `main` para release
-- **`upstream`** - Referencia al repo original TypeScript (submódulo)
+- **`main`** - Stable code, releases
+- **`canary`** - Development/integration branch
+  - Feature PRs go to `canary`
+  - When stable, merge to `main` for release
+- **`upstream`** - Reference to original TypeScript repo (submodule)
 
-### Flujo de Trabajo
+### Workflow
 
 ```bash
-# 1. Crea tu feature branch desde canary
+# 1. Create your feature branch from canary
 git checkout canary
 git pull origin canary
-git checkout -b feat/nueva-funcionalidad
+git checkout -b feat/new-feature
 
-# 2. Haces tus cambios
-# ... código ...
+# 2. Make your changes
+# ... code ...
 
-# 3. Commit y push
+# 3. Commit and push
 git add .
-git commit -m "feat(core): agrega soporte para X"
-git push origin feat/nueva-funcionalidad
+git commit -m "feat(core): add support for X"
+git push origin feat/new-feature
 
-# 4. Crea PR hacia canary en GitHub
+# 4. Create PR towards canary on GitHub
 
-# 5. Una vez mergeado a canary y probado:
-#    Merge canary → main y crea tag para release
+# 5. Once merged to canary and tested:
+#    Merge canary → main and create tag for release
 ```
 
-### Actualizar el Submódulo Upstream
+### Updating the Upstream Submodule
 
 ```bash
-# Actualiza el submódulo a la última versión
+# Update submodule to latest version
 cd upstream
 git fetch origin
-git checkout canary  # o main, según necesites
+git checkout canary  # or main, as needed
 git pull origin canary
 cd ..
 git add upstream
@@ -163,41 +163,41 @@ git commit -m "chore: update upstream to latest canary"
 
 ## Release Process
 
-### Release Automático (GitHub Actions)
+### Automatic Release (GitHub Actions)
 
-El release se dispara al crear un tag:
+Release is triggered by creating a tag:
 
 ```bash
-# 1. Actualiza la versión en el package correspondiente
+# 1. Update version in the corresponding package
 #    packages/better_auth/lib/better_auth/version.rb
-#    o packages/better_auth-rails/lib/better_auth/rails/version.rb
+#    or packages/better_auth-rails/lib/better_auth/rails/version.rb
 
-# 2. Commit del cambio
+# 2. Commit the change
 git add packages/better_auth/lib/better_auth/version.rb
 git commit -m "chore: bump better_auth to v0.1.1"
 
-# 3. Crea y push el tag
+# 3. Create and push the tag
 git tag -a v0.1.1 -m "Release v0.1.1"
 git push origin main --tags
 
-# GitHub Actions publica automáticamente a RubyGems!
+# GitHub Actions automatically publishes to RubyGems!
 ```
 
-**Nota:** Cada package tiene su propio versionado independiente.
+**Note:** Each package has its own independent versioning.
 
-### Configuración de RubyGems
+### RubyGems Configuration
 
-1. Ve a GitHub → Settings → Secrets → Actions
-2. Agrega `RUBYGEMS_API_KEY` con tu API key
-3. El workflow publica automáticamente
+1. Go to GitHub → Settings → Secrets → Actions
+2. Add `RUBYGEMS_API_KEY` with your API key
+3. The workflow publishes automatically
 
 ## Contributing
 
-1. Fork el repositorio
-2. Crea tu feature branch (`git checkout -b feat/amazing-feature`)
-3. Commit tus cambios (`git commit -m 'feat: add amazing feature'`)
-4. Push a la rama (`git push origin feat/amazing-feature`)
-5. Abre un Pull Request hacia `canary`
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feat/amazing-feature`)
+3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
+4. Push to the branch (`git push origin feat/amazing-feature`)
+5. Open a Pull Request towards `canary`
 
 ## License
 
@@ -205,4 +205,4 @@ git push origin main --tags
 
 ## Security
 
-Para reportar vulnerabilidades: security@better-auth.com
+To report vulnerabilities: security@better-auth.com
