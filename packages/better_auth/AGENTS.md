@@ -1,6 +1,10 @@
-# AGENTS.md
+# AGENTS.md - Better Auth Core Package
 
-This file provides guidance to AI assistants (Claude Code, Cursor, etc.) when working with code in this repository.
+**⚠️ CRITICAL: Always read this file when editing files in packages/better_auth/**
+
+This file provides guidance to AI assistants (Claude Code, Cursor, etc.) when working with code in this directory.
+
+**Note:** CLAUDE.md is a symlink to this file. Both contain the same information.
 
 ## Project Overview
 
