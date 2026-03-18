@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release-core:
+    name: Release better_auth
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/better_auth
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth
+
+      - name: Install dependencies
+        run: bundle install
+
+      - name: Run tests
+        run: bundle exec rake ci
+
+      - name: Publish to RubyGems
+        run: |
+          mkdir -p $HOME/.gem
+          touch $HOME/.gem/credentials
+          chmod 0600 $HOME/.gem/credentials
+          printf -- "---\n:rubygems_api_key: ${GEM_HOST_API_KEY}\n" > $HOME/.gem/credentials
+          gem build better_auth.gemspec
+          gem push better_auth-*.gem
+        env:
+          GEM_HOST_API_KEY: "${{ secrets.RUBYGEMS_API_KEY }}"
+
+  release-rails:
+    name: Release better_auth-rails
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/better_auth-rails
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-rails
+
+      - name: Install dependencies
+        run: bundle install
+
+      - name: Run tests
+        run: bundle exec rake ci
+
+      - name: Publish to RubyGems
+        run: |
+          mkdir -p $HOME/.gem
+          touch $HOME/.gem/credentials
+          chmod 0600 $HOME/.gem/credentials
+          printf -- "---\n:rubygems_api_key: ${GEM_HOST_API_KEY}\n" > $HOME/.gem/credentials
+          gem build better_auth-rails.gemspec
+          gem push better_auth-rails-*.gem
+        env:
+          GEM_HOST_API_KEY: "${{ secrets.RUBYGEMS_API_KEY }}"
+
+  create-release:
+    name: Create GitHub Release
+    needs: [release-core, release-rails]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          generate_release_notes: true
+          name: "Better Auth Ruby ${{ github.ref_name }}"
+          body: |
+            ## Changes
+            
+            This release includes updates to the Better Auth Ruby gems.
+            
+            ### Packages
+            - `better_auth` - Core authentication library
+            - `better_auth-rails` - Rails adapter
