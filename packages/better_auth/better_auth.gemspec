@@ -5,8 +5,8 @@ require_relative "lib/better_auth/version"
 Gem::Specification.new do |spec|
   spec.name = "better_auth"
   spec.version = BetterAuth::VERSION
-  spec.authors = ["Your Name"]
-  spec.email = ["your.email@example.com"]
+  spec.authors = ["Sebastian Sala"]
+  spec.email = ["sebastian.sala.tech@gmail.com"]
 
   spec.summary = "Comprehensive authentication framework for Ruby/Rack"
   spec.description = "Better Auth is a comprehensive, framework-agnostic authentication library for Ruby. It provides a complete set of features out of the box with a plugin ecosystem."

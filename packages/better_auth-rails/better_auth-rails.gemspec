@@ -5,18 +5,19 @@ require_relative "lib/better_auth/rails/version"
 Gem::Specification.new do |spec|
   spec.name = "better_auth-rails"
   spec.version = BetterAuth::Rails::VERSION
-  spec.authors = ["Your Name"]
-  spec.email = ["your.email@example.com"]
+  spec.authors = ["Sebastian Sala"]
+  spec.email = ["sebastian.sala.tech@gmail.com"]
 
   spec.summary = "Rails adapter for Better Auth"
   spec.description = "Rails integration for Better Auth Ruby. Provides middleware, controller helpers, and generators."
-  spec.homepage = "https://github.com/sebasxsala/better-auth-rails"
+  spec.homepage = "https://github.com/sebasxsala/better-auth"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"
 
   spec.metadata["homepage_uri"] = spec.homepage
-  spec.metadata["source_code_uri"] = "https://github.com/sebasxsala/better-auth-rails"
-  spec.metadata["changelog_uri"] = "https://github.com/sebasxsala/better-auth-rails/blob/main/CHANGELOG.md"
+  spec.metadata["source_code_uri"] = "https://github.com/sebasxsala/better-auth"
+  spec.metadata["changelog_uri"] = "https://github.com/sebasxsala/better-auth/blob/main/packages/better_auth-rails/CHANGELOG.md"
+  spec.metadata["bug_tracker_uri"] = "https://github.com/sebasxsala/better-auth/issues"
 
   spec.files = Dir.chdir(__dir__) do
     `git ls-files -z`.split("\x0").reject do |f|

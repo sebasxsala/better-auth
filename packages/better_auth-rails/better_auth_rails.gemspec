@@ -5,8 +5,8 @@ require_relative "lib/better_auth/rails/version"
 Gem::Specification.new do |spec|
   spec.name = "better_auth_rails"
   spec.version = BetterAuth::Rails::VERSION
-  spec.authors = ["Your Name"]
-  spec.email = ["your.email@example.com"]
+  spec.authors = ["Sebastian Sala"]
+  spec.email = ["sebastian.sala.tech@gmail.com"]
 
   spec.summary = "Alias for better_auth-rails"
   spec.description = "Please use better_auth-rails instead."
@@ -16,6 +16,7 @@ Gem::Specification.new do |spec|
 
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = "https://github.com/sebasxsala/better-auth"
+  spec.metadata["bug_tracker_uri"] = "https://github.com/sebasxsala/better-auth/issues"
 
   spec.files = [
     "lib/better_auth_rails.rb",
