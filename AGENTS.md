@@ -98,6 +98,37 @@ Examples:
 - SCREAMING_SNAKE_CASE for constants
 - `frozen_string_literal: true` pragma in all Ruby files
 
+## Documentation
+
+### Feature Documentation
+
+When implementing a new feature or fixing a complex bug, document your work in `.docs/` directory:
+
+```
+.docs/
+├── features/
+│   ├── oauth-providers.md       # Feature implementation docs
+│   ├── jwt-tokens.md
+│   └── session-management.md
+└── postmortems/
+    └── issue-123-session-race.md  # Bug fixes and issues
+```
+
+**When to document:**
+- Implementing a new feature from upstream
+- Porting a plugin from TypeScript
+- Fixing a non-trivial bug
+- Making architectural decisions
+
+**What to include:**
+- Link to upstream implementation (if applicable)
+- How you adapted it to Ruby/Rails
+- Key differences from TypeScript version
+- Testing approach
+- Examples and usage
+
+This helps future maintainers understand the context and decisions made during development.
+
 ## After Everything is Done
 
 **Unless the user asked for it or you are working on CI, DO NOT COMMIT**

@@ -11,6 +11,16 @@ on:
         required: false
         default: false
         type: boolean
+      force_core:
+        description: "Force publish better_auth gem (even if version unchanged)"
+        required: false
+        default: false
+        type: boolean
+      force_rails:
+        description: "Force publish better_auth-rails gem (even if version unchanged)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -87,6 +97,8 @@ jobs:
         id: detect
         env:
           DRY_RUN_INPUT: ${{ github.event.inputs.dry_run || 'false' }}
+          FORCE_CORE_INPUT: ${{ github.event.inputs.force_core || 'false' }}
+          FORCE_RAILS_INPUT: ${{ github.event.inputs.force_rails || 'false' }}
         run: |
           set -euo pipefail
 
@@ -102,11 +114,12 @@ jobs:
           core_changed=false
           rails_changed=false
 
-          if [ "$core_version" != "$core_previous" ]; then
+          # Check for version changes or force flags
+          if [ "$core_version" != "$core_previous" ] || [ "$FORCE_CORE_INPUT" = "true" ]; then
             core_changed=true
           fi
 
-          if [ "$rails_version" != "$rails_previous" ]; then
+          if [ "$rails_version" != "$rails_previous" ] || [ "$FORCE_RAILS_INPUT" = "true" ]; then
             rails_changed=true
           fi
 
@@ -138,8 +151,8 @@ jobs:
           echo "release_version=$release_version" >> "$GITHUB_OUTPUT"
           echo "dry_run=$DRY_RUN_INPUT" >> "$GITHUB_OUTPUT"
 
-          echo "core_changed=$core_changed"
-          echo "rails_changed=$rails_changed"
+          echo "core_changed=$core_changed (force: $FORCE_CORE_INPUT)"
+          echo "rails_changed=$rails_changed (force: $FORCE_RAILS_INPUT)"
           echo "should_release=$should_release"
           echo "release_version=$release_version"
           echo "dry_run=$DRY_RUN_INPUT"
