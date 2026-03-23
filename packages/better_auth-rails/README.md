@@ -10,6 +10,12 @@ Add this line to your application's Gemfile:
 gem 'better_auth-rails'
 ```
 
+Optional compatibility package (underscore naming):
+
+```ruby
+gem 'better_auth_rails'
+```
+
 And then execute:
 
 ```bash
@@ -24,6 +30,12 @@ Add to your `config/application.rb`:
 
 ```ruby
 require 'better_auth/rails'
+```
+
+Compatibility require is also supported:
+
+```ruby
+require 'better_auth_rails'
 ```
 
 Or in your Gemfile:

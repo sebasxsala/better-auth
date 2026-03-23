@@ -190,6 +190,10 @@ git push origin main
 
 **Note:** If both versions are changed in the same release commit, they must match.
 
+Rails adapter is published under both names:
+- `better_auth-rails` (primary)
+- `better_auth_rails` (compatibility alias)
+
 ### Dry-run Release Validation
 
 Use these to verify release packaging without publishing:

@@ -87,8 +87,8 @@ ci:
 release-check:
 	@echo "$(BLUE)📦 Validando build de gemas (sin publicar)...$(NC)"
 	cd packages/better_auth && rm -f better_auth-*.gem && bundle install && gem build better_auth.gemspec
-	cd packages/better_auth-rails && rm -f better_auth-rails-*.gem && bundle install && gem build better_auth-rails.gemspec
-	@echo "$(GREEN)✓ Build OK en ambas gemas (dry-run local)$(NC)"
+	cd packages/better_auth-rails && rm -f better_auth-rails-*.gem better_auth_rails-*.gem && bundle install && gem build better_auth-rails.gemspec && gem build better_auth_rails.gemspec
+	@echo "$(GREEN)✓ Build OK en todas las gemas (dry-run local)$(NC)"
 
 # =============================================
 # BASES DE DATOS
