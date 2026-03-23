@@ -7,17 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.1] - 2026-03-22
+## [0.1.2] - 2026-03-22
 
 ### Fixed
 
 - Fixed gemspec files list to use `Dir.glob` instead of `git ls-files` for better CI compatibility
+- Fixed dependency constraints for railties and activesupport (now `>= 6.0, < 9`)
+- Fixed better_auth_rails compatibility gem dependency version
+
+## [0.1.1] - 2026-03-17
+
+### Added
+
+- Initial Rails adapter setup
+- Basic gem structure
+
+## [0.1.0] - 2026-03-17
 
 ### Added
 
 - Initial project setup
-- Basic gem structure
-- StandardRB configuration
-- Minitest for core testing
-- RSpec for Rails adapter testing
-- CI/CD workflows for GitHub Actions

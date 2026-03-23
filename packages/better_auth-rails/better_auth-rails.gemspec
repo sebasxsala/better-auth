@@ -19,20 +19,16 @@ Gem::Specification.new do |spec|
   spec.metadata["changelog_uri"] = "https://github.com/sebasxsala/better-auth/blob/main/packages/better_auth-rails/CHANGELOG.md"
   spec.metadata["bug_tracker_uri"] = "https://github.com/sebasxsala/better-auth/issues"
 
-  spec.files = Dir.chdir(__dir__) do
-    `git ls-files -z`.split("\x0").reject do |f|
-      (f == __FILE__) ||
-        f.match(%r{\A(?:(?:bin|test|spec|features)/|\.(?:git|circleci)|appveyor)})
-    end
-  end
+  spec.files = Dir.glob("lib/**/*", File::FNM_DOTMATCH).select { |f| File.file?(f) } +
+    ["LICENSE.md", "README.md", "CHANGELOG.md"].select { |f| File.exist?(f) }
   spec.bindir = "exe"
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
 
   # Runtime dependencies
   spec.add_dependency "better_auth", "~> 0.1"
-  spec.add_dependency "railties", ">= 6.0"
-  spec.add_dependency "activesupport", ">= 6.0"
+  spec.add_dependency "railties", ">= 6.0", "< 9"
+  spec.add_dependency "activesupport", ">= 6.0", "< 9"
 
   # Development dependencies
   spec.add_development_dependency "bundler", "~> 2.5"
