@@ -2,79 +2,49 @@
 
 **⚠️ CRITICAL: Always read this file when editing files in packages/better_auth/**
 
-This file provides guidance to AI assistants (Claude Code, Cursor, etc.) when working with code in this directory.
+## What is this package?
 
-**Note:** CLAUDE.md is a symlink to this file. Both contain the same information.
+This is the **core gem** of Better Auth Ruby - a Ruby port of the TypeScript [better-auth](https://github.com/better-auth/better-auth) library. It contains framework-agnostic authentication logic built on Rack.
 
-## Project Overview
+## Upstream Reference
 
-Better Auth is a comprehensive, framework-agnostic authentication framework for Ruby. It provides a complete set of authentication and authorization features with a plugin ecosystem.
+**Always check `upstream/` before implementing or modifying features.**
+
+The TypeScript implementation in `upstream/packages/better-auth/` is the source of truth. Your workflow should be:
+
+1. **Find the feature** in `upstream/packages/better-auth/src/`
+2. **Understand how it works** in TypeScript
+3. **Translate to Ruby** following Ruby/Rails best practices
+4. **Adapt idiomatically** - don't do a literal translation, make it feel native to Ruby
+
+Key upstream directories:
+- `upstream/packages/better-auth/src/` - Core auth logic
+- `upstream/packages/better-auth/src/plugins/` - Plugin implementations
 
 ## Development Commands
 
 ```bash
-# Install dependencies
-bundle install
-
-# Run linter
-bundle exec standardrb
-
-# Fix linting issues
-bundle exec standardrb --fix
-
-# Run tests (Minitest)
-bundle exec rake test
-
-# Run full CI
-bundle exec rake ci
+bundle install          # Install dependencies
+bundle exec rake test   # Run tests (Minitest)
+bundle exec standardrb  # Run linter
+bundle exec standardrb --fix  # Fix linting issues
 ```
 
-## Architecture
-
-### Directory Structure
+## Directory Structure
 
 * `lib/better_auth.rb` - Main entry point
-* `lib/better_auth/core/` - Core authentication logic (framework-agnostic)
-* `test/` - Core library tests (Minitest)
-
-**Note:** Rails adapter is in a separate package (`packages/better_auth-rails`)
+* `lib/better_auth/core/` - Core authentication logic
+* `test/` - Tests (Minitest)
 
 ## Code Style
 
-* Linter: StandardRB (Ruby community standard)
-* Use 2 spaces for indentation
-* Follow Ruby naming conventions:
-  - Files/directories: `snake_case.rb`
-  - Classes/Modules: `CamelCase`
-  - Methods/variables: `snake_case`
-  - Constants: `SCREAMING_SNAKE_CASE`
-* Prefer composition over inheritance
-* Use frozen_string_literal: true pragma
-
-## Testing
-
-* This package uses Minitest for testing
-* Test files should end with `_test.rb`
-* Keep tests focused and fast
-* Use descriptive test names
-
-**Note:** Rails adapter testing is in `packages/better_auth-rails` using RSpec
-
-## Documentation
-
-* Please update the documentation when you make changes to the public API
-* Use YARD format for documentation comments
-* Include code examples in documentation
-
-## Git Workflow
-
-* PRs should target the `main` branch
-* Commit format: `feat(scope): description` or `fix(scope): description`, following Conventional Commits
-* Use `docs:` for documentation, `chore:` for non-functional changes
+* StandardRB for linting
+* `frozen_string_literal: true` in all files
+* snake_case for files/methods, CamelCase for classes
 
 ## After Everything is Done
 
-**Unless the user asked for it or you are working on CI, DO NOT COMMIT**
+**Unless the user asked for it, DO NOT COMMIT**
 
 * Make sure `bundle exec standardrb` passes
-* Make sure all tests pass
+* Make sure `bundle exec rake test` passes

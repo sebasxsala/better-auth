@@ -1,10 +1,12 @@
 # AGENTS.md - Better Auth Ruby Workspace
 
-This is the **workspace-level** guidance for the Better Auth Ruby monorepo.
+## What is Better Auth Ruby?
 
-## Project Overview
+Better Auth Ruby is a **Ruby/Rails port** of [better-auth](https://github.com/better-auth/better-auth), the popular TypeScript authentication library. The goal is to bring the same developer experience, features, and plugin ecosystem to the Ruby world.
 
-Better Auth Ruby is a comprehensive authentication framework for Ruby, adapted from the TypeScript better-auth library. This is a **monorepo** containing multiple related gems:
+**The upstream TypeScript implementation lives in `upstream/` as a git submodule.** This is the source of truth for how features should work. When implementing or modifying features, always reference `upstream/` to understand the original implementation and adapt it idiomatically to Ruby/Rails.
+
+## Monorepo Structure
 
 - **`better_auth`** - Core authentication library (framework-agnostic, Rack-based)
 - **`better_auth-rails`** - Rails adapter with middleware, helpers, and generators
@@ -96,32 +98,10 @@ Examples:
 - SCREAMING_SNAKE_CASE for constants
 - `frozen_string_literal: true` pragma in all Ruby files
 
-## Testing
-
-- **Core package:** Minitest (`test/` directory)
-- **Rails package:** RSpec (`spec/` directory)
-- Docker services available via `make db-up`
-- Run specific package tests from within that package directory
-
-## Documentation
-
-- Keep package-specific docs in each package's README.md
-- Update workspace README.md for high-level changes
-- Use YARD format for API documentation
-- Include code examples
-
 ## After Everything is Done
 
 **Unless the user asked for it or you are working on CI, DO NOT COMMIT**
 
 - Make sure `make lint` passes
 - Make sure `make test` passes
-- Update relevant documentation
 - Follow package-specific AGENTS.md guidance
-
-## Links
-
-- **Upstream Reference:** `upstream/` directory (TypeScript original)
-- **Core Package:** `packages/better_auth/`
-- **Rails Package:** `packages/better_auth-rails/`
-- **Issues:** https://github.com/sebasxsala/better-auth/issues
