@@ -8,8 +8,8 @@ Gem::Specification.new do |spec|
   spec.authors = ["Your Name"]
   spec.email = ["your.email@example.com"]
 
-  spec.summary = "Compatibility package for better_auth-rails"
-  spec.description = "Compatibility package that depends on better_auth-rails and provides require 'better_auth_rails'."
+  spec.summary = "Alias for better_auth-rails"
+  spec.description = "Please use better_auth-rails instead."
   spec.homepage = "https://github.com/sebasxsala/better-auth"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"
@@ -23,5 +23,5 @@ Gem::Specification.new do |spec|
   ]
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "better_auth-rails", "= #{BetterAuth::Rails::VERSION}"
+  spec.add_dependency "better_auth-rails"
 end

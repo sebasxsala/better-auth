@@ -10,11 +10,11 @@ Add this line to your application's Gemfile:
 gem 'better_auth-rails'
 ```
 
-Optional compatibility package (underscore naming):
+### Defensive alias package
 
-```ruby
-gem 'better_auth_rails'
-```
+`better_auth_rails` is published only as a defensive alias package.
+
+WARNING: This gem is an alias. Use `better_auth-rails`.
 
 And then execute:
 
