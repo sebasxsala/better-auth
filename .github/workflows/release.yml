@@ -165,6 +165,7 @@ jobs:
     outputs:
       published_core: ${{ steps.publish-core.outputs.published }}
       published_rails: ${{ steps.publish-rails.outputs.published }}
+      published_rails_compat: ${{ steps.publish-rails-compat.outputs.published }}
     steps:
       - uses: actions/checkout@v4
 
@@ -254,6 +255,40 @@ jobs:
           gem push better_auth-rails-*.gem
           echo "published=true" >> "$GITHUB_OUTPUT"
 
+      - name: Build better_auth_rails gem
+        if: needs.prepare-release.outputs.rails_changed == 'true'
+        working-directory: packages/better_auth-rails
+        run: |
+          set -euo pipefail
+          rm -f better_auth_rails-*.gem
+          gem build better_auth_rails.gemspec
+
+      - name: Publish better_auth_rails gem
+        if: needs.prepare-release.outputs.rails_changed == 'true'
+        id: publish-rails-compat
+        working-directory: packages/better_auth-rails
+        env:
+          TARGET_VERSION: ${{ needs.prepare-release.outputs.rails_version }}
+          DRY_RUN: ${{ needs.prepare-release.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run enabled, skipping gem push for better_auth_rails"
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          already_exists=$(ruby -rjson -ropen-uri -e 'gem_name = "better_auth_rails"; version = ENV.fetch("TARGET_VERSION"); begin; body = URI.open("https://rubygems.org/api/v1/versions/#{gem_name}.json").read; versions = JSON.parse(body).map { |v| v["number"] }; print versions.include?(version) ? "true" : "false"; rescue StandardError; print "false"; end')
+
+          if [ "$already_exists" = "true" ]; then
+            echo "better_auth_rails $TARGET_VERSION already exists on RubyGems, skipping push"
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          gem push better_auth_rails-*.gem
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
   create-tag:
     name: Create git tag
     needs: [prepare-release, publish]
@@ -308,3 +343,4 @@ jobs:
             ### Published packages
             - `better_auth` version `${{ needs.prepare-release.outputs.core_version }}` (changed: `${{ needs.prepare-release.outputs.core_changed }}`)
             - `better_auth-rails` version `${{ needs.prepare-release.outputs.rails_version }}` (changed: `${{ needs.prepare-release.outputs.rails_changed }}`)
+            - `better_auth_rails` version `${{ needs.prepare-release.outputs.rails_version }}` (changed: `${{ needs.prepare-release.outputs.rails_changed }}`)

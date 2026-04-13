@@ -13,7 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed gemspec files list to use `Dir.glob` instead of `git ls-files` for better CI compatibility
 - Fixed dependency constraints for railties and activesupport (now `>= 6.0, < 9`)
-- Removed better_auth_rails compatibility gem (RubyGems doesn't allow similar names)
+- Fixed `better_auth_rails` compatibility gem dependency version
+
+## [0.1.1] - 2026-03-17
 
 ### Added
 

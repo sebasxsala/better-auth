@@ -2,6 +2,7 @@
 
 require "bundler/setup"
 require "better_auth/rails"
+require "better_auth_rails"
 
 RSpec.configure do |config|
   config.example_status_persistence_file_path = ".rspec_status"

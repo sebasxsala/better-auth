@@ -1,12 +1,28 @@
 # AGENTS.md - better_auth (Core)
 
+**Always read this file when editing files in `packages/better_auth/`.**
+
 This is the core authentication library. It is **framework-agnostic** and depends only on Rack. No Rails code belongs here.
 
 ## What This Package Is
 
 `better_auth` is the Ruby translation of the upstream `packages/better-auth` TypeScript package. It contains all core authentication logic: session management, token handling, OAuth flows, user/account models, password hashing, and the plugin system.
 
-When implementing features, always reference `upstream/packages/better-auth/` for the original TypeScript implementation.
+## Upstream Reference
+
+**Always check `upstream/` before implementing or modifying features.**
+
+The TypeScript code in `upstream/packages/better-auth/` is the source of truth. Workflow:
+
+1. **Find the feature** in `upstream/packages/better-auth/src/` (and `plugins/` when applicable)
+2. **Understand how it works** in TypeScript
+3. **Translate to Ruby** using idiomatic Ruby and this gem’s patterns
+4. **Adapt** — same behavior, not necessarily a line-by-line port
+
+Key paths:
+
+- `upstream/packages/better-auth/src/` — core auth logic
+- `upstream/packages/better-auth/src/plugins/` — plugins
 
 ## Constraints
 
@@ -65,4 +81,17 @@ When porting a feature from `upstream/packages/better-auth/src/`:
 2. Understand the data flow and side effects
 3. Write the Ruby equivalent using idiomatic patterns
 4. Ensure the same edge cases are handled
-5. Write tests that verify the same behavior (check `upstream/packages/better-auth/src/**/*.test.ts` for test cases to port)
+5. Write tests that verify the same behavior (check `upstream/packages/better-auth/src/**/*.test.ts` for cases to port)
+
+## Code Style
+
+- StandardRB
+- `# frozen_string_literal: true` in all Ruby files
+- `snake_case` files/methods; `CamelCase` classes/modules
+
+## After Everything is Done
+
+**Unless the user asked for it or you are working on CI, do not commit.**
+
+- `bundle exec standardrb` passes
+- `bundle exec rake test` passes

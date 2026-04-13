@@ -4,7 +4,10 @@ source "https://rubygems.org"
 
 ruby file: ".ruby-version"
 
-gemspec
+# Use local better_auth for development
+gem "better_auth", path: "../better_auth"
+
+gemspec name: "better_auth-rails"
 
 group :development, :test do
   gem "standardrb", "~> 1.0"

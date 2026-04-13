@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+    paths:
+      - 'packages/**'
+      - 'Gemfile'
+      - 'Rakefile'
+      - '.github/workflows/ci.yml'
+  push:
+    branches:
+      - main
+      - canary
+    paths:
+      - 'packages/**'
+      - 'Gemfile'
+      - 'Rakefile'
+      - '.github/workflows/ci.yml'
+
+jobs:
+  test-core:
+    name: Test better_auth (Core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install dependencies for better_auth
+        working-directory: packages/better_auth
+        run: bundle install
+
+      - name: Run linter
+        working-directory: packages/better_auth
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth
+        run: bundle exec rake test
+
+  test-rails:
+    name: Test better_auth-rails (Rails Adapter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install dependencies for better_auth-rails
+        working-directory: packages/better_auth-rails
+        run: bundle install
+
+      - name: Run linter
+        working-directory: packages/better_auth-rails
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-rails
+        run: bundle exec rspec

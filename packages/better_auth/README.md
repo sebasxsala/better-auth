@@ -13,11 +13,11 @@
     ·
     <a href="https://better-auth.com">Website</a>
     ·
-    <a href="https://github.com/better-auth/better-auth-ruby/issues">Issues</a>
+    <a href="https://github.com/sebasxsala/better-auth/issues">Issues</a>
   </p>
 
 [![Gem](https://img.shields.io/gem/v/better_auth?style=flat&colorA=000000&colorB=000000)](https://rubygems.org/gems/better_auth)
-[![GitHub stars](https://img.shields.io/github/stars/better-auth/better-auth-ruby?style=flat&colorA=000000&colorB=000000)](https://github.com/better-auth/better-auth-ruby/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/sebasxsala/better-auth?style=flat&colorA=000000&colorB=000000)](https://github.com/sebasxsala/better-auth/stargazers)
 </p>
 
 ## About the Project
@@ -100,158 +100,161 @@ end
 ### Quick Start
 
 ```bash
-# 1. Clona el repositorio
-git clone https://github.com/better-auth/better-auth-ruby.git
-cd better-auth-ruby
+# 1. Clone the repository
+git clone https://github.com/sebasxsala/better-auth.git
+cd better-auth/packages/better_auth
 
-# 2. Instala dependencias
+# 2. Install dependencies
 make install
-# o: bundle install
+# or: bundle install
 
-# 3. Corre tests para verificar todo funciona
+# 3. Run tests to verify everything works
 make ci
 ```
 
-### Comandos Comunes con Make
+### Common Make Commands
 
-Usamos un **Makefile** para simplificar los comandos. Todos tienen comentarios explicativos:
+We use a **Makefile** to simplify commands. All have explanatory comments:
 
 ```bash
-# Ver todos los comandos disponibles con descripción
+# View all available commands with description
 make help
 
-# Desarrollo
-make console          # Consola interactiva con la gema cargada
-make lint            # Revisa estilo de código
-make lint-fix        # Corrige estilo automáticamente
+# Development
+make console          # Interactive console with gem loaded
+make lint            # Check code style
+make lint-fix        # Auto-fix style issues
 
 # Testing
-make test            # Ejecuta todos los tests
-make test-core       # Solo tests del core (Minitest)
-make test-rails      # Solo tests Rails (RSpec)
-make test-coverage   # Tests con cobertura
-make ci              # CI completo (lint + test)
+make test            # Run all tests
+make test-core       # Only core tests (Minitest)
+make test-coverage   # Tests with coverage
+make ci              # Full CI (lint + test)
 
-# Bases de datos para testing
-make db-up           # Inicia PostgreSQL, MySQL, Redis
-make db-down         # Detiene contenedores
+# Databases for testing
+make db-up           # Start PostgreSQL, MySQL, Redis
+make db-down         # Stop containers
 ```
 
-### Flujo de Trabajo de Ramas
+### Branch Workflow
 
-Este proyecto usa un modelo de ramas similar al del upstream:
+This project uses a branch model similar to the upstream:
 
-**Ramas principales:**
+**Main Branches:**
 
-- **`main`**: Código estable, listo para producción
-- **`canary`**: Rama de desarrollo/integración (como "development" pero con nombre específico)
-  - "Canary" viene de "canary in a coal mine" - es donde prueban cambios antes de ir a producción
-  - Los PRs de features van a `canary`
-  - Cuando `canary` está estable, se mergea a `main` para release
+- **`main`**: Stable code, ready for production
+- **`canary`**: Development/integration branch (like "development" but specific name)
+  - "Canary" comes from "canary in a coal mine" - where changes are tested before production
+  - Feature PRs go to `canary`
+  - When `canary` is stable, merge to `main` for release
 
-**Flujo de trabajo típico:**
+**Typical workflow:**
 
 ```bash
-# 1. Crea tu feature branch desde canary
+# 1. Create your feature branch from canary
 git checkout canary
 git pull origin canary
-git checkout -b feat/nueva-funcionalidad
+git checkout -b feat/new-feature
 
-# 2. Haces tus cambios y commits
-# ... código ...
+# 2. Make your changes and commits
+# ... code ...
 git add .
-git commit -m "feat(core): agrega soporte para X"
+git commit -m "feat(core): add support for X"
 
-# 3. Push y creas PR hacia canary
-git push origin feat/nueva-funcionalidad
-# Crear PR en GitHub hacia canary
+# 3. Push and create PR towards canary
+git push origin feat/new-feature
+# Create PR on GitHub towards canary
 
-# 4. Una vez mergeado a canary y probado,
-#    se mergea canary → main para el release
+# 4. Once merged to canary and tested,
+#    merge canary → main for release
 ```
 
-**Por qué canary en vez de development?**
+**Why canary instead of development?**
 
-- Es un nombre común en proyectos que hacen releases frecuentes
-- Sugiere que es una versión "experimental" que puede romperse
-- Permite tener múltiples niveles: feature → canary → main
+- Common name in projects with frequent releases
+- Suggests it's an "experimental" version that might break
+- Allows multiple levels: feature → canary → main
 
-### Cómo Funciona el CI/CD
+### How CI/CD Works
 
 **Pull Requests:**
-- Cada PR ejecuta: lint + tests en Ruby 3.2 y 3.3
-- Debe pasar todo antes de poder mergear
+- Each PR runs: lint + tests on Ruby 3.2 and 3.3
+- Everything must pass before merging
 
-**Release Automático (GitHub Actions):**
+**Automatic Release (GitHub Actions):**
 
-El release se dispara automáticamente cuando creas un git tag:
+Release is triggered on `push` to `main` when `lib/better_auth/version.rb` changes.
 
 ```bash
-# PASO 1: Actualiza la versión en lib/better_auth/version.rb
-# Ejemplo: VERSION = "0.1.1"
+# STEP 1: Update version in lib/better_auth/version.rb
+# Example: VERSION = "0.1.1"
 
-# PASO 2: Commitea el cambio de versión
+# STEP 2: Commit and push to main
 git add lib/better_auth/version.rb
 git commit -m "chore: bump version to 0.1.1"
+git push origin main
 
-# PASO 3: Crea y push el tag
-git tag -a v0.1.1 -m "Release v0.1.1"
-git push origin main --tags
-
-# PASO 4: GitHub Actions automáticamente:
-# - Corre tests
-# - Construye la gema
-# - Publica a RubyGems
-# - Crea GitHub Release con changelog
+# STEP 3: GitHub Actions automatically:
+# - Runs tests
+# - Builds the gem
+# - Publishes to RubyGems (if version is new)
+# - Creates and pushes git tag (v0.1.1)
+# - Creates GitHub Release
 ```
 
-**Configuración necesaria en GitHub:**
+**Required GitHub Configuration:**
 
-1. Ve a Settings → Secrets and variables → Actions
-2. Agrega `RUBYGEMS_API_KEY` con tu API key de RubyGems
-3. El workflow `.github/workflows/release.yml` hace el resto
+1. Go to Settings → Secrets and variables → Actions
+2. Add `RUBYGEMS_API_KEY` with your RubyGems API key
+3. The workflow `.github/workflows/release.yml` does the rest
 
-### Release Manual (sin GitHub Actions)
-
-Solo si necesitas hacer un release manualmente:
+**Dry-run options:**
 
 ```bash
-# 1. Actualiza version.rb
-# 2. Construye la gema
+# Local packaging dry-run
+make release-check
+
+# CI dry-run from GitHub Actions
+# Actions -> Release -> Run workflow -> dry_run=true
+```
+
+### Manual Release (without GitHub Actions)
+
+Only if you need to do a manual release:
+
+```bash
+# 1. Update version.rb
+# 2. Build the gem
 gem build better_auth.gemspec
 
-# 3. Publica (necesitas estar logueado en RubyGems)
+# 3. Publish (you need to be logged into RubyGems)
 gem push better_auth-*.gem
 
-# 4. Crea el tag y push
+# 4. Create and push the tag
 git tag -a v0.1.1 -m "Release v0.1.1"
 git push origin --tags
 ```
 
-### Estructura del Proyecto
+### Project Structure
 
 ```
 lib/
   better_auth.rb              # Entry point
   better_auth/
-    version.rb                # Versión de la gema
+    version.rb                # Gem version
     core.rb                   # Core loader
-    core/                     # Lógica core (framework-agnostic)
-    rails.rb                  # Rails adapter entry
-    rails/                    # Código específico de Rails
+    core/                     # Core logic (framework-agnostic)
 
-test/                       # Tests del core (Minitest)
-spec/                       # Tests de Rails (RSpec)
+test/                       # Core tests (Minitest)
 ```
 
-**Convenciones:**
-- Core: Framework-agnostic, usa Minitest
-- Rails: Adapter específico, usa RSpec para mejor integración
-- Todo código pasa por StandardRB (Ruby style guide)
+**Conventions:**
+- Core: Framework-agnostic, uses Minitest
+- All code goes through StandardRB (Ruby style guide)
 
 ## Contributing
 
-Bug reports and pull requests are welcome on GitHub at https://github.com/better-auth/better-auth-ruby. This project is intended to be a safe, welcoming space for collaboration, and contributors are expected to adhere to the [code of conduct](https://github.com/better-auth/better-auth-ruby/blob/main/CODE_OF_CONDUCT.md).
+Bug reports and pull requests are welcome on GitHub at https://github.com/sebasxsala/better-auth. This project is intended to be a safe, welcoming space for collaboration, and contributors are expected to adhere to the [code of conduct](https://github.com/sebasxsala/better-auth/blob/main/CODE_OF_CONDUCT.md).
 
 ## License
 
