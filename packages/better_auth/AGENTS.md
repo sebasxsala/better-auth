@@ -1,76 +1,68 @@
-# AGENTS.md
+# AGENTS.md - better_auth (Core)
 
-This file provides guidance to AI assistants (Claude Code, Cursor, etc.) when working with code in this repository.
+This is the core authentication library. It is **framework-agnostic** and depends only on Rack. No Rails code belongs here.
 
-## Project Overview
+## What This Package Is
 
-Better Auth is a comprehensive, framework-agnostic authentication framework for Ruby. It provides a complete set of authentication and authorization features with a plugin ecosystem.
+`better_auth` is the Ruby translation of the upstream `packages/better-auth` TypeScript package. It contains all core authentication logic: session management, token handling, OAuth flows, user/account models, password hashing, and the plugin system.
 
-## Development Commands
+When implementing features, always reference `upstream/packages/better-auth/` for the original TypeScript implementation.
+
+## Constraints
+
+- **No Rails dependencies.** This gem must work with any Rack-based app (Sinatra, Hanami, Roda, etc.)
+- **No RSpec.** This package uses Minitest exclusively.
+- Runtime deps are limited to: `rack`, `json`, `jwt`, `bcrypt`
+
+## Development
 
 ```bash
-# Install dependencies
 bundle install
-
-# Run linter
-bundle exec standardrb
-
-# Fix linting issues
-bundle exec standardrb --fix
-
-# Run tests (Minitest)
-bundle exec rake test
-
-# Run full CI
-bundle exec rake ci
+bundle exec rake test       # Run Minitest suite
+bundle exec standardrb      # Check linting
+bundle exec standardrb --fix # Auto-fix
+bundle exec rake ci         # Full CI (lint + test)
 ```
 
-## Architecture
+## Directory Structure
 
-### Directory Structure
+```
+lib/
+  better_auth.rb              # Main entry point, autoloads
+  better_auth/
+    version.rb                # BetterAuth::VERSION
+    core.rb                   # Core module loader
+    core/                     # Core auth logic (sessions, tokens, OAuth, etc.)
 
-* `lib/better_auth.rb` - Main entry point
-* `lib/better_auth/core/` - Core authentication logic (framework-agnostic)
-* `test/` - Core library tests (Minitest)
+test/
+  test_helper.rb              # Minitest setup, shared helpers
+  better_auth_test.rb         # Top-level smoke tests
+  better_auth/
+    <module>_test.rb          # Tests mirror lib/ structure
+```
 
-**Note:** Rails adapter is in a separate package (`packages/better_auth-rails`)
+## Namespace
 
-## Code Style
-
-* Linter: StandardRB (Ruby community standard)
-* Use 2 spaces for indentation
-* Follow Ruby naming conventions:
-  - Files/directories: `snake_case.rb`
-  - Classes/Modules: `CamelCase`
-  - Methods/variables: `snake_case`
-  - Constants: `SCREAMING_SNAKE_CASE`
-* Prefer composition over inheritance
-* Use frozen_string_literal: true pragma
+- **Gem name**: `better_auth`
+- **Require path**: `require "better_auth"`
+- **Top-level module**: `BetterAuth`
+- Everything lives under `BetterAuth::` (e.g., `BetterAuth::Session`, `BetterAuth::OAuth::Provider`)
 
 ## Testing
 
-* This package uses Minitest for testing
-* Test files should end with `_test.rb`
-* Keep tests focused and fast
-* Use descriptive test names
+- Framework: **Minitest**
+- Files: `test/**/*_test.rb`
+- Run: `bundle exec rake test`
+- All public APIs must have tests
+- Prefer integration-style tests that exercise real flows over unit tests with mocks
+- Use `docker-compose up -d` for database-dependent tests
 
-**Note:** Rails adapter testing is in `packages/better_auth-rails` using RSpec
+## Translating from Upstream
 
-## Documentation
+When porting a feature from `upstream/packages/better-auth/src/`:
 
-* Please update the documentation when you make changes to the public API
-* Use YARD format for documentation comments
-* Include code examples in documentation
-
-## Git Workflow
-
-* PRs should target the `main` branch
-* Commit format: `feat(scope): description` or `fix(scope): description`, following Conventional Commits
-* Use `docs:` for documentation, `chore:` for non-functional changes
-
-## After Everything is Done
-
-**Unless the user asked for it or you are working on CI, DO NOT COMMIT**
-
-* Make sure `bundle exec standardrb` passes
-* Make sure all tests pass
+1. Read the TypeScript source thoroughly
+2. Understand the data flow and side effects
+3. Write the Ruby equivalent using idiomatic patterns
+4. Ensure the same edge cases are handled
+5. Write tests that verify the same behavior (check `upstream/packages/better-auth/src/**/*.test.ts` for test cases to port)
