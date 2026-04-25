@@ -56,9 +56,13 @@ module BetterAuth
       route_path = route_path_for(request.path_info)
       return not_found unless route_path
 
-      body = parse_body(request)
       query = parse_query(request)
       endpoint, params, allowed_methods = find_endpoint(route_path, request.request_method)
+      return run_on_response_chain(not_found) unless endpoint
+      return run_on_response_chain(method_not_allowed(allowed_methods)) unless endpoint.matches_method?(request.request_method)
+      return run_on_response_chain(unsupported_media_type) unless allowed_media_type?(request, endpoint)
+
+      body = parse_body(request)
       endpoint_context = build_endpoint_context(request, route_path, query, body, params)
 
       response = @origin_check.call(endpoint_context)
@@ -74,9 +78,6 @@ module BetterAuth
 
       response = rate_limiter.call(request, context, route_path)
       return run_on_response_chain(response) if response
-
-      return run_on_response_chain(not_found) unless endpoint
-      return run_on_response_chain(method_not_allowed(allowed_methods)) unless endpoint.matches_method?(request.request_method)
 
       endpoint_context = build_endpoint_context(request, route_path, parse_query(request), parse_body(request), params)
       result = API.new(context, endpoints).execute(endpoint, endpoint_context)
@@ -168,6 +169,25 @@ module BetterAuth
       else
         request.POST
       end
+    end
+
+    def allowed_media_type?(request, endpoint)
+      return true unless request_body_method?(request.request_method)
+      return true if request.media_type.nil? || request.media_type.empty?
+      return true if request.body.nil? || request.content_length.to_i.zero?
+
+      allowed_media_types(endpoint).include?(request.media_type)
+    end
+
+    def request_body_method?(method)
+      %w[POST PUT PATCH DELETE].include?(method.to_s.upcase)
+    end
+
+    def allowed_media_types(endpoint)
+      endpoint.metadata[:allowed_media_types] ||
+        endpoint.metadata["allowedMediaTypes"] ||
+        endpoint.metadata[:allowedMediaTypes] ||
+        ["application/json"]
     end
 
     def parse_query(request)
@@ -302,6 +322,10 @@ module BetterAuth
 
     def method_not_allowed(methods)
       [405, {"content-type" => "application/json", "allow" => methods.reject { |method| method == "*" }.join(", ")}, [JSON.generate({error: "Method Not Allowed"})]]
+    end
+
+    def unsupported_media_type
+      [415, {"content-type" => "application/json"}, [JSON.generate({error: "Unsupported Media Type"})]]
     end
 
     def error_response(error)

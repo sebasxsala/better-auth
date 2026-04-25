@@ -327,6 +327,60 @@ class BetterAuthRouterTest < Minitest::Test
     assert_equal ["127.0.0.1|/limited"], storage.keys
   end
 
+  def test_rate_limit_applies_upstream_special_auth_rules
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      rate_limit: {enabled: true, window: 10, max: 100},
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            sign_in: BetterAuth::Endpoint.new(path: "/sign-in/email", method: "POST") { {ok: true} }
+          }
+        }
+      ]
+    )
+
+    3.times do
+      assert_equal 200, auth.call(rack_env("POST", "/api/auth/sign-in/email", body: {"email" => "a@example.com"})).first
+    end
+    assert_equal 429, auth.call(rack_env("POST", "/api/auth/sign-in/email", body: {"email" => "a@example.com"})).first
+  end
+
+  def test_rate_limit_honors_custom_rules_and_false_disables
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      rate_limit: {
+        enabled: true,
+        window: 60,
+        max: 100,
+        custom_rules: {
+          "/custom/*" => {window: 60, max: 2},
+          "/unlimited" => false
+        }
+      },
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            custom: BetterAuth::Endpoint.new(path: "/custom/action", method: "GET") { {ok: true} },
+            unlimited: BetterAuth::Endpoint.new(path: "/unlimited", method: "GET") { {ok: true} }
+          }
+        }
+      ]
+    )
+
+    assert_equal 200, auth.call(rack_env("GET", "/api/auth/custom/action")).first
+    assert_equal 200, auth.call(rack_env("GET", "/api/auth/custom/action")).first
+    assert_equal 429, auth.call(rack_env("GET", "/api/auth/custom/action")).first
+
+    4.times do
+      assert_equal 200, auth.call(rack_env("GET", "/api/auth/unlimited")).first
+    end
+  end
+
   def test_rate_limit_can_use_secondary_storage_with_ttl
     storage = SecondaryStorage.new
     auth = BetterAuth.auth(
@@ -347,6 +401,88 @@ class BetterAuthRouterTest < Minitest::Test
     assert_equal 200, auth.call(rack_env("GET", "/api/auth/limited")).first
     assert_equal 429, auth.call(rack_env("GET", "/api/auth/limited")).first
     assert_equal 60, storage.ttls["127.0.0.1|/limited"]
+  end
+
+  def test_rate_limit_normalizes_configured_ip_headers
+    storage = RateLimitStorage.new
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      advanced: {ip_address: {ip_address_headers: ["x-forwarded-for"], ipv6_subnet: 64}},
+      rate_limit: {enabled: true, window: 60, max: 1, custom_storage: storage},
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            limited: BetterAuth::Endpoint.new(path: "/limited", method: "GET") { {ok: true} }
+          }
+        }
+      ]
+    )
+
+    first_ip = "2001:db8:abcd:1234:0000:0000:0000:0001"
+    second_ip = "2001:db8:abcd:1234:ffff:ffff:ffff:ffff"
+    assert_equal 200, auth.call(rack_env("GET", "/api/auth/limited", headers: {"HTTP_X_FORWARDED_FOR" => first_ip})).first
+    assert_equal 429, auth.call(rack_env("GET", "/api/auth/limited", headers: {"HTTP_X_FORWARDED_FOR" => second_ip})).first
+    assert_equal 1, storage.keys.length
+    assert_match(/\A2001:db8:abcd:1234::\|\/limited\z/, storage.keys.first)
+  end
+
+  def test_rate_limit_can_disable_ip_tracking
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      advanced: {ip_address: {disable_ip_tracking: true}},
+      rate_limit: {enabled: true, window: 60, max: 1},
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            limited: BetterAuth::Endpoint.new(path: "/limited", method: "GET") { {ok: true} }
+          }
+        }
+      ]
+    )
+
+    assert_equal 200, auth.call(rack_env("GET", "/api/auth/limited")).first
+    assert_equal 200, auth.call(rack_env("GET", "/api/auth/limited")).first
+  end
+
+  def test_form_media_type_is_rejected_unless_endpoint_allows_it
+    json_only = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            post: BetterAuth::Endpoint.new(path: "/post", method: "POST") { {ok: true} }
+          }
+        }
+      ]
+    )
+    form_allowed = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            post: BetterAuth::Endpoint.new(
+              path: "/post",
+              method: "POST",
+              metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}
+            ) { |ctx| {name: ctx.body["name"]} }
+          }
+        }
+      ]
+    )
+
+    assert_equal 415, json_only.call(rack_env("POST", "/api/auth/post", form: {"name" => "Ada"})).first
+    status, _headers, body = form_allowed.call(rack_env("POST", "/api/auth/post", form: {"name" => "Ada"}))
+
+    assert_equal 200, status
+    assert_equal({"name" => "Ada"}, JSON.parse(body.join))
   end
 
   def test_trusted_proxy_headers_reject_malformed_forwarded_values
@@ -402,8 +538,14 @@ class BetterAuthRouterTest < Minitest::Test
 
   private
 
-  def rack_env(method, path, body: nil, headers: {})
-    payload = body ? JSON.generate(body) : ""
+  def rack_env(method, path, body: nil, form: nil, headers: {})
+    payload = if form
+      URI.encode_www_form(form)
+    elsif body
+      JSON.generate(body)
+    else
+      ""
+    end
     {
       "REQUEST_METHOD" => method,
       "PATH_INFO" => path,
@@ -413,9 +555,16 @@ class BetterAuthRouterTest < Minitest::Test
       "REMOTE_ADDR" => "127.0.0.1",
       "rack.url_scheme" => "http",
       "rack.input" => StringIO.new(payload),
-      "CONTENT_TYPE" => body ? "application/json" : nil,
+      "CONTENT_TYPE" => content_type_for(body, form),
       "CONTENT_LENGTH" => payload.bytesize.to_s
     }.merge(headers).compact
+  end
+
+  def content_type_for(body, form)
+    return "application/x-www-form-urlencoded" if form
+    return "application/json" if body
+
+    nil
   end
 
   class RateLimitStorage

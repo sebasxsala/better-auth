@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "ipaddr"
 require "json"
 
 module BetterAuth
@@ -42,10 +43,15 @@ module BetterAuth
       config = context.rate_limit_config || {}
       return unless config[:enabled]
 
-      rule = matching_plugin_rule(context, path)
-      window = (rule && rule[:window]) || config[:window] || 10
-      max = (rule && rule[:max]) || config[:max] || 100
-      key = rate_limit_key(request.ip, path)
+      ip = client_ip(request, context.options)
+      return unless ip
+
+      rule = rate_limit_rule(request, context, config, path)
+      return if rule == false
+
+      window = rule[:window] || 10
+      max = rule[:max] || 100
+      key = rate_limit_key(ip, path)
       now = Time.now.to_f
       storage = storage_for(context, config)
       data = read_storage(storage, key)
@@ -95,6 +101,39 @@ module BetterAuth
         count: count,
         last_request: last_request
       }
+    end
+
+    def rate_limit_rule(request, context, config, path)
+      rule = {
+        window: config[:window] || 10,
+        max: config[:max] || 100
+      }
+      rule = default_special_rule(path) || rule
+      rule = matching_plugin_rule(context, path) || rule
+      custom_rule = matching_custom_rule(config, path)
+      return resolve_custom_rule(custom_rule, request, rule) unless custom_rule.nil?
+
+      rule
+    end
+
+    def default_special_rule(path)
+      return unless path.start_with?("/sign-in", "/sign-up", "/change-password", "/change-email")
+
+      {window: 10, max: 3}
+    end
+
+    def matching_custom_rule(config, path)
+      custom_rules = config[:custom_rules] || {}
+      custom_rules.find do |pattern, _rule|
+        path_matches?(pattern.to_s, path)
+      end&.last
+    end
+
+    def resolve_custom_rule(rule, request, current)
+      return false if rule == false
+      return rule.call(request, current) if rule.respond_to?(:call)
+
+      rule || current
     end
 
     def storage_for(context, config)
@@ -154,6 +193,43 @@ module BetterAuth
       "#{ip}|#{path}"
     end
 
+    def client_ip(request, options)
+      ip_options = options.advanced[:ip_address] || {}
+      return if ip_options[:disable_ip_tracking]
+
+      Array(ip_options[:ip_address_headers] || ["x-forwarded-for"]).each do |header|
+        value = request.get_header(rack_header_name(header))
+        next unless value.is_a?(String)
+
+        ip = value.split(",").first.to_s.strip
+        return normalize_ip(ip, ipv6_subnet: ip_options[:ipv6_subnet]) if valid_ip?(ip)
+      end
+
+      ip = request.ip.to_s
+      normalize_ip(ip, ipv6_subnet: ip_options[:ipv6_subnet]) if valid_ip?(ip)
+    end
+
+    def rack_header_name(header)
+      "HTTP_#{header.to_s.upcase.tr("-", "_")}"
+    end
+
+    def valid_ip?(ip)
+      return false if ip.empty? || ip.match?(/\s/)
+
+      IPAddr.new(ip)
+      true
+    rescue ArgumentError
+      false
+    end
+
+    def normalize_ip(ip, ipv6_subnet: nil)
+      address = IPAddr.new(ip)
+      return address.native.to_s if address.respond_to?(:ipv4_mapped?) && address.ipv4_mapped?
+      return address.to_s if address.ipv4?
+
+      address.mask((ipv6_subnet || 64).to_i).to_s
+    end
+
     def matching_plugin_rule(context, path)
       context.options.plugins
         .flat_map { |plugin| Array(plugin[:rate_limit]) }
@@ -161,6 +237,13 @@ module BetterAuth
           matcher = rule[:path_matcher]
           matcher&.call(path)
         end
+    end
+
+    def path_matches?(pattern, path)
+      return path == pattern unless pattern.include?("*")
+
+      regex = Regexp.escape(pattern).gsub("\\*", ".*")
+      /\A#{regex}\z/.match?(path)
     end
   end
 end

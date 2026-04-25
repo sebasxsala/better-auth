@@ -141,6 +141,7 @@ Steps:
 - [x] Run `cd packages/better_auth && rbenv exec bundle exec rake test TEST=test/better_auth/router_test.rb`.
 - [x] Run `cd packages/better_auth && rbenv exec bundle exec rake test TEST=test/better_auth/api_test.rb`.
 - [x] Document the Phase 2 dependency decision: do not add `rack-attack`, `rack-protection`, `dry-validation`, `addressable`, or `public_suffix` as required core runtime dependencies yet; keep Better Auth-specific origin/rate/schema behavior in core and expose custom storage/schema adapters for future integration.
+- [x] Address Phase 2 security review findings for default auth-route rate limits, custom rate-limit rules, IP tracking normalization, and JSON-by-default media-type enforcement.
 
 ## Phase 3: Database Schema, Adapters, And Internal Adapter
 

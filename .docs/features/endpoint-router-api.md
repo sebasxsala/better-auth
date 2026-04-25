@@ -19,10 +19,11 @@ Ruby exposes `BetterAuth::Endpoint`, `BetterAuth::API`, and `BetterAuth::Router`
 - Phase 2 tests use synthetic endpoints for pipeline behavior because full email/session/OAuth route semantics are scheduled for later phases.
 - Generic cookie/header aggregation is implemented now; Better Auth cookie names, signed session cookies, chunking, and session cache behavior remain Phase 4 work.
 - Generic header setting rejects CR/LF in names and values to avoid header injection while cookie/session-specific encoding remains Phase 4 work.
-- Rate limiting defaults to an in-memory store for Phase 2, but it now accepts `rate_limit: { custom_storage: ... }` and `storage: "secondary-storage"` so apps can avoid process-local counters before adapter-backed rate limits land.
+- Rate limiting defaults to an in-memory store for Phase 2, but it now accepts `rate_limit: { custom_storage: ... }` and `storage: "secondary-storage"` so apps can avoid process-local counters before adapter-backed rate limits land. The limiter also mirrors upstream special auth-route defaults, custom path rules, disabled custom rules, upstream-style retry headers, IP tracking disablement, configurable IP headers, and IPv6 subnet normalization.
 - Request-time base URL inference and trusted proxy header handling live on `BetterAuth::Context` so Rack requests without configured `base_url` can still populate trusted origins.
 - Endpoint schema fields are enforced through a small adapter contract instead of a hard validator dependency: schemas may respond to `parse`, be callable, or return dry-style objects that answer `success?`/`to_h`.
 - Trusted proxy headers follow the upstream validation shape: only `http`/`https` protocols are accepted, suspicious host characters are rejected, and invalid forwarded values fall back to the actual Rack request origin.
+- Router body parsing enforces upstream's JSON-by-default media policy. Form submissions are accepted only when an endpoint explicitly declares `metadata: { allowed_media_types: [...] }`, which keeps future state-changing routes from accidentally accepting broad form posts.
 
 ### Dependency Decision
 
