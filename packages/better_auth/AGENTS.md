@@ -29,6 +29,7 @@ Key paths:
 - **No Rails dependencies.** This gem must work with any Rack-based app (Sinatra, Hanami, Roda, etc.)
 - **No RSpec.** This package uses Minitest exclusively.
 - Runtime deps are limited to: `rack`, `json`, `jwt`, `bcrypt`
+- If a dependency is needed for a feature, optimization, or simplification, ask for approval before adding it.
 
 ## Development
 
