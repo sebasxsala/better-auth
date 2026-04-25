@@ -4,8 +4,11 @@ This directory contains internal documentation for Better Auth Ruby development.
 
 ## Structure
 
+### `plans/`
+Long-running implementation plans. Plans use checkbox steps so agents can mark progress as phases, upstream parity discoveries, and Ruby-specific adaptations are completed.
+
 ### `features/`
-Documentation for implemented features and plugins. Each file should explain:
+Documentation for implemented features and plugins. Feature notes are also where upstream parity decisions and known Ruby/Rails differences are recorded. Each file should explain:
 - Link to upstream TypeScript implementation
 - How it was adapted to Ruby/Rails
 - Key design decisions
