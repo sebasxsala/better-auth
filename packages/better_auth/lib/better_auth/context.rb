@@ -48,6 +48,14 @@ module BetterAuth
       @new_session = session
     end
 
+    def set_adapter(adapter)
+      @adapter = adapter
+    end
+
+    def set_internal_adapter(adapter)
+      @internal_adapter = adapter
+    end
+
     def prepare_for_request!(request)
       @base_url = inferred_base_url(request) if options.base_url.to_s.empty?
       @trusted_origins = current_trusted_origins(request)

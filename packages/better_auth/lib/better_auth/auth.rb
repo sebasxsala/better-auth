@@ -7,6 +7,8 @@ module BetterAuth
     def initialize(options = {})
       @options = Configuration.new(options)
       @context = Context.new(@options)
+      @context.set_adapter(build_adapter)
+      @context.set_internal_adapter(Adapters::InternalAdapter.new(@context.adapter, @options))
       @error_codes = build_error_codes
       @endpoints = build_endpoints
       Router.check_endpoint_conflicts(@options, @options.logger)
@@ -29,6 +31,13 @@ module BetterAuth
           codes[key.to_s.upcase] = value
         end
       end
+    end
+
+    def build_adapter
+      return Adapters::Memory.new(options) if options.database.nil? || options.database == :memory
+      return options.database.call(options) if options.database.respond_to?(:call)
+
+      options.database
     end
 
     def build_endpoints

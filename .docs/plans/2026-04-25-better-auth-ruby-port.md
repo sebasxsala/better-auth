@@ -160,17 +160,17 @@ Steps:
 
 Steps:
 
-- [ ] Port upstream tests from `db/*.test.ts`, `db/internal-adapter.test.ts`, `db/secondary-storage.test.ts`, and adapter factory tests.
-- [ ] Define core schema tables: `user`, `session`, `account`, `verification`, `rateLimit`.
-- [ ] Preserve upstream field names for storage and wire behavior: `id`, `name`, `email`, `emailVerified`, `image`, `createdAt`, `updatedAt`, `userId`, `token`, `expiresAt`, `ipAddress`, `userAgent`, `providerId`, `accountId`, `accessToken`, `refreshToken`, `idToken`, `scope`, `password`, `identifier`, `value`.
-- [ ] Implement schema merge for plugin schemas and additional fields.
-- [ ] Implement adapter operations: `create`, `find_one`, `find_many`, `update`, `update_many`, `delete`, `delete_many`, `count`, and `transaction`.
-- [ ] Implement memory adapter first; it is the default when no database is provided.
-- [ ] Implement `InternalAdapter` methods matching upstream semantics: user creation, OAuth user creation, account linking, session creation, session lookup, session update, session deletion, account lookup, verification value lifecycle, user listing, user count, password update.
-- [ ] Implement database hooks for create, update, update many, delete, and delete many.
-- [ ] Implement `secondary_storage` session behavior with token TTL and `active-sessions-*` lists.
-- [ ] Run schema, memory adapter, and internal adapter tests.
-- [ ] Add `.docs/features/database-adapters.md` with upstream links and Ruby storage decisions.
+- [x] Port upstream tests from `db/*.test.ts`, `db/internal-adapter.test.ts`, `db/secondary-storage.test.ts`, and adapter factory tests. Ruby Phase 3 ports focused schema, memory-adapter, internal-adapter, hook, and secondary-storage behavior; direct SQL migration/to-zod coverage remains outside this phase's Ruby file list.
+- [x] Define core schema tables: `user`, `session`, `account`, `verification`, `rateLimit`.
+- [x] Preserve upstream logical and wire field names: `id`, `name`, `email`, `emailVerified`, `image`, `createdAt`, `updatedAt`, `userId`, `token`, `expiresAt`, `ipAddress`, `userAgent`, `providerId`, `accountId`, `accessToken`, `refreshToken`, `idToken`, `scope`, `password`, `identifier`, `value`; default physical SQL names use PostgreSQL-friendly `snake_case`.
+- [x] Implement schema merge for plugin schemas and additional fields.
+- [x] Implement adapter operations: `create`, `find_one`, `find_many`, `update`, `update_many`, `delete`, `delete_many`, `count`, and `transaction`.
+- [x] Implement memory adapter first; it is the default when no database is provided.
+- [x] Implement `InternalAdapter` methods matching upstream semantics: user creation, OAuth user creation, account linking, session creation, session lookup, session update, session deletion, account lookup, verification value lifecycle, user listing, user count, password update.
+- [x] Implement database hooks for create, update, update many, delete, and delete many.
+- [x] Implement `secondary_storage` session behavior with token TTL and `active-sessions-*` lists.
+- [x] Run schema, memory adapter, and internal adapter tests.
+- [x] Add `.docs/features/database-adapters.md` with upstream links and Ruby storage decisions.
 
 ## Phase 4: Crypto, Cookies, Passwords, Sessions
 

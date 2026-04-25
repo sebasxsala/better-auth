@@ -39,6 +39,8 @@ module BetterAuth
       :rate_limit,
       :session,
       :account,
+      :user,
+      :verification,
       :advanced,
       :email_and_password,
       :social_providers,
@@ -68,6 +70,8 @@ module BetterAuth
       @base_url, @context_base_url = normalize_base_url(options[:base_url])
       @session = normalize_session(options[:session])
       @account = normalize_account(options[:account])
+      @user = symbolize_keys(options[:user] || {})
+      @verification = symbolize_keys(options[:verification] || {})
       @email_and_password = normalize_email_and_password(options[:email_and_password])
       @rate_limit = normalize_rate_limit(options[:rate_limit])
       @trusted_origins = normalize_trusted_origins(options[:trusted_origins])
@@ -93,6 +97,8 @@ module BetterAuth
         rate_limit: rate_limit,
         session: session,
         account: account,
+        user: user,
+        verification: verification,
         advanced: advanced,
         email_and_password: email_and_password,
         social_providers: social_providers,
