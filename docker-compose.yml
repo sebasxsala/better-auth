@@ -1,5 +1,5 @@
-# Services for testing database adapters
-# These are used in CI for testing various database backends
+# Services for testing database adapters.
+# These are shared by workspace-level and package-level test commands.
 
 x-postgres-healthcheck: &postgres-healthcheck
   healthcheck:

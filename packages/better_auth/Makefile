@@ -148,14 +148,14 @@ release-manual:
 .PHONY: db-up
 db-up:
 	@echo "$(BLUE)🐳 Iniciando bases de datos...$(NC)"
-	docker-compose up -d
+	cd ../.. && docker compose up -d
 	@echo "$(GREEN)✓ Bases de datos listas$(NC)"
 
 # Detiene los contenedores de Docker
 .PHONY: db-down
 db-down:
 	@echo "$(BLUE)🐳 Deteniendo bases de datos...$(NC)"
-	docker-compose down
+	cd ../.. && docker compose down
 	@echo "$(GREEN)✓ Bases de datos detenidas$(NC)"
 
 # =============================================

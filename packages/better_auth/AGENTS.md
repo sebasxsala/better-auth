@@ -71,7 +71,7 @@ test/
 - Run: `bundle exec rake test`
 - All public APIs must have tests
 - Prefer integration-style tests that exercise real flows over unit tests with mocks
-- Use `docker-compose up -d` for database-dependent tests
+- Use `cd ../.. && docker compose up -d` for database-dependent tests when working from this package
 
 ## Translating from Upstream
 

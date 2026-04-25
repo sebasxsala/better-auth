@@ -97,13 +97,13 @@ release-check:
 .PHONY: db-up
 db-up:
 	@echo "$(BLUE)🐳 Iniciando bases de datos...$(NC)"
-	cd packages/better_auth && docker-compose up -d
+	docker compose up -d
 	@echo "$(GREEN)✓ Bases de datos listas$(NC)"
 
 .PHONY: db-down
 db-down:
 	@echo "$(BLUE)🐳 Deteniendo bases de datos...$(NC)"
-	cd packages/better_auth && docker-compose down
+	docker compose down
 	@echo "$(GREEN)✓ Bases de datos detenidas$(NC)"
 
 # =============================================
