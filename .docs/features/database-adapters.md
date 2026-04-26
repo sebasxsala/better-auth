@@ -26,7 +26,7 @@ Ruby keeps upstream logical and wire field names such as `emailVerified`, `userI
 - Database hooks use Ruby callables and may mutate data by returning `{ data: ... }` or cancel by returning `false`.
 - The memory adapter implements Better Auth-specific where operators, basic joins for `session -> user`, `account -> user`, and `user -> account`, sorting, pagination, counts, and rollbackable in-memory transactions.
 - The direct SQL layer generates PostgreSQL and MySQL schema DDL from the same `BetterAuth::Schema` metadata. PostgreSQL uses `text`, `boolean`, `timestamptz`, `bigint`, FK constraints, and explicit FK indexes. MySQL uses InnoDB, `utf8mb4`, `varchar(191)` for indexed strings, `text`, `tinyint(1)`, `datetime(6)`, FK constraints, and explicit FK indexes.
-- `BetterAuth::Adapters::SQL` implements parameterized CRUD, count, transactions, logical-to-physical field mapping, and current internal-adapter joins for SQL-backed storage. `BetterAuth::Adapters::Postgres` and `BetterAuth::Adapters::MySQL` are thin wrappers that require `pg` or `mysql2` only when instantiated without an injected connection.
+- `BetterAuth::Adapters::SQL` implements parameterized CRUD, count, transactions, logical-to-physical field mapping, current internal-adapter joins for SQL-backed storage, and collection aggregation for `user -> account`. `BetterAuth::Adapters::Postgres` and `BetterAuth::Adapters::MySQL` are thin wrappers that require `pg` or `mysql2` only when instantiated without an injected connection.
 
 ## Configuration Examples
 

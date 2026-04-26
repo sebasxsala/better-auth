@@ -226,7 +226,7 @@ Steps:
 - [x] Generate MySQL DDL from schema using InnoDB, `utf8mb4`, `varchar/text`, `tinyint(1)`, `datetime(6)`, `bigint`, unique constraints, FK constraints, and explicit FK indexes.
 - [x] Implement SQL adapter CRUD: `create`, `find_one`, `find_many`, `update`, `update_many`, `delete`, `delete_many`, `count`, and `transaction`.
 - [x] Implement SQL where operators already supported by memory adapter: `eq`, `in`, `not_in`, `contains`, `starts_with`, `ends_with`, `ne`, `gt`, `gte`, `lt`, `lte`.
-- [ ] Implement SQL joins needed by current internal adapter: `session -> user`, `account -> user`, and `user -> account`. `session -> user` and `account -> user` are implemented; `user -> account` remains for account-list route work.
+- [x] Implement SQL joins needed by current internal adapter: `session -> user`, `account -> user`, and `user -> account`.
 - [x] Return logical Better Auth field names from SQL adapters (`emailVerified`, `createdAt`, `userId`) even though stored columns are `snake_case`.
 - [x] Add integration tests that use root `docker-compose.yml` Postgres/MySQL services when drivers are available and skip with a clear message when drivers or services are unavailable.
 - [x] Run SQL adapter unit tests and available integration tests.
@@ -244,19 +244,19 @@ Steps:
 
 Steps:
 
-- [ ] Port upstream base route tests from `api/routes/*.test.ts`.
+- [x] Port upstream base route tests from `api/routes/*.test.ts`.
 - [x] Implement `/ok` and `/error`.
 - [x] Implement `/sign-up/email` with email normalization, password validation, user creation, account creation, optional email verification, auto sign-in, callback URL behavior, and sign-up disabled behavior.
 - [x] Implement `/sign-in/email` with password validation, banned/sensitive checks once plugins exist, session creation, remember-me behavior, and cookie setting. Admin-plugin ban checks remain deferred until the admin plugin exists.
-- [ ] Implement `/sign-in/social` and `/callback/:providerId` with OAuth state strategy, provider lookup, callback URL validation, new user callback, error callback, account linking, and token storage.
+- [x] Implement `/sign-in/social` and `/callback/:providerId` with OAuth state strategy, provider lookup, callback URL validation, new user callback, error callback, account linking, and token storage.
 - [x] Implement `/sign-out`.
 - [x] Implement `/get-session`, `/list-sessions`, `/revoke-session`, `/revoke-sessions`, `/revoke-other-sessions`.
-- [ ] Implement `/request-password-reset`, `/request-password-reset/callback`, `/reset-password`, `/verify-password`.
-- [ ] Implement `/send-verification-email` and `/verify-email`.
-- [ ] Implement `/update-user`, `/change-email`, `/change-password`, `/set-password`, `/delete-user`, `/delete-user/callback`.
-- [ ] Implement `/list-accounts`, `/link-social`, `/unlink-account`, `/get-access-token`, `/refresh-token`, `/account-info`.
-- [ ] Preserve upstream response statuses, JSON keys, redirects, `Set-Cookie` behavior, and error codes.
-- [ ] Run every route test file individually, then run the full core test suite.
+- [x] Implement `/request-password-reset`, `/request-password-reset/callback`, `/reset-password`, `/verify-password`.
+- [x] Implement `/send-verification-email` and `/verify-email`.
+- [x] Implement `/update-user`, `/change-email`, `/change-password`, `/set-password`, `/delete-user`, `/delete-user/callback`.
+- [x] Implement `/list-accounts`, `/link-social`, `/unlink-account`, `/get-access-token`, `/refresh-token`, `/account-info`.
+- [x] Preserve upstream response statuses, JSON keys, redirects, `Set-Cookie` behavior, and error codes.
+- [x] Run every route test file individually, then run the full core test suite.
 - [x] Add `.docs/features/base-auth-routes.md`.
 
 ## Phase 5.5: Rails ActiveRecord Adapter And Mounting
@@ -293,16 +293,16 @@ Steps:
 
 Steps:
 
-- [ ] Port upstream plugin behavior from `packages/core/src/types/plugin.ts`, `context/create-context.test.ts`, `api/check-endpoint-conflicts.test.ts`, and plugin helper tests.
-- [ ] Implement plugin fields: `id`, `init`, `endpoints`, `middlewares`, `hooks`, `schema`, `migrations`, `options`, `rate_limit`, `error_codes`, `on_request`, `on_response`, `adapter`.
-- [ ] Implement plugin init merging for options, context, and database hooks.
-- [ ] Implement plugin endpoint merge after base endpoints.
-- [ ] Implement plugin middlewares by path matcher.
-- [ ] Implement plugin `before` and `after` endpoint hooks.
-- [ ] Implement plugin schema merge into migration schema.
-- [ ] Implement plugin error-code merge into auth error registry.
-- [ ] Add tests for two plugins changing context, adding endpoints, adding schema, and changing endpoint responses through hooks.
-- [ ] Add `.docs/features/plugin-system.md`.
+- [x] Port upstream plugin behavior from `packages/core/src/types/plugin.ts`, `context/create-context.test.ts`, `api/check-endpoint-conflicts.test.ts`, and plugin helper tests.
+- [x] Implement plugin fields: `id`, `init`, `endpoints`, `middlewares`, `hooks`, `schema`, `migrations`, `options`, `rate_limit`, `error_codes`, `on_request`, `on_response`, `adapter`.
+- [x] Implement plugin init merging for options, context, and database hooks.
+- [x] Implement plugin endpoint merge after base endpoints.
+- [x] Implement plugin middlewares by path matcher.
+- [x] Implement plugin `before` and `after` endpoint hooks.
+- [x] Implement plugin schema merge into migration schema.
+- [x] Implement plugin error-code merge into auth error registry.
+- [x] Add tests for two plugins changing context, adding endpoints, adding schema, and changing endpoint responses through hooks.
+- [x] Add `.docs/features/plugin-system.md`.
 
 ## Phase 7: First Core Plugins
 
@@ -522,13 +522,13 @@ The final Ruby port should cover these upstream product features:
 - [ ] Core auth instance and handler.
 - [ ] Server-side API calls.
 - [ ] Email and password authentication.
-- [ ] Social OAuth sign-in and callback flow.
+- [x] Social OAuth sign-in and callback flow.
 - [ ] Session management and cookie cache.
-- [ ] Password reset.
-- [ ] Email verification.
-- [ ] User update/delete.
-- [ ] Account linking and unlinking.
-- [ ] Access token refresh.
+- [x] Password reset.
+- [x] Email verification.
+- [x] User update/delete.
+- [x] Account linking and unlinking.
+- [x] Access token refresh.
 - [ ] Trusted origins and origin/CSRF protections.
 - [ ] Rate limiting.
 - [ ] Database adapters and schema generation/migration story.

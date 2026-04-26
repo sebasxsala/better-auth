@@ -31,7 +31,11 @@ module BetterAuth
       end
 
       def find_one(model:, where: [], select: nil, join: nil)
-        find_many(model: model, where: where, select: select, join: join, limit: 1).first
+        if collection_join?(model.to_s, join)
+          find_many(model: model, where: where, select: select, join: join).first
+        else
+          find_many(model: model, where: where, select: select, join: join, limit: 1).first
+        end
       end
 
       def find_many(model:, where: [], sort_by: nil, limit: nil, offset: nil, select: nil, join: nil)
@@ -48,7 +52,8 @@ module BetterAuth
         sql << " LIMIT #{Integer(limit)}" if limit
         sql << " OFFSET #{Integer(offset)}" if offset
 
-        execute(sql, params).map { |row| normalize_record(model, row, join: join) }
+        records = execute(sql, params).map { |row| normalize_record(model, row, join: join) }
+        collection_join?(model, join) ? aggregate_collection_joins(model, records, join) : records
       end
 
       def update(model:, where:, update:)
@@ -171,6 +176,8 @@ module BetterAuth
           case [model, join_model]
           when ["session", "user"], ["account", "user"]
             " LEFT JOIN #{quote(table_for("user"))} AS #{quote("user")} ON #{quote("user")}.#{quote("id")} = #{quote(table_for(model))}.#{quote("user_id")}"
+          when ["user", "account"]
+            " LEFT JOIN #{quote(table_for("account"))} AS #{quote("account")} ON #{quote("account")}.#{quote("user_id")} = #{quote(table_for(model))}.#{quote("id")}"
           else
             ""
           end
@@ -262,6 +269,21 @@ module BetterAuth
           key = "#{model}__#{column}"
           output[field] = fetch_row(row, key) if row_key?(row, key)
         end
+      end
+
+      def collection_join?(model, join)
+        model == "user" && join&.keys&.any? { |join_model| join_model.to_s == "account" }
+      end
+
+      def aggregate_collection_joins(_model, records, _join)
+        grouped = {}
+        records.each do |record|
+          key = record.fetch("id")
+          grouped[key] ||= record.merge("account" => [])
+          account = record["account"]
+          grouped[key]["account"] << account if account&.values&.any?
+        end
+        grouped.values
       end
 
       def row_key?(row, key)

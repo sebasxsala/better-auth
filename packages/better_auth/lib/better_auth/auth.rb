@@ -9,6 +9,8 @@ module BetterAuth
       @context = Context.new(@options)
       @context.set_adapter(build_adapter)
       @context.set_internal_adapter(Adapters::InternalAdapter.new(@context.adapter, @options))
+      @plugin_registry = PluginRegistry.new(@context)
+      @plugin_registry.run_init!
       @error_codes = build_error_codes
       @endpoints = build_endpoints
       Router.check_endpoint_conflicts(@options, @options.logger)
@@ -23,14 +25,7 @@ module BetterAuth
     private
 
     def build_error_codes
-      options.plugins.each_with_object(BASE_ERROR_CODES.dup) do |plugin, codes|
-        plugin_codes = plugin[:error_codes] || plugin[:$error_codes] || plugin[:$ERROR_CODES]
-        next unless plugin_codes
-
-        plugin_codes.each do |key, value|
-          codes[key.to_s.upcase] = value
-        end
-      end
+      @plugin_registry.error_codes(BASE_ERROR_CODES)
     end
 
     def build_adapter
@@ -41,11 +36,7 @@ module BetterAuth
     end
 
     def build_endpoints
-      plugin_endpoints = options.plugins.each_with_object({}) do |plugin, result|
-        result.merge!(plugin.fetch(:endpoints, {}))
-      end
-
-      plugin_endpoints.merge(Core.base_endpoints)
+      Core.base_endpoints.merge(@plugin_registry.endpoints)
     end
   end
 end

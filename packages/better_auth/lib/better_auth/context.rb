@@ -66,6 +66,31 @@ module BetterAuth
       @internal_adapter = adapter
     end
 
+    def apply_plugin_context!(attributes)
+      normalize_context(attributes).each do |key, value|
+        instance_variable_set("@#{key}", value) if plugin_context_attribute?(key)
+      end
+    end
+
+    def refresh_from_options!
+      @social_providers = options.social_providers
+      @session_config = options.session
+      @rate_limit_config = options.rate_limit
+      @trusted_origins = options.trusted_origins
+      @secret = options.secret
+    end
+
+    def method_missing(name, *arguments, &block)
+      variable_name = :"@#{name}"
+      return instance_variable_get(variable_name) if arguments.empty? && instance_variable_defined?(variable_name)
+
+      super
+    end
+
+    def respond_to_missing?(name, include_private = false)
+      instance_variable_defined?(:"@#{name}") || super
+    end
+
     def prepare_for_request!(request)
       @current_session = nil
       @new_session = nil
@@ -149,6 +174,23 @@ module BetterAuth
       origins.map(&:to_s).reject(&:empty?).uniq
     rescue URI::InvalidURIError
       options.trusted_origins
+    end
+
+    def normalize_context(value)
+      return {} unless value.is_a?(Hash)
+
+      value.each_with_object({}) do |(key, object), result|
+        normalized = key.to_s
+          .gsub(/([a-z\d])([A-Z])/, "\\1_\\2")
+          .tr("-", "_")
+          .downcase
+          .to_sym
+        result[normalized] = object
+      end
+    end
+
+    def plugin_context_attribute?(key)
+      ![:options, :adapter, :internal_adapter].include?(key)
     end
   end
 end

@@ -79,9 +79,9 @@ module BetterAuth
       response = rate_limiter.call(request, context, route_path)
       return run_on_response_chain(response) if response
 
-      endpoint_context = build_endpoint_context(request, route_path, parse_query(request), parse_body(request), params)
+      endpoint_context = rebuild_endpoint_context(endpoint_context, request, route_path, params)
       result = API.new(context, endpoints).execute(endpoint, endpoint_context)
-      response = result.response.is_a?(APIError) ? error_response(result.response) : result.to_rack_response
+      response = result.response.is_a?(APIError) ? error_response(result.response, headers: result.headers) : result.to_rack_response
       run_on_response_chain(response)
     rescue APIError => error
       error_response(error)
@@ -207,6 +207,26 @@ module BetterAuth
       )
     end
 
+    def rebuild_endpoint_context(previous_context, request, route_path, params)
+      fresh_context = build_endpoint_context(request, route_path, parse_query(request), parse_body(request), params)
+      fresh_context.headers = merge_hashes(previous_context.headers, fresh_context.headers)
+      fresh_context.query = merge_hashes(previous_context.query, fresh_context.query)
+      fresh_context.body = merge_hashes(previous_context.body, fresh_context.body)
+      fresh_context
+    end
+
+    def merge_hashes(base, override)
+      return override unless base.is_a?(Hash) && override.is_a?(Hash)
+
+      base.merge(override) do |_key, old_value, new_value|
+        if old_value.is_a?(Hash) && new_value.is_a?(Hash)
+          merge_hashes(old_value, new_value)
+        else
+          new_value
+        end
+      end
+    end
+
     def headers_from(env)
       env.each_with_object({}) do |(key, value), headers|
         case key
@@ -231,7 +251,7 @@ module BetterAuth
 
       return [nil, {}, []] if path_matches.empty?
 
-      endpoint, params = path_matches.find { |candidate, _candidate_params| candidate.matches_method?(method) } || path_matches.first
+      endpoint, params = path_matches.reverse.find { |candidate, _candidate_params| candidate.matches_method?(method) } || path_matches.first
       allowed_methods = path_matches.flat_map { |candidate, _candidate_params| candidate.methods }.uniq
       [endpoint, params, allowed_methods]
     end
@@ -328,8 +348,12 @@ module BetterAuth
       [415, {"content-type" => "application/json"}, [JSON.generate({error: "Unsupported Media Type"})]]
     end
 
-    def error_response(error)
-      Endpoint::Result.new(response: error.to_h, status: error.status_code, headers: error.headers).to_rack_response
+    def error_response(error, headers: {})
+      Endpoint::Result.new(
+        response: error.to_h,
+        status: error.status_code,
+        headers: Endpoint::Result.merge_headers(headers, error.headers)
+      ).to_rack_response
     end
 
     def rack_response?(value)

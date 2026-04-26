@@ -61,6 +61,64 @@ class BetterAuthSQLAdapterTest < Minitest::Test
     assert_includes connection.sql.first, 'LEFT JOIN "users" AS "user" ON "user"."id" = "sessions"."user_id"'
   end
 
+  def test_sql_adapter_builds_user_account_collection_join
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+    connection = RecordingConnection.new([
+      {
+        "id" => "user-1",
+        "name" => "Ada",
+        "email" => "ada@example.com",
+        "email_verified" => true,
+        "image" => nil,
+        "created_at" => Time.at(1),
+        "updated_at" => Time.at(1),
+        "account__id" => "account-1",
+        "account__account_id" => "github-1",
+        "account__provider_id" => "github",
+        "account__user_id" => "user-1",
+        "account__access_token" => "access-1",
+        "account__refresh_token" => nil,
+        "account__id_token" => nil,
+        "account__access_token_expires_at" => nil,
+        "account__refresh_token_expires_at" => nil,
+        "account__scope" => "repo",
+        "account__password" => nil,
+        "account__created_at" => Time.at(1),
+        "account__updated_at" => Time.at(1)
+      },
+      {
+        "id" => "user-1",
+        "name" => "Ada",
+        "email" => "ada@example.com",
+        "email_verified" => true,
+        "image" => nil,
+        "created_at" => Time.at(1),
+        "updated_at" => Time.at(1),
+        "account__id" => "account-2",
+        "account__account_id" => "credential-1",
+        "account__provider_id" => "credential",
+        "account__user_id" => "user-1",
+        "account__access_token" => nil,
+        "account__refresh_token" => nil,
+        "account__id_token" => nil,
+        "account__access_token_expires_at" => nil,
+        "account__refresh_token_expires_at" => nil,
+        "account__scope" => nil,
+        "account__password" => "hash",
+        "account__created_at" => Time.at(1),
+        "account__updated_at" => Time.at(1)
+      }
+    ])
+    adapter = BetterAuth::Adapters::SQL.new(config, connection: connection, dialect: :postgres)
+
+    found = adapter.find_one(model: "user", where: [{field: "id", value: "user-1"}], join: {account: true})
+
+    assert_equal "ada@example.com", found["email"]
+    assert_equal ["github", "credential"], found["account"].map { |account| account["providerId"] }
+    assert_includes connection.sql.first, 'LEFT JOIN "accounts" AS "account" ON "account"."user_id" = "users"."id"'
+    refute_includes connection.sql.first, "LIMIT"
+  end
+
   RecordingConnection = Struct.new(:responses, :sql, :params) do
     def initialize(*responses)
       super(responses, [], [])

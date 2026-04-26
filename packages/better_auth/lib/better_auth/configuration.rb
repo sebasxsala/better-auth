@@ -55,6 +55,7 @@ module BetterAuth
 
     def initialize(options = {})
       options = symbolize_keys(options)
+      @explicit_options = deep_dup(options)
 
       @logger = options[:logger]
       @app_name = options[:app_name] || "Better Auth"
@@ -117,6 +118,16 @@ module BetterAuth
         on_api_error: on_api_error,
         disabled_paths: disabled_paths
       }
+    end
+
+    def merge_defaults!(defaults)
+      normalized = symbolize_keys(defaults || {})
+      normalized.each do |key, value|
+        next unless respond_to?(key)
+        next if key == :database_hooks
+
+        instance_variable_set("@#{key}", merge_default_value([key], public_send(key), value))
+      end
     end
 
     def self.matches_origin_pattern?(url, pattern, allow_relative_paths: false)
@@ -273,7 +284,7 @@ module BetterAuth
     end
 
     def normalize_plugins(value)
-      Array(value).compact.reject { |plugin| plugin == false }.map { |plugin| symbolize_keys(plugin) }
+      Array(value).compact.reject { |plugin| plugin == false }.map { |plugin| Plugin.coerce(plugin) }
     end
 
     def normalize_trusted_origins(value)
@@ -313,6 +324,34 @@ module BetterAuth
           new_value
         end
       end
+    end
+
+    def merge_default_value(path, current, default)
+      if current.is_a?(Hash) && default.is_a?(Hash)
+        default.each_with_object(current.dup) do |(key, value), result|
+          result[key] = merge_default_value(path + [key], result[key], value)
+        end
+      else
+        return current if explicit_path?(path)
+
+        default
+      end
+    end
+
+    def explicit_path?(path)
+      path.reduce(@explicit_options) do |value, key|
+        return false unless value.is_a?(Hash) && value.key?(key)
+
+        value[key]
+      end
+      true
+    end
+
+    def deep_dup(value)
+      return value.transform_values { |entry| deep_dup(entry) } if value.is_a?(Hash)
+      return value.map { |entry| deep_dup(entry) } if value.is_a?(Array)
+
+      value
     end
 
     def warn(message)

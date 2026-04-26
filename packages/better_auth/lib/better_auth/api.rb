@@ -57,7 +57,11 @@ module BetterAuth
       result = begin
         endpoint.call(endpoint_context)
       rescue APIError => error
-        Endpoint::Result.new(response: error, status: error.status_code, headers: error.headers)
+        Endpoint::Result.new(
+          response: error,
+          status: error.status_code,
+          headers: Endpoint::Result.merge_headers(endpoint_context.response_headers, error.headers)
+        )
       end
 
       return result if result.raw_response?
@@ -134,7 +138,7 @@ module BetterAuth
       return result.to_rack_response if result.raw_response?
 
       if result.response.is_a?(APIError)
-        return error_response(result.response) if input[:as_response]
+        return error_response(result.response, headers: result.headers) if input[:as_response]
 
         raise result.response
       end
@@ -155,11 +159,11 @@ module BetterAuth
       result.response
     end
 
-    def error_response(error)
+    def error_response(error, headers: {})
       Endpoint::Result.new(
         response: error.to_h,
         status: error.status_code,
-        headers: error.headers
+        headers: Endpoint::Result.merge_headers(headers, error.headers)
       ).to_rack_response
     end
 
