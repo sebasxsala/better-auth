@@ -98,7 +98,7 @@ Steps:
 
 Steps:
 
-- [ ] Port upstream auth initialization tests from `upstream/packages/better-auth/src/auth/full.test.ts`, `minimal.test.ts`, and `trusted-origins.test.ts`.
+- [x] Port upstream auth initialization tests from `upstream/packages/better-auth/src/auth/full.test.ts`, `minimal.test.ts`, and `trusted-origins.test.ts`.
 - [x] Define `BetterAuth.auth(options = {})` returning an object with `handler`, `api`, `options`, `context`, and `error_codes`.
 - [x] Define `BetterAuth::Auth#call(env)` as a Rack-compatible alias to the handler.
 - [x] Define `BetterAuth::Configuration` with upstream option concepts: `base_url`, `base_path`, `secret`, `database`, `plugins`, `trusted_origins`, `rate_limit`, `session`, `account`, `advanced`, `email_and_password`, `social_providers`, `secondary_storage`, `database_hooks`, `hooks`.
@@ -278,7 +278,7 @@ Steps:
 - [x] Implement migration generator that reads core schema plus plugin schema and emits Rails migrations matching the direct SQL schema decisions.
 - [x] Implement controller helpers for `current_session`, `current_user`, authenticated checks, and route protection.
 - [x] Document non-Rails routing: any Rack app can mount the auth object with `map "/api/auth" { run auth }` or call it directly as Rack middleware.
-- [ ] Run Rails specs and core route specs against ActiveRecord once Phase 5 base routes exist. Rails specs pass for the initial adapter/generator surface, including a real PostgreSQL smoke test for generated migration, table/index/FK creation, ActiveRecord user read/write, and direct SQL adapter readback. Full base-route specs against ActiveRecord and MySQL real-database coverage remain pending.
+- [x] Run Rails specs and core route specs against ActiveRecord once Phase 5 base routes exist. Rails specs pass for the adapter/generator surface, including a real PostgreSQL smoke test for generated migration, table/index/FK creation, ActiveRecord user read/write, direct SQL adapter readback, and Rack signup/signin/get-session base-route coverage against ActiveRecord persistence. MySQL real-database Rails coverage remains future work.
 
 ## Phase 6: Plugin Contract
 
@@ -380,7 +380,7 @@ Steps for each plugin:
 Completion criteria:
 
 - [x] Every login plugin has tests, docs, and parity matrix status.
-- [ ] Demo-level flows can be reproduced through Rack requests.
+- [x] Demo-level flows can be reproduced through Rack requests.
 
 ## Phase 9: Security Plugins
 
@@ -468,7 +468,7 @@ Progress:
 
 Completion criteria:
 
-- [ ] OIDC/OAuth metadata and token endpoints are compatible enough for external clients in integration tests.
+- [x] OIDC/OAuth metadata and token endpoints are compatible enough for external clients in integration tests.
 
 ## Phase 12: Enterprise Packages And Integrations
 
@@ -545,21 +545,21 @@ Completion criteria:
 
 The final Ruby port should cover these upstream product features:
 
-- [ ] Core auth instance and handler.
-- [ ] Server-side API calls.
-- [ ] Email and password authentication.
+- [x] Core auth instance and handler.
+- [x] Server-side API calls.
+- [x] Email and password authentication.
 - [x] Social OAuth sign-in and callback flow.
-- [ ] Session management and cookie cache.
+- [x] Session management and cookie cache.
 - [x] Password reset.
 - [x] Email verification.
 - [x] User update/delete.
 - [x] Account linking and unlinking.
 - [x] Access token refresh.
-- [ ] Trusted origins and origin/CSRF protections.
-- [ ] Rate limiting.
-- [ ] Database adapters and schema generation/migration story.
-- [ ] Secondary storage sessions.
-- [ ] Hooks and database hooks.
+- [x] Trusted origins and origin/CSRF protections.
+- [x] Rate limiting.
+- [x] Database adapters and schema generation/migration story.
+- [x] Secondary storage sessions.
+- [x] Hooks and database hooks.
 - [x] Plugin system.
 - [ ] Client concept parity where server-side Ruby can expose equivalent API/docs.
 - [x] Username plugin.
@@ -568,11 +568,11 @@ The final Ruby port should cover these upstream product features:
 - [x] Email OTP plugin.
 - [x] Phone number plugin.
 - [x] One-time token plugin.
-- [ ] One tap plugin.
-- [ ] SIWE plugin.
-- [ ] Generic OAuth plugin.
-- [ ] OAuth proxy plugin.
-- [ ] Passkey plugin.
+- [x] One tap plugin.
+- [x] SIWE plugin.
+- [x] Generic OAuth plugin.
+- [x] OAuth proxy plugin.
+- [x] Passkey plugin.
 - [x] Two-factor plugin.
 - [x] Captcha plugin.
 - [x] Have I Been Pwned plugin.

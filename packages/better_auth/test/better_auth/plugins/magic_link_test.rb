@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "stringio"
 require "uri"
 require_relative "../../test_helper"
 
@@ -153,9 +154,54 @@ class BetterAuthPluginsMagicLinkTest < Minitest::Test
     assert_equal "Invalid callbackURL", error.message
   end
 
+  def test_magic_link_demo_flow_works_through_rack_requests
+    sent = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.magic_link(send_magic_link: ->(data, _ctx = nil) { sent << data })
+      ]
+    )
+
+    sign_in_status, _sign_in_headers, sign_in_body = auth.call(
+      rack_env(
+        "POST",
+        "/api/auth/sign-in/magic-link",
+        body: JSON.generate(email: "rack-magic@example.com", name: "Rack Magic", callbackURL: "/dashboard")
+      )
+    )
+
+    assert_equal 200, sign_in_status
+    assert_equal({"status" => true}, JSON.parse(sign_in_body.join))
+    assert_equal "rack-magic@example.com", sent.first[:email]
+
+    verify_status, verify_headers, _verify_body = auth.call(
+      rack_env("GET", "/api/auth/magic-link/verify", query: Rack::Utils.build_query(token: sent.first[:token], callbackURL: "/dashboard"), body: "")
+    )
+
+    assert_equal 302, verify_status
+    assert_equal "/dashboard", verify_headers.fetch("location")
+    assert_includes verify_headers.fetch("set-cookie"), "better-auth.session_token="
+  end
+
   private
 
   def build_auth(options = {})
     BetterAuth.auth({base_url: "http://localhost:3000", secret: SECRET, database: :memory}.merge(options))
+  end
+
+  def rack_env(method, path, body:, query: "", content_type: "application/json", extra_headers: {})
+    {
+      "REQUEST_METHOD" => method,
+      "PATH_INFO" => path,
+      "QUERY_STRING" => query,
+      "SERVER_NAME" => "localhost",
+      "SERVER_PORT" => "3000",
+      "REMOTE_ADDR" => "127.0.0.1",
+      "rack.url_scheme" => "http",
+      "rack.input" => StringIO.new(body),
+      "CONTENT_TYPE" => content_type,
+      "CONTENT_LENGTH" => body.bytesize.to_s,
+      "HTTP_ORIGIN" => "http://localhost:3000"
+    }.merge(extra_headers)
   end
 end

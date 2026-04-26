@@ -79,6 +79,69 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
     assert_equal "OIDC User", userinfo[:name]
   end
 
+  def test_metadata_and_token_flow_work_through_rack_for_external_clients
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    request = Rack::MockRequest.new(auth)
+
+    metadata_response = request.get("/api/auth/.well-known/openid-configuration")
+    metadata = JSON.parse(metadata_response.body)
+
+    assert_equal 200, metadata_response.status
+    assert_equal "http://localhost:3000/api/auth/oauth2/token", metadata.fetch("token_endpoint")
+
+    register_response = request.post(
+      "/api/auth/oauth2/register",
+      "CONTENT_TYPE" => "application/json",
+      :input => JSON.generate(
+        redirect_uris: ["https://client.example/callback"],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        skip_consent: true,
+        client_name: "Rack Client"
+      )
+    )
+    client = JSON.parse(register_response.body)
+
+    assert_equal 200, register_response.status
+    assert_equal "none", client.fetch("token_endpoint_auth_method")
+
+    authorize_response = request.get(
+      "/api/auth/oauth2/authorize?#{Rack::Utils.build_query(
+        response_type: "code",
+        client_id: client.fetch("client_id"),
+        redirect_uri: "https://client.example/callback",
+        scope: "openid email",
+        state: "rack-state",
+        prompt: "none"
+      )}",
+      "HTTP_COOKIE" => cookie
+    )
+    redirect_params = Rack::Utils.parse_query(URI.parse(authorize_response["location"]).query)
+
+    assert_equal 302, authorize_response.status
+    assert_equal "rack-state", redirect_params.fetch("state")
+    assert redirect_params.fetch("code")
+
+    token_response = request.post(
+      "/api/auth/oauth2/token",
+      "CONTENT_TYPE" => "application/json",
+      :input => JSON.generate(
+        grant_type: "authorization_code",
+        code: redirect_params.fetch("code"),
+        redirect_uri: "https://client.example/callback",
+        client_id: client.fetch("client_id")
+      )
+    )
+    tokens = JSON.parse(token_response.body)
+
+    assert_equal 200, token_response.status
+    assert_equal "Bearer", tokens.fetch("token_type")
+    assert tokens.fetch("access_token")
+    assert tokens.fetch("id_token")
+  end
+
   def test_logout_endpoint_clears_session_and_redirects_to_registered_url
     auth = build_auth
     cookie = sign_up_cookie(auth)

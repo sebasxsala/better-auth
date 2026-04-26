@@ -5,6 +5,7 @@
 ## Summary
 
 Adds username fields to users, mirrors username data into email sign-up and update-user flows, exposes username/password sign-in, and exposes username availability checks.
+The demo-level Rack flow is covered end to end through `/sign-up/email`, `/sign-in/username`, and `/get-session`.
 
 ## Ruby Adaptation
 

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "stringio"
 require_relative "../../test_helper"
 
 class BetterAuthPluginsUsernameTest < Minitest::Test
@@ -119,6 +120,41 @@ class BetterAuthPluginsUsernameTest < Minitest::Test
     assert_equal BetterAuth::Plugins::USERNAME_ERROR_CODES["EMAIL_NOT_VERIFIED"], correct_password.message
   end
 
+  def test_username_demo_flow_works_through_rack_requests
+    auth = build_auth(plugins: [BetterAuth::Plugins.username(min_username_length: 4)])
+
+    sign_up_status, _sign_up_headers, sign_up_body = auth.call(
+      rack_env(
+        "POST",
+        "/api/auth/sign-up/email",
+        body: JSON.generate(email: "rack-username@example.com", username: "Rack_User", password: "password123", name: "Rack")
+      )
+    )
+    assert_equal 200, sign_up_status
+    assert_equal "rack_user", JSON.parse(sign_up_body.join).fetch("user").fetch("username")
+
+    sign_in_status, sign_in_headers, sign_in_body = auth.call(
+      rack_env(
+        "POST",
+        "/api/auth/sign-in/username",
+        body: JSON.generate(username: "RACK_USER", password: "password123")
+      )
+    )
+    sign_in = JSON.parse(sign_in_body.join)
+    cookie = cookie_header(sign_in_headers.fetch("set-cookie"))
+
+    assert_equal 200, sign_in_status
+    assert_match(/\A[0-9a-f]{32}\z/, sign_in.fetch("token"))
+
+    session_status, _session_headers, session_body = auth.call(
+      rack_env("GET", "/api/auth/get-session", body: "", extra_headers: {"HTTP_COOKIE" => cookie})
+    )
+    session = JSON.parse(session_body.join)
+
+    assert_equal 200, session_status
+    assert_equal "rack_user", session.fetch("user").fetch("username")
+  end
+
   private
 
   def build_auth(options = {})
@@ -127,5 +163,21 @@ class BetterAuthPluginsUsernameTest < Minitest::Test
 
   def cookie_header(set_cookie)
     set_cookie.lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def rack_env(method, path, body:, content_type: "application/json", extra_headers: {})
+    {
+      "REQUEST_METHOD" => method,
+      "PATH_INFO" => path,
+      "QUERY_STRING" => "",
+      "SERVER_NAME" => "localhost",
+      "SERVER_PORT" => "3000",
+      "REMOTE_ADDR" => "127.0.0.1",
+      "rack.url_scheme" => "http",
+      "rack.input" => StringIO.new(body),
+      "CONTENT_TYPE" => content_type,
+      "CONTENT_LENGTH" => body.bytesize.to_s,
+      "HTTP_ORIGIN" => "http://localhost:3000"
+    }.merge(extra_headers)
   end
 end

@@ -1,6 +1,6 @@
 # Rails Adapter
 
-**Status:** Phase 5.5 started.
+**Status:** Phase 5.5 complete for the initial Rails adapter surface.
 
 **Upstream Reference:** Better Auth upstream is framework-agnostic at the route/runtime layer. The Rails adapter keeps that shape by mounting the core Rack auth object instead of reimplementing auth routes in controllers.
 
@@ -28,8 +28,9 @@ ActiveRecord is declared as a runtime dependency of `better_auth-rails`. The ada
 - verifies the `users` table, unique email index, primary keys, and foreign keys are created;
 - creates and reads a user through `BetterAuth::Rails::ActiveRecordAdapter`;
 - reads the same user through the core `BetterAuth::Adapters::Postgres` SQL adapter.
+- runs Rack signup, signin, and get-session base routes against ActiveRecord persistence, including rebuilding the auth instance between signup and signin.
 
-Full base-route specs against ActiveRecord and MySQL real-database coverage remain pending.
+MySQL real-database Rails coverage and the broader Phase 13 Rails hardening matrix remain pending.
 
 ## Verification
 

@@ -5,6 +5,7 @@
 ## Summary
 
 Adds email magic-link sign-in, magic-link verification, new-user sign-up through magic links, existing-user email verification, redirect/error handling, and configurable token storage.
+The demo-level Rack flow is covered end to end through `/sign-in/magic-link` and `/magic-link/verify`.
 
 ## Ruby Adaptation
 
