@@ -10,6 +10,7 @@ module BetterAuth
       :options,
       :social_providers,
       :cookies,
+      :auth_cookies,
       :adapter,
       :internal_adapter,
       :logger,
@@ -26,7 +27,8 @@ module BetterAuth
       @version = BetterAuth::VERSION
       @options = configuration
       @social_providers = configuration.social_providers
-      @cookies = {}
+      @auth_cookies = Cookies.get_cookies(configuration)
+      @cookies = @auth_cookies
       @adapter = configuration.database
       @internal_adapter = nil
       @logger = configuration.logger
@@ -46,6 +48,14 @@ module BetterAuth
 
     def set_new_session(session)
       @new_session = session
+    end
+
+    def set_current_session(session)
+      @current_session = session
+    end
+
+    def create_auth_cookie(cookie_name, override_attributes = {})
+      Cookies.create_cookie(options, cookie_name.to_s, override_attributes)
     end
 
     def set_adapter(adapter)

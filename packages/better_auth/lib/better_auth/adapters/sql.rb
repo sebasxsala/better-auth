@@ -1,0 +1,339 @@
+# frozen_string_literal: true
+
+require "securerandom"
+require "time"
+
+module BetterAuth
+  module Adapters
+    class SQL < Base
+      attr_reader :connection, :dialect
+
+      def initialize(options, connection:, dialect:)
+        super(options)
+        @connection = connection
+        @dialect = dialect.to_sym
+      end
+
+      def create(model:, data:, force_allow_id: false)
+        model = model.to_s
+        input = transform_input(model, data, "create", force_allow_id)
+        table = table_for(model)
+        columns = input.keys.map { |field| storage_field(model, field) }
+        params = input.keys.map { |field| input[field] }
+        placeholders = params.each_index.map { |index| placeholder(index + 1) }
+        returning = (dialect == :postgres) ? " RETURNING *" : ""
+        sql = "INSERT INTO #{quote(table)} (#{columns.map { |column| quote(column) }.join(", ")}) VALUES (#{placeholders.join(", ")})#{returning}"
+        rows = execute(sql, params)
+        row = rows.first
+        return normalize_record(model, row) if row
+
+        find_one(model: model, where: [{field: "id", value: input.fetch("id")}])
+      end
+
+      def find_one(model:, where: [], select: nil, join: nil)
+        find_many(model: model, where: where, select: select, join: join, limit: 1).first
+      end
+
+      def find_many(model:, where: [], sort_by: nil, limit: nil, offset: nil, select: nil, join: nil)
+        model = model.to_s
+        params = []
+        sql = +"SELECT "
+        sql << select_sql(model, select, join)
+        sql << " FROM "
+        sql << quote(table_for(model))
+        sql << join_sql(model, join)
+        where_sql = build_where(model, where || [], params)
+        sql << " WHERE #{where_sql}" unless where_sql.empty?
+        sql << order_sql(model, sort_by) if sort_by
+        sql << " LIMIT #{Integer(limit)}" if limit
+        sql << " OFFSET #{Integer(offset)}" if offset
+
+        execute(sql, params).map { |row| normalize_record(model, row, join: join) }
+      end
+
+      def update(model:, where:, update:)
+        records = update_many(model: model, where: where, update: update, returning: true)
+        records.is_a?(Array) ? records.first : records
+      end
+
+      def update_many(model:, where:, update:, returning: false)
+        model = model.to_s
+        data = transform_input(model, update, "update", true)
+        params = []
+        assignments = data.each_key.map do |field|
+          params << data[field]
+          "#{quote(storage_field(model, field))} = #{placeholder(params.length)}"
+        end
+        where_sql = build_where(model, where || [], params)
+        sql = +"UPDATE "
+        sql << quote(table_for(model))
+        sql << " SET "
+        sql << assignments.join(", ")
+        sql << " WHERE #{where_sql}" unless where_sql.empty?
+        sql << " RETURNING *" if dialect == :postgres
+        rows = execute(sql, params).map { |row| normalize_record(model, row) }
+        return rows if returning || dialect == :postgres
+
+        nil
+      end
+
+      def delete(model:, where:)
+        delete_many(model: model, where: where)
+        nil
+      end
+
+      def delete_many(model:, where:)
+        model = model.to_s
+        params = []
+        where_sql = build_where(model, where || [], params)
+        sql = +"DELETE FROM "
+        sql << quote(table_for(model))
+        sql << " WHERE #{where_sql}" unless where_sql.empty?
+        result = execute(sql, params)
+        result.respond_to?(:cmd_tuples) ? result.cmd_tuples : result.to_i
+      end
+
+      def count(model:, where: nil)
+        model = model.to_s
+        params = []
+        where_sql = build_where(model, where || [], params)
+        sql = +"SELECT COUNT(*) AS count FROM "
+        sql << quote(table_for(model))
+        sql << " WHERE #{where_sql}" unless where_sql.empty?
+        row = execute(sql, params).first || {}
+        (row["count"] || row[:count] || 0).to_i
+      end
+
+      def transaction
+        execute("BEGIN", [])
+        result = yield self
+        execute("COMMIT", [])
+        result
+      rescue
+        execute("ROLLBACK", [])
+        raise
+      end
+
+      private
+
+      def transform_input(model, data, action, force_allow_id)
+        fields = Schema.auth_tables(options).fetch(model).fetch(:fields)
+        input = stringify_keys(data)
+        output = {}
+
+        fields.each do |field, attributes|
+          next if field == "id" && input.key?(field) && !force_allow_id
+
+          value_provided = input.key?(field)
+          value = input[field]
+          if !value_provided && action == "create" && attributes.key?(:default_value)
+            value = resolve_default(attributes[:default_value])
+            value_provided = true
+          elsif !value_provided && action == "update" && attributes[:on_update]
+            value = resolve_default(attributes[:on_update])
+            value_provided = true
+          end
+          if !value_provided && action == "create" && attributes[:required]
+            raise APIError.new("BAD_REQUEST", message: "#{field} is required") unless field == "id"
+          end
+          output[field] = coerce_value(value, attributes) if value_provided
+        end
+
+        output["id"] = generated_id if action == "create" && !output.key?("id")
+        output
+      end
+
+      def select_sql(model, select, join)
+        fields = Array(select).empty? ? schema_for(model).fetch(:fields).keys : Array(select).map { |field| storage_key(field) }
+        columns = fields.map do |field|
+          column = storage_field(model, field)
+          "#{quote(table_for(model))}.#{quote(column)} AS #{quote(column)}"
+        end
+        columns.concat(join_select_sql(model, join)) if join
+        columns.join(", ")
+      end
+
+      def join_select_sql(model, join)
+        join.flat_map do |join_model, _enabled|
+          join_model = join_model.to_s
+          schema_for(join_model).fetch(:fields).map do |field, attributes|
+            column = attributes[:field_name] || physical_name(field)
+            "#{quote(join_model)}.#{quote(column)} AS #{quote("#{join_model}__#{column}")}"
+          end
+        end
+      end
+
+      def join_sql(model, join)
+        return "" unless join
+
+        join.map do |join_model, _enabled|
+          join_model = join_model.to_s
+          case [model, join_model]
+          when ["session", "user"], ["account", "user"]
+            " LEFT JOIN #{quote(table_for("user"))} AS #{quote("user")} ON #{quote("user")}.#{quote("id")} = #{quote(table_for(model))}.#{quote("user_id")}"
+          else
+            ""
+          end
+        end.join
+      end
+
+      def build_where(model, where, params)
+        Array(where).map do |clause|
+          field = storage_key(fetch_key(clause, :field))
+          column = "#{quote(table_for(model))}.#{quote(storage_field(model, field))}"
+          operator = (fetch_key(clause, :operator) || "eq").to_s
+          value = fetch_key(clause, :value)
+
+          case operator
+          when "in", "not_in"
+            values = Array(value)
+            placeholders = values.map do |entry|
+              params << entry
+              placeholder(params.length)
+            end.join(", ")
+            sql_operator = (operator == "not_in") ? "NOT IN" : "IN"
+            "#{column} #{sql_operator} (#{placeholders})"
+          when "contains", "starts_with", "ends_with"
+            pattern = case operator
+            when "starts_with" then "#{value}%"
+            when "ends_with" then "%#{value}"
+            else "%#{value}%"
+            end
+            params << pattern
+            "#{column} LIKE #{placeholder(params.length)}"
+          else
+            params << value
+            "#{column} #{sql_operator(operator)} #{placeholder(params.length)}"
+          end
+        end.join(" AND ")
+      end
+
+      def order_sql(model, sort_by)
+        field = Schema.storage_key(fetch_key(sort_by, :field))
+        direction = (fetch_key(sort_by, :direction).to_s.downcase == "desc") ? "DESC" : "ASC"
+        " ORDER BY #{quote(table_for(model))}.#{quote(storage_field(model, field))} #{direction}"
+      end
+
+      def sql_operator(operator)
+        {
+          "ne" => "!=",
+          "gt" => ">",
+          "gte" => ">=",
+          "lt" => "<",
+          "lte" => "<="
+        }.fetch(operator, "=")
+      end
+
+      def execute(sql, params)
+        if connection.respond_to?(:exec_params)
+          result = connection.exec_params(sql, params)
+          return result.to_a if result.respond_to?(:to_a)
+
+          result
+        elsif connection.respond_to?(:prepare)
+          statement = connection.prepare(sql)
+          result = statement.execute(*params)
+          result.respond_to?(:to_a) ? result.to_a : result
+        else
+          raise Error, "SQL connection must respond to exec_params or prepare"
+        end
+      end
+
+      def normalize_record(model, row, join: nil)
+        return nil unless row
+
+        fields = schema_for(model).fetch(:fields)
+        record = fields.each_with_object({}) do |(field, attributes), output|
+          column = attributes[:field_name] || physical_name(field)
+          output[field] = fetch_row(row, column) if row_key?(row, column)
+        end
+
+        join&.each_key do |join_model|
+          join_model = join_model.to_s
+          record[join_model] = normalize_joined_record(join_model, row)
+        end
+
+        record
+      end
+
+      def normalize_joined_record(model, row)
+        schema_for(model).fetch(:fields).each_with_object({}) do |(field, attributes), output|
+          column = attributes[:field_name] || physical_name(field)
+          key = "#{model}__#{column}"
+          output[field] = fetch_row(row, key) if row_key?(row, key)
+        end
+      end
+
+      def row_key?(row, key)
+        row.key?(key) || row.key?(key.to_sym)
+      end
+
+      def fetch_row(row, key)
+        return row[key] if row.key?(key)
+
+        row[key.to_sym]
+      end
+
+      def table_for(model)
+        schema_for(model).fetch(:model_name)
+      end
+
+      def schema_for(model)
+        Schema.auth_tables(options).fetch(model.to_s)
+      end
+
+      def storage_field(model, field)
+        schema_for(model).fetch(:fields).fetch(field.to_s).fetch(:field_name, physical_name(field))
+      end
+
+      def quote(identifier)
+        Schema::SQL.quote(identifier, dialect)
+      end
+
+      def placeholder(index)
+        (dialect == :postgres) ? "$#{index}" : "?"
+      end
+
+      def generated_id
+        generator = options.advanced.dig(:database, :generate_id)
+        return generator.call.to_s if generator.respond_to?(:call)
+        return SecureRandom.uuid if generator == "uuid"
+
+        SecureRandom.hex(16)
+      end
+
+      def resolve_default(default)
+        default.respond_to?(:call) ? default.call : default
+      end
+
+      def coerce_value(value, attributes)
+        return value if value.nil?
+        return Time.parse(value) if attributes[:type] == "date" && value.is_a?(String)
+
+        value
+      end
+
+      def stringify_keys(data)
+        data.each_with_object({}) do |(key, value), result|
+          result[storage_key(key)] = value
+        end
+      end
+
+      def fetch_key(hash, key)
+        hash[key] || hash[key.to_s] || hash[storage_key(key)] || hash[storage_key(key).to_sym]
+      end
+
+      def storage_key(value)
+        parts = physical_name(value).split("_")
+        ([parts.first] + parts.drop(1).map(&:capitalize)).join
+      end
+
+      def physical_name(value)
+        value.to_s
+          .gsub(/([a-z\d])([A-Z])/, "\\1_\\2")
+          .tr("-", "_")
+          .downcase
+      end
+    end
+  end
+end

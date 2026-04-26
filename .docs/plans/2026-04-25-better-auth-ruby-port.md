@@ -189,18 +189,48 @@ Steps:
 
 Steps:
 
-- [ ] Port upstream `cookies/cookies.test.ts`, `client/session-refresh.test.ts`, and session route tests that only depend on session primitives.
-- [ ] Implement secure random ID generation and UUID mode.
-- [ ] Implement HMAC signing, signature verification, constant-time comparison, hashing helpers, symmetric encryption helpers, and JWT helpers needed by later plugins.
-- [ ] Implement BCrypt password hash and verify with configurable callbacks.
-- [ ] Implement cookie naming, prefixing, default attributes, secure cookie options, cross-subdomain attributes, and advanced cookie overrides.
-- [ ] Implement signed `session_token` cookies.
-- [ ] Implement `session_data` cookie cache, max age, refresh cache behavior, and disabling cache per request.
-- [ ] Implement cookie chunking and deletion for oversized cookie values.
-- [ ] Implement session lookup priority: signed cookie parse, cookie cache when allowed, adapter or secondary storage lookup, expiration refresh, response cookie update.
-- [ ] Add sensitive session behavior that bypasses stale cookie cache for sensitive routes.
-- [ ] Run crypto, cookie, and session tests.
-- [ ] Add `.docs/features/sessions-and-cookies.md`.
+- [x] Port upstream `cookies/cookies.test.ts`, `client/session-refresh.test.ts`, and session route tests that only depend on session primitives. Ruby Phase 4 ports focused primitive tests; full route endpoint tests remain Phase 5.
+- [x] Implement secure random ID generation and UUID mode.
+- [x] Implement HMAC signing, signature verification, constant-time comparison, hashing helpers, symmetric encryption helpers, and JWT helpers needed by later plugins.
+- [x] Implement BCrypt password hash and verify with configurable callbacks.
+- [x] Implement cookie naming, prefixing, default attributes, secure cookie options, cross-subdomain attributes, and advanced cookie overrides.
+- [x] Implement signed `session_token` cookies.
+- [x] Implement `session_data` cookie cache, max age, refresh cache behavior, and disabling cache per request.
+- [x] Implement cookie chunking and deletion for oversized cookie values.
+- [x] Implement session lookup priority: signed cookie parse, cookie cache when allowed, adapter or secondary storage lookup, expiration refresh, response cookie update.
+- [x] Add sensitive session behavior that bypasses stale cookie cache for sensitive routes.
+- [x] Run crypto, cookie, and session tests.
+- [x] Add `.docs/features/sessions-and-cookies.md`.
+
+## Phase 4.5: Direct SQL Adapters For PostgreSQL And MySQL
+
+**Purpose:** Start exercising real databases before full route work, without coupling the core gem to Rails or ActiveRecord.
+
+**Architecture decision:** Core SQL support is framework-agnostic and adapter-based. PostgreSQL and MySQL adapters satisfy the same `BetterAuth::Adapters::Base` contract used by the memory adapter. They translate Better Auth logical model/field names into physical SQL table/column names from `BetterAuth::Schema`, use parameterized SQL only, and expose migration SQL generation. ActiveRecord remains a later Rails-layer adapter after Phase 5.
+
+**Files:**
+
+- Create: `/Users/sebastiansala/projects/better-auth/packages/better_auth/lib/better_auth/adapters/sql.rb`
+- Create: `/Users/sebastiansala/projects/better-auth/packages/better_auth/lib/better_auth/adapters/postgres.rb`
+- Create: `/Users/sebastiansala/projects/better-auth/packages/better_auth/lib/better_auth/adapters/mysql.rb`
+- Create: `/Users/sebastiansala/projects/better-auth/packages/better_auth/lib/better_auth/schema/sql.rb`
+- Test: `/Users/sebastiansala/projects/better-auth/packages/better_auth/test/better_auth/adapters/sql_test.rb`
+- Test: `/Users/sebastiansala/projects/better-auth/packages/better_auth/test/better_auth/adapters/postgres_test.rb`
+- Test: `/Users/sebastiansala/projects/better-auth/packages/better_auth/test/better_auth/adapters/mysql_test.rb`
+
+Steps:
+
+- [x] Add optional direct SQL adapter configuration examples: `database: BetterAuth::Adapters::Postgres.new(url: ENV["DATABASE_URL"])` and `database: BetterAuth::Adapters::MySQL.new(url: ENV["DATABASE_URL"])`.
+- [x] Keep SQL driver gems out of Rails: `pg` and `mysql2` are adapter dependencies/dev-test dependencies for `better_auth`, not ActiveRecord dependencies. Current wrappers require those gems only when instantiated without an injected connection.
+- [x] Generate PostgreSQL DDL from schema using plural `snake_case` table names, `text`, `boolean`, `timestamptz`, `bigint`, `not null`, unique constraints, FK constraints, and explicit FK indexes.
+- [x] Generate MySQL DDL from schema using InnoDB, `utf8mb4`, `varchar/text`, `tinyint(1)`, `datetime(6)`, `bigint`, unique constraints, FK constraints, and explicit FK indexes.
+- [x] Implement SQL adapter CRUD: `create`, `find_one`, `find_many`, `update`, `update_many`, `delete`, `delete_many`, `count`, and `transaction`.
+- [x] Implement SQL where operators already supported by memory adapter: `eq`, `in`, `not_in`, `contains`, `starts_with`, `ends_with`, `ne`, `gt`, `gte`, `lt`, `lte`.
+- [ ] Implement SQL joins needed by current internal adapter: `session -> user`, `account -> user`, and `user -> account`. `session -> user` and `account -> user` are implemented; `user -> account` remains for account-list route work.
+- [x] Return logical Better Auth field names from SQL adapters (`emailVerified`, `createdAt`, `userId`) even though stored columns are `snake_case`.
+- [x] Add integration tests that use root `docker-compose.yml` Postgres/MySQL services when drivers are available and skip with a clear message when drivers or services are unavailable.
+- [x] Run SQL adapter unit tests and available integration tests.
+- [x] Update `.docs/features/database-adapters.md` and `.docs/features/upstream-parity-matrix.md` with SQL adapter status and dependency decisions.
 
 ## Phase 5: Base Auth Routes
 
@@ -215,7 +245,7 @@ Steps:
 Steps:
 
 - [ ] Port upstream base route tests from `api/routes/*.test.ts`.
-- [ ] Implement `/ok` and `/error`.
+- [x] Implement `/ok` and `/error`.
 - [ ] Implement `/sign-up/email` with email normalization, password validation, user creation, account creation, optional email verification, auto sign-in, callback URL behavior, and sign-up disabled behavior.
 - [ ] Implement `/sign-in/email` with password validation, banned/sensitive checks once plugins exist, session creation, remember-me behavior, and cookie setting.
 - [ ] Implement `/sign-in/social` and `/callback/:providerId` with OAuth state strategy, provider lookup, callback URL validation, new user callback, error callback, account linking, and token storage.
@@ -228,6 +258,27 @@ Steps:
 - [ ] Preserve upstream response statuses, JSON keys, redirects, `Set-Cookie` behavior, and error codes.
 - [ ] Run every route test file individually, then run the full core test suite.
 - [ ] Add `.docs/features/base-auth-routes.md`.
+
+## Phase 5.5: Rails ActiveRecord Adapter And Mounting
+
+**Purpose:** Add Rails ergonomics immediately after base routes are implemented, while keeping auth behavior in the Rack/core layer.
+
+**Architecture decision:** Rails configuration lives in `config/initializers/better_auth.rb`, but the initializer should construct/configure the core auth instance rather than reimplement auth in Rails controllers. Rails mounts a single Rack endpoint for Better Auth routes; the Better Auth router handles dynamic internal routes like `/callback/:providerId`.
+
+**Files:**
+
+- Modify/create under `/Users/sebastiansala/projects/better-auth/packages/better_auth-rails/lib/better_auth/rails/`
+- Create Rails specs under `/Users/sebastiansala/projects/better-auth/packages/better_auth-rails/spec/`
+
+Steps:
+
+- [ ] Implement `config/initializers/better_auth.rb` generator that configures `BetterAuth.auth(...)` with Rails credentials/secrets and selected adapter.
+- [ ] Implement route mounting helper for a single Rack app, defaulting to `/api/auth/*`, with no per-route Rails controller magic.
+- [ ] Implement ActiveRecord adapter satisfying the core adapter contract after direct SQL and base routes are stable.
+- [ ] Implement migration generator that reads core schema plus plugin schema and emits Rails migrations matching the direct SQL schema decisions.
+- [ ] Implement controller helpers for `current_session`, `current_user`, authenticated checks, and route protection.
+- [ ] Document non-Rails routing: any Rack app can mount the auth object with `map "/api/auth" { run auth }` or call it directly as Rack middleware.
+- [ ] Run Rails specs and core route specs against ActiveRecord once Phase 5 base routes exist.
 
 ## Phase 6: Plugin Contract
 
@@ -421,7 +472,7 @@ Completion criteria:
 
 ## Phase 13: Rails Adapter
 
-**Purpose:** Provide Rails ergonomics without leaking Rails into the core gem.
+**Purpose:** Finish Rails adapter polish after the early Phase 5.5 ActiveRecord/mounting work.
 
 **Files:**
 
@@ -430,11 +481,11 @@ Completion criteria:
 
 Steps:
 
-- [ ] Implement Rails middleware or engine route mounting for `/api/auth/*`.
-- [ ] Implement initializer generator for Better Auth configuration.
-- [ ] Implement migration generator that reads core schema plus plugin schema.
-- [ ] Implement ActiveRecord adapter that satisfies the core adapter contract.
-- [ ] Implement controller helpers for current session, current user, authenticated checks, and route protection.
+- [ ] Harden Rails middleware or engine route mounting for `/api/auth/*` after plugin routes are available.
+- [ ] Harden initializer generator for Better Auth configuration.
+- [ ] Harden migration generator for plugin schemas beyond the base auth schema.
+- [ ] Extend ActiveRecord adapter coverage for plugin schemas and advanced query cases.
+- [ ] Harden controller helpers for current session, current user, authenticated checks, and route protection.
 - [ ] Implement Rails cookie/CSRF compatibility behavior while delegating auth decisions to core.
 - [ ] Add RSpec coverage for route mounting, initializer generation, migration generation, ActiveRecord adapter CRUD, cookies, sessions, and helpers.
 - [ ] Update `packages/better_auth-rails/README.md`.

@@ -45,13 +45,7 @@ module BetterAuth
         result.merge!(plugin.fetch(:endpoints, {}))
       end
 
-      plugin_endpoints.merge(
-        ok: Endpoint.new(path: "/ok", method: "GET") { {ok: true} },
-        error: Endpoint.new(path: "/error", method: "GET") do |ctx|
-          code = ctx.query["code"] || ctx.query[:code] || "ERROR"
-          {error: code}
-        end
-      )
+      plugin_endpoints.merge(Core.base_endpoints)
     end
   end
 end
