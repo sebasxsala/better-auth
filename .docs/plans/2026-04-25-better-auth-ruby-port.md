@@ -356,7 +356,7 @@ Progress:
 - [x] `username`: ported schema fields, sign-up/update hooks, `/sign-in/username`, `/is-username-available`, normalization, display username validation, duplicate checks, and email-verification no-leak behavior. Ruby adaptation: memory-adapter duplicate checks are performed by the plugin hook against normalized usernames because memory schema uniqueness is not global.
 - [x] `anonymous`: ported `isAnonymous` schema, `/sign-in/anonymous`, `/delete-anonymous-user`, generated email/name options, repeat anonymous sign-in rejection, anonymous deletion, and real sign-in linking cleanup. Ruby adaptation: dependency-free email validation uses the core route email pattern; social callback cleanup uses the same response-cookie/new-session hook and remains covered by base social route tests.
 - [x] `magic-link`: ported `/sign-in/magic-link`, `/magic-link/verify`, verification-table token lifecycle, new-user sign-up, existing-user email verification, redirect/error callback behavior, callback origin validation, custom token generation, and plain/hashed/custom token storage. Ruby adaptation: hashed storage uses core SHA-256/base64url helpers instead of an extra dependency.
-- [ ] `email-otp`
+- [x] `email-otp`: ported `/email-otp/send-verification-otp`, `/email-otp/check-verification-otp`, `/email-otp/verify-email`, `/sign-in/email-otp`, `/email-otp/request-password-reset`, deprecated `/forget-password/email-otp`, `/email-otp/reset-password`, server OTP create/get helpers, sign-up OTP sending hook, allowed-attempt tracking, and plain/hashed/encrypted/custom OTP storage. Ruby adaptation: endpoints own Better Auth behavior and call a configured `send_verification_otp` callable for delivery; email/SMS/provider transport is intentionally application code, matching upstream's callback model.
 - [ ] `phone-number`
 - [ ] `one-time-token`
 - [ ] `one-tap`
@@ -553,7 +553,7 @@ The final Ruby port should cover these upstream product features:
 - [x] Username plugin.
 - [x] Anonymous plugin.
 - [x] Magic link plugin.
-- [ ] Email OTP plugin.
+- [x] Email OTP plugin.
 - [ ] Phone number plugin.
 - [ ] One-time token plugin.
 - [ ] One tap plugin.
