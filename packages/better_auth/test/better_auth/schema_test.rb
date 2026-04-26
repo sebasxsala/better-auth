@@ -124,6 +124,31 @@ class BetterAuthSchemaTest < Minitest::Test
     assert_equal "last_request", schema["apiKey"][:fields]["lastRequest"][:field_name]
   end
 
+  def test_phase_eight_identity_plugin_schemas_are_merged
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [
+        BetterAuth::Plugins.username,
+        BetterAuth::Plugins.anonymous,
+        BetterAuth::Plugins.phone_number,
+        BetterAuth::Plugins.siwe(get_nonce: -> { "nonce" }, verify_message: ->(**) { true }),
+        BetterAuth::Plugins.passkey
+      ]
+    )
+
+    schema = BetterAuth::Schema.auth_tables(config)
+    user_fields = schema["user"][:fields]
+
+    assert user_fields.key?("username")
+    assert user_fields.key?("displayUsername")
+    assert user_fields.key?("isAnonymous")
+    assert user_fields.key?("phoneNumber")
+    assert user_fields.key?("phoneNumberVerified")
+    assert schema.key?("walletAddress")
+    assert schema.key?("passkey")
+  end
+
   def test_secondary_storage_omits_session_table_unless_database_storage_enabled
     storage = Object.new
     config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, secondary_storage: storage)

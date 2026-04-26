@@ -88,6 +88,28 @@ class BetterAuthPluginsEmailOTPTest < Minitest::Test
     assert_equal BetterAuth::Plugins::EMAIL_OTP_ERROR_CODES["TOO_MANY_ATTEMPTS"], too_many.message
   end
 
+  def test_expired_email_otp_is_rejected_and_consumed
+    sent = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.email_otp(
+          expires_in: -1,
+          send_verification_otp: ->(data, _ctx = nil) { sent << data }
+        )
+      ]
+    )
+    auth.api.sign_up_email(body: {email: "expired-otp@example.com", password: "password123", name: "Expired"})
+    auth.api.send_verification_otp(body: {email: "expired-otp@example.com", type: "email-verification"})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_email_otp(body: {email: "expired-otp@example.com", otp: sent.first[:otp]})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::Plugins::EMAIL_OTP_ERROR_CODES["OTP_EXPIRED"], error.message
+    assert_nil auth.context.internal_adapter.find_verification_value("email-verification-otp-expired-otp@example.com")
+  end
+
   def test_server_otp_helpers_support_custom_length_and_secure_storage_modes
     hashed = build_auth(
       plugins: [

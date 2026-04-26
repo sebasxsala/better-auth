@@ -181,6 +181,30 @@ class BetterAuthPluginsPhoneNumberTest < Minitest::Test
     assert_equal 403, blocked_reset.status_code
   end
 
+  def test_expired_phone_otp_is_rejected_and_consumed
+    sent = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.phone_number(
+          expires_in: -1,
+          send_otp: ->(data, _ctx = nil) { sent << data },
+          sign_up_on_verification: {
+            get_temp_email: ->(phone_number) { "temp-#{phone_number}@example.test" }
+          }
+        )
+      ]
+    )
+    auth.api.send_phone_number_otp(body: {phoneNumber: "+14085550102"})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_phone_number(body: {phoneNumber: "+14085550102", code: sent.first[:code]})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::Plugins::PHONE_NUMBER_ERROR_CODES["OTP_EXPIRED"], error.message
+    assert_nil auth.context.internal_adapter.find_verification_value("+14085550102")
+  end
+
   def test_password_reset_updates_password_revokes_sessions_and_does_not_leak_unknown_numbers
     sent = []
     reset_sent = []
