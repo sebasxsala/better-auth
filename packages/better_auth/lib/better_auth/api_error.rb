@@ -10,6 +10,7 @@ module BetterAuth
       "METHOD_NOT_ALLOWED" => 405,
       "UNPROCESSABLE_ENTITY" => 422,
       "TOO_MANY_REQUESTS" => 429,
+      "BAD_GATEWAY" => 502,
       "NOT_IMPLEMENTED" => 501,
       "FOUND" => 302,
       "INTERNAL_SERVER_ERROR" => 500
