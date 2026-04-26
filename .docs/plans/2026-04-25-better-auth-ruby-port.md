@@ -320,18 +320,18 @@ Steps:
 
 Steps for each plugin:
 
-- [ ] Add the plugin to the upstream parity matrix.
-- [ ] Port the upstream plugin test file into `packages/better_auth/test/better_auth/plugins/<plugin>_test.rb`.
-- [ ] Create the Ruby plugin under `packages/better_auth/lib/better_auth/plugins/<plugin>.rb`.
-- [ ] Preserve upstream plugin options, schema fields, endpoint names, endpoint paths, error codes, hooks, and response shapes.
-- [ ] Add or update `.docs/features/<plugin>.md`.
-- [ ] Run that plugin's test file.
-- [ ] Run related base route/session tests.
+- [x] Add the plugin to the upstream parity matrix.
+- [x] Port the upstream plugin test file into `packages/better_auth/test/better_auth/plugins/<plugin>_test.rb`.
+- [x] Create the Ruby plugin under `packages/better_auth/lib/better_auth/plugins/<plugin>.rb`.
+- [x] Preserve upstream plugin options, schema fields, endpoint names, endpoint paths, error codes, hooks, and response shapes.
+- [x] Add or update `.docs/features/<plugin>.md`.
+- [x] Run that plugin's test file.
+- [x] Run related base route/session tests.
 
 Completion criteria:
 
-- [ ] All seven first core plugin test files pass.
-- [ ] `bundle exec rake test` passes in `packages/better_auth`.
+- [x] All seven first core plugin test files pass.
+- [x] `bundle exec rake test` passes in `packages/better_auth`.
 
 ## Phase 8: Login And Identity Plugins
 
@@ -534,7 +534,7 @@ The final Ruby port should cover these upstream product features:
 - [ ] Database adapters and schema generation/migration story.
 - [ ] Secondary storage sessions.
 - [ ] Hooks and database hooks.
-- [ ] Plugin system.
+- [x] Plugin system.
 - [ ] Client concept parity where server-side Ruby can expose equivalent API/docs.
 - [ ] Username plugin.
 - [ ] Anonymous plugin.
@@ -551,13 +551,13 @@ The final Ruby port should cover these upstream product features:
 - [ ] Captcha plugin.
 - [ ] Have I Been Pwned plugin.
 - [ ] API key plugin.
-- [ ] Bearer plugin.
-- [ ] JWT/JWKS plugin.
-- [ ] Multi-session plugin.
-- [ ] Custom session plugin.
-- [ ] Last login method plugin.
-- [ ] Additional fields plugin.
-- [ ] OpenAPI plugin.
+- [x] Bearer plugin.
+- [x] JWT/JWKS plugin.
+- [x] Multi-session plugin.
+- [x] Custom session plugin.
+- [x] Last login method plugin.
+- [x] Additional fields plugin.
+- [x] OpenAPI plugin.
 - [ ] Access control plugin.
 - [ ] Organization plugin.
 - [ ] Admin plugin.
