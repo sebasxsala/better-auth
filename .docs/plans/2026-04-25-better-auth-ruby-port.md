@@ -362,24 +362,24 @@ Progress:
 - [x] `one-tap`: ported `/one-tap/callback`, Google ID-token verification, new-user OAuth creation, existing Google account reuse, verified/trusted account linking, `disable_signup`, session-cookie setting, invalid-token handling, and email-missing response. Ruby adaptation: default Google token verification uses existing `jwt` plus stdlib JWKS fetch; tests and apps may inject `verify_id_token` to avoid network-coupled verification.
 - [x] `siwe`: ported `/siwe/nonce`, `/siwe/verify`, wallet-address schema, nonce storage per wallet and chain, nonce consumption, callback-based message verification, anonymous/email modes, ENS lookup callback, user/account/session creation, and multi-chain wallet reuse. Ruby adaptation: wallet addresses normalize to lowercase for lookup; exact EIP-55 checksum casing remains a dependency decision because it needs Keccak support.
 - [x] `generic-oauth`: ported `/sign-in/oauth2`, `/oauth2/callback/:providerId`, `/oauth2/link`, custom token and user-info callbacks, authorization URL generation, scopes, PKCE state data, issuer mismatch redirects, implicit sign-up controls, new-user redirects, account storage, and account linking. Ruby adaptation: provider helper factories and exhaustive OAuth server integration matrix remain future polish.
-- [x] `oauth-proxy`: ported `/oauth-proxy-callback`, sign-in callback URL rewriting, same-origin proxy unwrap, cross-origin encrypted cookie payload forwarding, payload timestamp validation, cookie setting, and invalid payload redirects. Ruby adaptation: deeper upstream stateless state-cookie package restoration remains future polish if DB-less OAuth callback restoration needs it.
+- [x] `oauth-proxy`: ported `/oauth-proxy-callback`, sign-in callback URL rewriting, same-origin proxy unwrap, cross-origin encrypted cookie payload forwarding, payload timestamp validation, trusted callback URL validation, cookie setting, and invalid payload redirects. Ruby adaptation: deeper upstream stateless state-cookie package restoration remains future polish if DB-less OAuth callback restoration needs it.
 - [x] `passkey`: ported WebAuthn option generation, registration verification, authentication verification, challenge-cookie storage, passkey schema, list/update/delete routes, and session-cookie creation after passkey sign-in. Ruby adaptation: uses the maintained `webauthn` gem (`cedarcode/webauthn-ruby`) for server-side WebAuthn and cryptographic verification; credential public keys are stored as Base64 strings for adapter portability, and backup eligibility maps to upstream-style `singleDevice`/`multiDevice`.
 
 Steps for each plugin:
 
-- [ ] Port upstream tests first.
-- [ ] Implement plugin schema merge.
-- [ ] Implement routes with exact upstream paths and method names.
-- [ ] Implement client/server API aliases where upstream exposes them.
-- [ ] Implement email/SMS/provider callback hooks as configurable Ruby callables.
-- [ ] Preserve verification token expiry, callback URL behavior, trusted origin checks, and session cookie behavior.
+- [x] Port upstream tests first.
+- [x] Implement plugin schema merge.
+- [x] Implement routes with exact upstream paths and method names.
+- [x] Implement client/server API aliases where upstream exposes them.
+- [x] Implement email/SMS/provider callback hooks as configurable Ruby callables.
+- [x] Preserve verification token expiry, callback URL behavior, trusted origin checks, and session cookie behavior.
 - [x] For passkeys, select Ruby WebAuthn dependency and document any unavoidable library-level differences.
 - [x] Add `.docs/features/<plugin>.md`.
 - [x] Run plugin tests and related route tests.
 
 Completion criteria:
 
-- [ ] Every login plugin has tests, docs, and parity matrix status.
+- [x] Every login plugin has tests, docs, and parity matrix status.
 - [ ] Demo-level flows can be reproduced through Rack requests.
 
 ## Phase 9: Security Plugins
@@ -395,18 +395,18 @@ Completion criteria:
 
 Steps:
 
-- [ ] Port `two-factor` tests covering TOTP, OTP, backup codes, trusted device cookies, enabling, disabling, and post-login verification.
-- [ ] Implement two-factor schema and encrypted backup code handling.
-- [ ] Port captcha tests and implement provider adapters for Google reCAPTCHA, hCaptcha, Cloudflare Turnstile, CaptchaFox.
-- [ ] Port Have I Been Pwned tests and implement range API lookup with test stubs.
-- [ ] Port API key tests and implement key creation, hashing, verification, expiration, usage limits, rate limit, metadata, storage modes, and API-key session behavior.
-- [ ] Add feature docs for each security plugin.
-- [ ] Run security plugin tests and full session tests after each plugin.
+- [x] Port `two-factor` tests covering TOTP, OTP, backup codes, trusted device cookies, enabling, disabling, and post-login verification.
+- [x] Implement two-factor schema and encrypted backup code handling.
+- [x] Port captcha tests and implement provider adapters for Google reCAPTCHA, hCaptcha, Cloudflare Turnstile, CaptchaFox.
+- [x] Port Have I Been Pwned tests and implement range API lookup with test stubs.
+- [x] Port API key tests and implement key creation, hashing, verification, expiration, usage limits, rate limit, metadata, storage modes, and API-key session behavior.
+- [x] Add feature docs for each security plugin.
+- [x] Run security plugin tests and full session tests after each plugin.
 
 Completion criteria:
 
-- [ ] Sensitive routes force authoritative session lookup where upstream does.
-- [ ] Security plugin error codes match upstream.
+- [x] Sensitive routes force authoritative session lookup where upstream does.
+- [x] Security plugin error codes match upstream.
 
 ## Phase 10: Organization, Access, Admin
 
@@ -421,18 +421,18 @@ Completion criteria:
 
 Steps:
 
-- [ ] Port upstream access tests and implement statements, roles, permission checks, and role inference.
-- [ ] Port organization tests covering create, update, delete, list, active organization, slug checks, members, invitations, teams, active team, permissions, hooks, and client behavior.
-- [ ] Implement organization schema: `organization`, `member`, `invitation`, optional `team`, optional `teamMember`, optional dynamic role tables, and session active organization fields.
-- [ ] Preserve organization route paths from upstream route files.
-- [ ] Port admin tests covering user list, create user, update user, remove user, roles, bans, impersonation, session listing, session revocation, and permission checks.
-- [ ] Implement admin schema fields on user/session and hooks that enforce ban behavior.
-- [ ] Add `.docs/features/access.md`, `.docs/features/organization.md`, and `.docs/features/admin.md`.
-- [ ] Run organization/admin tests and all base auth route tests.
+- [x] Port upstream access tests and implement statements, roles, permission checks, and role inference. Ruby adaptation: TypeScript role inference is not applicable, so runtime behavior is covered.
+- [x] Port organization tests covering create, update, delete, list, active organization, slug checks, members, invitations, teams, active team, permissions, hooks, and client behavior. Ruby adaptation: browser client/type inference coverage is documented as future polish.
+- [x] Implement organization schema: `organization`, `member`, `invitation`, optional `team`, optional `teamMember`, optional dynamic role tables, and session active organization fields.
+- [x] Preserve organization route paths from upstream route files.
+- [x] Port admin tests covering user list, create user, update user, remove user, roles, bans, impersonation, session listing, session revocation, and permission checks.
+- [x] Implement admin schema fields on user/session and hooks that enforce ban behavior.
+- [x] Add `.docs/features/access.md`, `.docs/features/organization.md`, and `.docs/features/admin.md`.
+- [x] Run organization/admin tests and all base auth route tests. Focused Phase 10 plugin tests and base auth route tests pass; broader repo suite still has unrelated failures in later plugin work.
 
 Completion criteria:
 
-- [ ] Organization and admin flows work with memory adapter and are ready for SQL/Rails adapter mapping.
+- [x] Organization and admin flows work with memory adapter and are ready for SQL/Rails adapter mapping.
 
 ## Phase 11: OAuth, OIDC, Device Authorization, MCP
 
