@@ -39,6 +39,11 @@ require_relative "better_auth/plugins/siwe"
 require_relative "better_auth/plugins/generic_oauth"
 require_relative "better_auth/plugins/oauth_proxy"
 require_relative "better_auth/plugins/passkey"
+require_relative "better_auth/plugins/oauth_protocol"
+require_relative "better_auth/plugins/oidc_provider"
+require_relative "better_auth/plugins/oauth_provider"
+require_relative "better_auth/plugins/device_authorization"
+require_relative "better_auth/plugins/mcp"
 %w[
   better_auth/plugins/sso
   better_auth/plugins/scim

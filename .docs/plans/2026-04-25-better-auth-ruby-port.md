@@ -452,8 +452,18 @@ Steps:
 - [ ] Preserve well-known endpoint behavior, issuer behavior, scopes, claims, access tokens, refresh tokens, consent, introspection, revoke, userinfo, client resource endpoints, and dynamic registration.
 - [ ] Port device authorization tests for device code, user code, polling, approval, denial, expiry, and slow-down behavior.
 - [ ] Port MCP tests for protected resource metadata, OAuth config, authorization, token, dynamic registration, and session helpers.
-- [ ] Add docs for each protocol plugin with exact upstream references and Ruby dependency decisions.
-- [ ] Run protocol tests individually and then as a group.
+- [x] Add docs for each protocol plugin with exact upstream references and Ruby dependency decisions.
+- [x] Run protocol tests individually and then as a group.
+
+Progress:
+
+- [x] Added Phase 11 executable plan at `.docs/plans/2026-04-26-phase-11-protocol-plugins.md`.
+- [x] Added shared Ruby OAuth/OIDC protocol helpers without new runtime dependencies.
+- [x] Added partial OIDC provider coverage for metadata, prompt parsing, dynamic registration, authorize, token, userinfo, refresh token issuance, and logout.
+- [x] Added partial OAuth provider package coverage for metadata, RFC 9207 issuer normalization, client registration/public lookup, client-credentials token issuance, introspection, and revocation.
+- [x] Added partial device authorization coverage for device/user code issuance, verification, polling, approval, denial, expiry, slow-down, custom generators, client validation, and verification URI behavior.
+- [x] Added partial MCP coverage for OAuth metadata, protected-resource metadata, public PKCE client registration, token/refresh, userinfo, and `WWW-Authenticate` helper behavior.
+- [ ] Full upstream OIDC/OAuth/MCP consent, organization, logout, rate-limit, JWT algorithm, encrypted client-secret, and server-client integration matrices remain future polish.
 
 Completion criteria:
 
