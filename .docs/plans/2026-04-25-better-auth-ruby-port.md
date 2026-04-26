@@ -363,7 +363,7 @@ Progress:
 - [x] `siwe`: ported `/siwe/nonce`, `/siwe/verify`, wallet-address schema, nonce storage per wallet and chain, nonce consumption, callback-based message verification, anonymous/email modes, ENS lookup callback, user/account/session creation, and multi-chain wallet reuse. Ruby adaptation: wallet addresses normalize to lowercase for lookup; exact EIP-55 checksum casing remains a dependency decision because it needs Keccak support.
 - [x] `generic-oauth`: ported `/sign-in/oauth2`, `/oauth2/callback/:providerId`, `/oauth2/link`, custom token and user-info callbacks, authorization URL generation, scopes, PKCE state data, issuer mismatch redirects, implicit sign-up controls, new-user redirects, account storage, and account linking. Ruby adaptation: provider helper factories and exhaustive OAuth server integration matrix remain future polish.
 - [x] `oauth-proxy`: ported `/oauth-proxy-callback`, sign-in callback URL rewriting, same-origin proxy unwrap, cross-origin encrypted cookie payload forwarding, payload timestamp validation, cookie setting, and invalid payload redirects. Ruby adaptation: deeper upstream stateless state-cookie package restoration remains future polish if DB-less OAuth callback restoration needs it.
-- [ ] `passkey`
+- [x] `passkey`: ported WebAuthn option generation, registration verification, authentication verification, challenge-cookie storage, passkey schema, list/update/delete routes, and session-cookie creation after passkey sign-in. Ruby adaptation: uses the maintained `webauthn` gem (`cedarcode/webauthn-ruby`) for server-side WebAuthn and cryptographic verification; credential public keys are stored as Base64 strings for adapter portability, and backup eligibility maps to upstream-style `singleDevice`/`multiDevice`.
 
 Steps for each plugin:
 
@@ -373,9 +373,9 @@ Steps for each plugin:
 - [ ] Implement client/server API aliases where upstream exposes them.
 - [ ] Implement email/SMS/provider callback hooks as configurable Ruby callables.
 - [ ] Preserve verification token expiry, callback URL behavior, trusted origin checks, and session cookie behavior.
-- [ ] For passkeys, select Ruby WebAuthn dependency and document any unavoidable library-level differences.
-- [ ] Add `.docs/features/<plugin>.md`.
-- [ ] Run plugin tests and related route tests.
+- [x] For passkeys, select Ruby WebAuthn dependency and document any unavoidable library-level differences.
+- [x] Add `.docs/features/<plugin>.md`.
+- [x] Run plugin tests and related route tests.
 
 Completion criteria:
 
