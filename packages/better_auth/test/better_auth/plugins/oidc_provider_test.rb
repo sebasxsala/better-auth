@@ -34,6 +34,7 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
         token_endpoint_auth_method: "none",
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
+        skip_consent: true,
         client_name: "Ruby Client"
       }
     )
@@ -107,14 +108,94 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
     assert_includes headers.fetch("set-cookie"), "better-auth.session_token=;"
   end
 
+  def test_authorization_prompt_consent_records_consent_before_issuing_code
+    auth = build_auth(consent_page: "/oidc/consent")
+    cookie = sign_up_cookie(auth)
+    client = auth.api.register_o_auth_application(
+      body: {
+        redirect_uris: ["https://client.example/callback"],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        client_name: "Consent Client"
+      }
+    )
+
+    status, headers, = auth.api.o_auth2_authorize(
+      headers: {"cookie" => cookie},
+      query: {
+        response_type: "code",
+        client_id: client[:client_id],
+        redirect_uri: "https://client.example/callback",
+        scope: "openid email",
+        state: "consent-state",
+        prompt: "consent"
+      },
+      as_response: true
+    )
+    assert_equal 302, status
+    consent_redirect = URI.parse(headers.fetch("location"))
+    assert_equal "/oidc/consent", consent_redirect.path
+    consent_code = Rack::Utils.parse_query(consent_redirect.query).fetch("consent_code")
+
+    consent = auth.api.o_auth_consent(headers: {"cookie" => cookie}, body: {accept: true, consent_code: consent_code})
+    callback = URI.parse(consent.fetch(:redirectURI))
+    params = Rack::Utils.parse_query(callback.query)
+    assert_equal "consent-state", params.fetch("state")
+    assert params.fetch("code")
+
+    tokens = auth.api.o_auth2_token(
+      body: {
+        grant_type: "authorization_code",
+        code: params.fetch("code"),
+        redirect_uri: "https://client.example/callback",
+        client_id: client[:client_id]
+      }
+    )
+    assert tokens[:id_token]
+    assert_equal "openid email", tokens[:scope]
+  end
+
+  def test_prompt_none_returns_consent_required_when_consent_is_missing
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    client = auth.api.register_o_auth_application(
+      body: {
+        redirect_uris: ["https://client.example/callback"],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        client_name: "Prompt None Client"
+      }
+    )
+
+    status, headers, = auth.api.o_auth2_authorize(
+      headers: {"cookie" => cookie},
+      query: {
+        response_type: "code",
+        client_id: client[:client_id],
+        redirect_uri: "https://client.example/callback",
+        scope: "openid email",
+        state: "state-missing-consent",
+        prompt: "none"
+      },
+      as_response: true
+    )
+
+    assert_equal 302, status
+    params = Rack::Utils.parse_query(URI.parse(headers.fetch("location")).query)
+    assert_equal "consent_required", params.fetch("error")
+    assert_equal "state-missing-consent", params.fetch("state")
+  end
+
   private
 
-  def build_auth
+  def build_auth(options = {})
     BetterAuth.auth(
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
-      plugins: [BetterAuth::Plugins.oidc_provider]
+      plugins: [BetterAuth::Plugins.oidc_provider(options)]
     )
   end
 

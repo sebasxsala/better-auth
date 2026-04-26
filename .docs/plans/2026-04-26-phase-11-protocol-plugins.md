@@ -43,6 +43,7 @@
 - [x] `cd packages/better_auth && rbenv exec bundle exec rake test TEST=test/better_auth/router_test.rb`
 - [x] `cd packages/better_auth && rbenv exec bundle exec rake test`
 - [x] `cd packages/better_auth && RUBOCOP_CACHE_ROOT=/var/folders/7x/jrsz946d2w73n42fb1_ff5000000gn/T/rubocop_cache rbenv exec bundle exec standardrb <phase-11-files>`
+- [x] Added and ran OIDC/OAuth provider consent-code and OAuth authorization-code exchange tests on 2026-04-26.
 
 ## Assumptions
 
@@ -50,7 +51,7 @@
 - Existing worktree changes are user-owned and must not be reverted.
 - Upstream behavior wins for public route paths, JSON keys, OAuth parameter names, and error strings.
 - Ruby can store array/json values natively in the memory adapter; SQL encoding differences must be documented.
-- Organization-specific OAuth provider behavior is deferred unless Phase 10 is present in the implementation branch.
+- Organization-specific OAuth provider behavior remains future polish; Phase 10 is present, but this pass focused on consent and authorization-code protocol parity.
 
 ## Verification Notes
 

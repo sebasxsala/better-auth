@@ -98,14 +98,15 @@ module BetterAuth
         update = {}
         Array(normalize_hash(ctx.body)[:operations] || ctx.body["Operations"]).each do |operation|
           op = normalize_hash(operation)
-          next unless %w[replace add].include?(op[:op].to_s.downcase)
+          operation_name = op[:op].to_s.downcase
+          raise APIError.new("BAD_REQUEST", message: "Invalid SCIM patch operation") unless %w[replace add remove].include?(operation_name)
 
-          case op[:path].to_s
-          when "active"
-            update[:active] = op[:value]
-          when "userName"
-            update[:email] = op[:value].to_s.downcase
+          if op[:path].to_s.empty? && op[:value].is_a?(Hash)
+            scim_apply_patch_value!(update, normalize_hash(op[:value]), remove: false)
+            next
           end
+
+          scim_apply_patch_path!(update, op[:path], op[:value], remove: operation_name == "remove")
         end
         ctx.context.internal_adapter.update_user(user.fetch("id"), update) unless update.empty?
         ctx.json(nil, status: 204)
@@ -124,8 +125,8 @@ module BetterAuth
       Endpoint.new(path: "/scim/v2/Users", method: "GET", use: [scim_auth_middleware(config)]) do |ctx|
         users = ctx.context.internal_adapter.list_users
         if (filter = ctx.query[:filter] || ctx.query["filter"])
-          field, value = filter.to_s.scan(/\A(\w+)\s+eq\s+"([^"]+)"\z/).first
-          users = users.select { |user| scim_filter_value(user, field) == value } if field
+          field, value = scim_parse_filter(filter)
+          users = users.select { |user| scim_filter_value(user, field) == value }
         end
         resources = users.map { |user| scim_user_resource(user) }
         ctx.json({schemas: ["urn:ietf:params:scim:api:messages:2.0:ListResponse"], totalResults: resources.length, itemsPerPage: resources.length, startIndex: 1, Resources: resources})
@@ -222,6 +223,26 @@ module BetterAuth
       }.compact
     end
 
+    def scim_apply_patch_value!(update, value, remove:)
+      scim_apply_patch_path!(update, "userName", value[:user_name], remove: remove) if value.key?(:user_name)
+      scim_apply_patch_path!(update, "externalId", value[:external_id], remove: remove) if value.key?(:external_id)
+      scim_apply_patch_path!(update, "active", value[:active], remove: remove) if value.key?(:active)
+    end
+
+    def scim_apply_patch_path!(update, path, value, remove:)
+      normalized = path.to_s.sub(%r{\A/+}, "")
+      case normalized
+      when "active"
+        update[:active] = remove ? nil : value
+      when "userName"
+        update[:email] = remove ? nil : value.to_s.downcase
+      when "externalId"
+        update[:externalId] = remove ? nil : value
+      else
+        raise APIError.new("BAD_REQUEST", message: "Invalid SCIM patch path")
+      end
+    end
+
     def scim_display_name(body)
       name = normalize_hash(body[:name] || {})
       [name[:given_name], name[:family_name]].compact.join(" ").strip
@@ -246,6 +267,16 @@ module BetterAuth
       when "externalId" then user["externalId"]
       else user[field]
       end
+    end
+
+    def scim_parse_filter(filter)
+      match = filter.to_s.match(/\A(\w+)\s+eq\s+"([^"]+)"\z/)
+      raise APIError.new("BAD_REQUEST", message: "Invalid SCIM filter") unless match
+
+      field = match[1]
+      raise APIError.new("BAD_REQUEST", message: "Invalid SCIM filter") unless %w[userName externalId].include?(field)
+
+      [field, match[2]]
     end
 
     def scim_user_schema

@@ -27,8 +27,8 @@ module BetterAuth
           register_sso_provider: sso_register_provider_endpoint,
           sign_in_sso: sso_sign_in_endpoint,
           callback_sso: sso_oidc_callback_endpoint,
-          callback_sso_saml: sso_saml_callback_endpoint,
-          acs_endpoint: sso_saml_acs_endpoint,
+          callback_sso_saml: sso_saml_callback_endpoint(config),
+          acs_endpoint: sso_saml_acs_endpoint(config),
           list_sso_providers: sso_list_providers_endpoint,
           get_sso_provider: sso_get_provider_endpoint,
           update_sso_provider: sso_update_provider_endpoint,
@@ -198,15 +198,15 @@ module BetterAuth
       end
     end
 
-    def sso_saml_callback_endpoint
+    def sso_saml_callback_endpoint(config)
       Endpoint.new(path: "/sso/saml2/callback/:providerId", method: ["GET", "POST"], metadata: {allowed_media_types: ["application/json", "application/x-www-form-urlencoded"]}) do |ctx|
-        sso_handle_saml_response(ctx)
+        sso_handle_saml_response(ctx, config)
       end
     end
 
-    def sso_saml_acs_endpoint
+    def sso_saml_acs_endpoint(config)
       Endpoint.new(path: "/sso/saml2/sp/acs/:providerId", method: "POST", metadata: {allowed_media_types: ["application/json", "application/x-www-form-urlencoded"]}) do |ctx|
-        sso_handle_saml_response(ctx)
+        sso_handle_saml_response(ctx, config)
       end
     end
 
@@ -248,11 +248,12 @@ module BetterAuth
       end
     end
 
-    def sso_handle_saml_response(ctx)
+    def sso_handle_saml_response(ctx, config = {})
       provider = sso_find_provider!(ctx, sso_fetch(ctx.params, :provider_id))
       relay_state = sso_fetch(ctx.body, :relay_state) || sso_fetch(ctx.query, :relay_state)
       state = sso_verify_state(relay_state, ctx.context.secret) || {}
       assertion = sso_parse_saml_response(sso_fetch(ctx.body, :saml_response))
+      sso_validate_saml_response!(config, assertion, provider, ctx)
       assertion_id = assertion[:id] || assertion["id"] || assertion[:email]
       replay_key = "sso-saml-assertion:#{provider.fetch("providerId")}:#{assertion_id}"
       if ctx.context.internal_adapter.find_verification_value(replay_key)
@@ -260,7 +261,7 @@ module BetterAuth
       end
       ctx.context.internal_adapter.create_verification_value(identifier: replay_key, value: "used", expiresAt: Time.now + 300)
 
-      user = sso_find_or_create_user(ctx, provider, assertion)
+      user = sso_find_or_create_user(ctx, provider, assertion, config)
       session = ctx.context.internal_adapter.create_session(user.fetch("id"))
       Cookies.set_session_cookie(ctx, {session: session, user: user})
       callback_url = state["callbackURL"] || "/"
@@ -268,24 +269,48 @@ module BetterAuth
       sso_redirect(ctx, callback_url)
     end
 
-    def sso_find_or_create_user(ctx, provider, user_info)
+    def sso_find_or_create_user(ctx, provider, user_info, config = {})
       user_info = normalize_hash(user_info)
       email = user_info[:email].to_s.downcase
       found = ctx.context.internal_adapter.find_user_by_email(email)
-      return found[:user] if found
-
-      user = ctx.context.internal_adapter.create_user(
-        email: email,
-        name: user_info[:name] || email,
-        emailVerified: user_info.key?(:email_verified) ? user_info[:email_verified] : true,
-        image: user_info[:image]
-      )
-      ctx.context.internal_adapter.create_account(
-        accountId: (user_info[:id] || user.fetch("id")).to_s,
-        providerId: "sso:#{provider.fetch("providerId")}",
-        userId: user.fetch("id")
-      )
+      user = if found
+        found[:user]
+      else
+        created = ctx.context.internal_adapter.create_user(
+          email: email,
+          name: user_info[:name] || email,
+          emailVerified: user_info.key?(:email_verified) ? user_info[:email_verified] : true,
+          image: user_info[:image]
+        )
+        ctx.context.internal_adapter.create_account(
+          accountId: (user_info[:id] || created.fetch("id")).to_s,
+          providerId: "sso:#{provider.fetch("providerId")}",
+          userId: created.fetch("id")
+        )
+        created
+      end
+      sso_assign_organization_membership(ctx, provider, user, config)
       user
+    end
+
+    def sso_validate_saml_response!(config, assertion, provider, ctx)
+      validator = config.dig(:saml, :validate_response)
+      return unless validator.respond_to?(:call)
+      return if validator.call(response: assertion, provider: provider, context: ctx)
+
+      raise APIError.new("BAD_REQUEST", message: "Invalid SAML response")
+    end
+
+    def sso_assign_organization_membership(ctx, provider, user, config)
+      organization_id = provider["organizationId"]
+      return if organization_id.to_s.empty?
+      return unless provider["domainVerified"]
+      return unless sso_email_domain_matches?(user["email"].to_s.split("@").last.to_s.downcase, provider["domain"])
+      return unless ctx.context.options.plugins.any? { |plugin| plugin.id == "organization" }
+      return if ctx.context.adapter.find_one(model: "member", where: [{field: "organizationId", value: organization_id}, {field: "userId", value: user.fetch("id")}])
+
+      role = config.dig(:organization_provisioning, :role) || "member"
+      ctx.context.adapter.create(model: "member", data: {organizationId: organization_id, userId: user.fetch("id"), role: role, createdAt: Time.now})
     end
 
     def sso_parse_saml_response(value)

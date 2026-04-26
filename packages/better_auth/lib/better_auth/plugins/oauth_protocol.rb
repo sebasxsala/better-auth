@@ -95,6 +95,7 @@ module BetterAuth
           "grantTypes" => Array(body["grant_types"] || [AUTH_CODE_GRANT]),
           "responseTypes" => Array(body["response_types"] || ["code"]),
           "scopes" => scopes,
+          "skipConsent" => body["skip_consent"] || body["skipConsent"] || false,
           "metadata" => body["metadata"] || {},
           "disabled" => false
         }
@@ -115,6 +116,7 @@ module BetterAuth
           token_endpoint_auth_method: data["tokenEndpointAuthMethod"] || "client_secret_basic",
           grant_types: data["grantTypes"] || [],
           response_types: data["responseTypes"] || [],
+          skip_consent: !!data["skipConsent"],
           scope: scope_string(data["scopes"]),
           metadata: data["metadata"]
         }
@@ -284,7 +286,8 @@ module BetterAuth
         {
           codes: {},
           tokens: {},
-          refresh_tokens: {}
+          refresh_tokens: {},
+          consents: {}
         }
       end
 

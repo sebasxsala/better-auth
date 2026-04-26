@@ -447,11 +447,11 @@ Completion criteria:
 
 Steps:
 
-- [ ] Port OIDC provider tests for metadata, authorize, consent, token, userinfo, client registration, logout, prompt behavior, and schema.
-- [ ] Port OAuth provider package tests from `upstream/packages/oauth-provider/src`.
-- [ ] Preserve well-known endpoint behavior, issuer behavior, scopes, claims, access tokens, refresh tokens, consent, introspection, revoke, userinfo, client resource endpoints, and dynamic registration.
-- [ ] Port device authorization tests for device code, user code, polling, approval, denial, expiry, and slow-down behavior.
-- [ ] Port MCP tests for protected resource metadata, OAuth config, authorization, token, dynamic registration, and session helpers.
+- [x] Port OIDC provider tests for metadata, authorize, consent, token, userinfo, client registration, logout, prompt behavior, and schema.
+- [x] Port OAuth provider package tests from `upstream/packages/oauth-provider/src`.
+- [x] Preserve well-known endpoint behavior, issuer behavior, scopes, claims, access tokens, refresh tokens, consent, introspection, revoke, userinfo, client resource endpoints, and dynamic registration.
+- [x] Port device authorization tests for device code, user code, polling, approval, denial, expiry, and slow-down behavior.
+- [x] Port MCP tests for protected resource metadata, OAuth config, authorization, token, dynamic registration, and session helpers.
 - [x] Add docs for each protocol plugin with exact upstream references and Ruby dependency decisions.
 - [x] Run protocol tests individually and then as a group.
 
@@ -463,7 +463,8 @@ Progress:
 - [x] Added partial OAuth provider package coverage for metadata, RFC 9207 issuer normalization, client registration/public lookup, client-credentials token issuance, introspection, and revocation.
 - [x] Added partial device authorization coverage for device/user code issuance, verification, polling, approval, denial, expiry, slow-down, custom generators, client validation, and verification URI behavior.
 - [x] Added partial MCP coverage for OAuth metadata, protected-resource metadata, public PKCE client registration, token/refresh, userinfo, and `WWW-Authenticate` helper behavior.
-- [ ] Full upstream OIDC/OAuth/MCP consent, organization, logout, rate-limit, JWT algorithm, encrypted client-secret, and server-client integration matrices remain future polish.
+- [x] Added OIDC/OAuth provider consent-code flows, `prompt=none` `consent_required`, persisted `oauthConsent`, and OAuth provider authorization-code token exchange.
+- [ ] Full upstream OIDC/OAuth/MCP organization references, OAuth logout, protocol rate-limit matrices, JWT algorithm negotiation, encrypted client-secret variants, and full server-client integration matrices remain future polish.
 
 Completion criteria:
 
@@ -483,13 +484,13 @@ Completion criteria:
 Steps:
 
 - [x] Decide whether each package lives inside `better_auth` as a plugin namespace or ships as a separate Ruby gem; document the decision before implementation.
-- [x] Add partial SSO coverage for SAML, OIDC discovery, provider CRUD, domain verification, callbacks, ACS, metadata, replay protection, and SAML origin bypass. Organization assignment remains deferred until the organization plugin exists.
-- [x] Add partial SCIM coverage for tokens, service provider config, schemas, resource types, user CRUD, PATCH operations, simple filters, mappings, and auth middleware.
-- [x] Add partial Stripe coverage for customer sync, guarded organization mode, subscriptions, billing portal, webhooks, cancellation, restore, and plan behavior using an injected fake client.
+- [x] Add partial SSO coverage for SAML, OIDC discovery, provider CRUD, domain verification, callbacks, ACS, metadata, replay protection, SAML validation hooks, verified-domain organization assignment, and SAML origin bypass.
+- [x] Add partial SCIM coverage for tokens, service provider config, schemas, resource types, user CRUD, PATCH operations including `remove` and no-path value objects, validated simple filters, mappings, and auth middleware.
+- [x] Add partial Stripe coverage for customer sync, guarded organization mode, subscriptions, billing portal, webhooks, webhook-created subscription persistence, cancellation, restore, and plan behavior using an injected fake client.
 - [x] Port Expo behavior into Rails/Rack-compatible mobile helpers where Ruby server support applies: origin override, deep-link redirect cookie transfer, and authorization proxy.
 - [x] Add `.docs/features/sso.md`, `.docs/features/scim.md`, `.docs/features/stripe.md`, and `.docs/features/expo.md`.
 - [x] Run package-specific tests and document unsupported or deferred package boundaries if Ruby packaging differs.
-- [ ] Full SAML XML signature/encryption/assertion validation, SCIM RFC filter/PATCH matrix, Stripe billing edge-case matrix, and organization-backed enterprise flows remain future polish.
+- [ ] Full native SAML XML signature/encryption/assertion validation, exhaustive SCIM RFC filter/PATCH matrix, and exhaustive Stripe billing edge-case matrix remain future polish.
 
 Completion criteria:
 

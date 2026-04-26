@@ -91,6 +91,34 @@ class BetterAuthPluginsStripeTest < Minitest::Test
     assert_equal "active", updated.fetch("status")
   end
 
+  def test_webhook_creates_subscription_from_created_event_metadata
+    stripe = FakeStripeClient.new
+    auth = build_auth(stripe_client: stripe, stripe_webhook_secret: "whsec_test")
+    event = {
+      type: "customer.subscription.created",
+      data: {
+        object: {
+          id: "sub_created",
+          customer: "cus_created",
+          status: "active",
+          current_period_start: 1_700_000_000,
+          current_period_end: 1_700_086_400,
+          cancel_at_period_end: false,
+          metadata: {plan: "pro", referenceId: "user-created", customerType: "user"}
+        }
+      }
+    }
+
+    result = auth.api.stripe_webhook(headers: {"stripe-signature" => "valid"}, body: event)
+
+    assert_equal({received: true}, result)
+    created = auth.context.adapter.find_one(model: "subscription", where: [{field: "stripeSubscriptionId", value: "sub_created"}])
+    assert_equal "pro", created.fetch("plan")
+    assert_equal "user-created", created.fetch("referenceId")
+    assert_equal "cus_created", created.fetch("stripeCustomerId")
+    assert_equal "active", created.fetch("status")
+  end
+
   private
 
   def build_auth(options = {})

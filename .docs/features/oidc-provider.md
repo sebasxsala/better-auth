@@ -4,7 +4,7 @@
 
 ## Summary
 
-Adds OIDC provider metadata, dynamic client registration, authorization-code issuance, token exchange, refresh tokens, userinfo, prompt parsing, consent placeholder behavior, and RP-initiated logout.
+Adds OIDC provider metadata, dynamic client registration, authorization-code issuance, token exchange, refresh tokens, userinfo, prompt parsing, consent-code flow, and RP-initiated logout.
 
 ## Ruby Adaptation
 
@@ -17,8 +17,8 @@ Adds OIDC provider metadata, dynamic client registration, authorization-code iss
 ## Key Differences
 
 - Ruby options use snake_case equivalents of upstream camelCase.
-- Current coverage focuses on server-side Rack/API behavior: metadata, prompt validation, client registration, auth-code redirect, token exchange, userinfo, refresh-token issuance, and logout.
-- Full upstream consent-screen UX, JWT plugin algorithm negotiation, encrypted client-secret variants, and exhaustive prompt/max-age matrices remain future polish.
+- Current coverage focuses on server-side Rack/API behavior: metadata, prompt validation, client registration, consent redirects, auth-code redirect, token exchange, userinfo, refresh-token issuance, and logout.
+- Full upstream consent-screen UI rendering, JWT plugin algorithm negotiation, encrypted client-secret variants, and exhaustive prompt/max-age matrices remain future polish.
 
 ## Testing
 

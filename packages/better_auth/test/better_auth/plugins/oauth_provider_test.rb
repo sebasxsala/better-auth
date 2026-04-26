@@ -86,14 +86,107 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
     assert_equal false, inactive[:active]
   end
 
+  def test_authorization_code_flow_requires_and_records_consent
+    auth = build_auth(consent_page: "/consent")
+    cookie = sign_up_cookie(auth)
+    client = auth.api.register_o_auth_client(
+      headers: {"cookie" => cookie},
+      body: {
+        redirect_uris: ["https://resource.example/callback"],
+        token_endpoint_auth_method: "client_secret_post",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        client_name: "Browser Client",
+        scope: "read write"
+      }
+    )
+
+    status, headers, = auth.api.o_auth2_authorize(
+      headers: {"cookie" => cookie},
+      query: {
+        response_type: "code",
+        client_id: client[:client_id],
+        redirect_uri: "https://resource.example/callback",
+        scope: "read",
+        state: "state-123",
+        prompt: "consent"
+      },
+      as_response: true
+    )
+    assert_equal 302, status
+    consent_redirect = URI.parse(headers.fetch("location"))
+    assert_equal "/consent", consent_redirect.path
+    consent_code = Rack::Utils.parse_query(consent_redirect.query).fetch("consent_code")
+
+    consent = auth.api.o_auth2_consent(
+      headers: {"cookie" => cookie},
+      body: {accept: true, consent_code: consent_code}
+    )
+    callback = URI.parse(consent.fetch(:redirectURI))
+    params = Rack::Utils.parse_query(callback.query)
+    assert_equal "state-123", params.fetch("state")
+    assert_equal "http://localhost:3000", params.fetch("iss")
+    assert params.fetch("code")
+
+    tokens = auth.api.o_auth2_token(
+      body: {
+        grant_type: "authorization_code",
+        code: params.fetch("code"),
+        redirect_uri: "https://resource.example/callback",
+        client_id: client[:client_id],
+        client_secret: client[:client_secret]
+      }
+    )
+    assert_equal "Bearer", tokens[:token_type]
+    assert_equal "read", tokens[:scope]
+    assert tokens[:refresh_token]
+
+    consent_record = auth.context.adapter.find_one(model: "oauthConsent", where: [{field: "clientId", value: client[:client_id]}])
+    assert_equal true, consent_record.fetch("consentGiven")
+  end
+
+  def test_authorize_prompt_none_returns_consent_required_without_prior_consent
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    client = auth.api.register_o_auth_client(
+      headers: {"cookie" => cookie},
+      body: {
+        redirect_uris: ["https://resource.example/callback"],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        client_name: "Prompt None Client",
+        scope: "read"
+      }
+    )
+
+    status, headers, = auth.api.o_auth2_authorize(
+      headers: {"cookie" => cookie},
+      query: {
+        response_type: "code",
+        client_id: client[:client_id],
+        redirect_uri: "https://resource.example/callback",
+        scope: "read",
+        state: "state-456",
+        prompt: "none"
+      },
+      as_response: true
+    )
+
+    assert_equal 302, status
+    params = Rack::Utils.parse_query(URI.parse(headers.fetch("location")).query)
+    assert_equal "consent_required", params.fetch("error")
+    assert_equal "state-456", params.fetch("state")
+  end
+
   private
 
-  def build_auth
+  def build_auth(options = {})
     BetterAuth.auth(
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
-      plugins: [BetterAuth::Plugins.oauth_provider(scopes: ["read", "write"])]
+      plugins: [BetterAuth::Plugins.oauth_provider({scopes: ["read", "write"]}.merge(options))]
     )
   end
 

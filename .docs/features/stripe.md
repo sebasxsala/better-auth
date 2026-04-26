@@ -17,6 +17,7 @@ Adds `BetterAuth::Plugins.stripe` with injected Stripe client support, customer 
 
 - Organization subscription operations are guarded with a clear error until the organization plugin is ported.
 - Webhook verification delegates to the injected client when it exposes `webhooks.construct_event`.
+- Webhooks update existing subscriptions and create missing subscriptions from Stripe subscription metadata when enough reference data is present.
 - Full plan/seat/trial abuse and every Stripe event edge case remains partial; current tests cover the server contract and persistence path.
 
 ## Testing

@@ -22,6 +22,7 @@ module BetterAuth
     def oidc_provider(options = {})
       config = {
         code_expires_in: 600,
+        consent_page: "/oauth2/authorize",
         default_scope: "openid",
         access_token_expires_in: 3600,
         refresh_token_expires_in: 604_800,
@@ -106,6 +107,26 @@ module BetterAuth
         raise APIError.new("BAD_REQUEST", message: "invalid_client") unless client
         OAuthProtocol.validate_redirect_uri!(client, query["redirect_uri"])
 
+        scopes = OAuthProtocol.parse_scopes(query["scope"] || config[:default_scope])
+        client_data = OAuthProtocol.stringify_keys(client)
+        requires_consent = !client_data["skipConsent"] && (prompts.include?("consent") || !oauth_consent_granted?(ctx, client_data["clientId"], session[:user]["id"], scopes))
+        if requires_consent
+          if prompts.include?("none")
+            redirect = OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], error: "consent_required", state: query["state"], iss: OAuthProtocol.issuer(ctx))
+            raise ctx.redirect(redirect)
+          end
+
+          consent_code = Crypto.random_string(32)
+          config[:store][:consents][consent_code] = {
+            query: query,
+            session: session,
+            client: client,
+            scopes: scopes,
+            expires_at: Time.now + config[:code_expires_in].to_i
+          }
+          raise ctx.redirect(OAuthProtocol.redirect_uri_with_params(config[:consent_page], consent_code: consent_code, client_id: client_data["clientId"], scope: OAuthProtocol.scope_string(scopes)))
+        end
+
         code = Crypto.random_string(32)
         OAuthProtocol.store_code(
           config[:store],
@@ -113,7 +134,7 @@ module BetterAuth
           client_id: query["client_id"],
           redirect_uri: query["redirect_uri"],
           session: session,
-          scopes: query["scope"] || config[:default_scope],
+          scopes: scopes,
           code_challenge: query["code_challenge"],
           code_challenge_method: query["code_challenge_method"]
         )
@@ -123,10 +144,33 @@ module BetterAuth
       end
     end
 
-    def oidc_consent_endpoint(_config)
+    def oidc_consent_endpoint(config)
       Endpoint.new(path: "/oauth2/consent", method: "POST") do |ctx|
         Routes.current_session(ctx)
-        ctx.json({status: true})
+        body = OAuthProtocol.stringify_keys(ctx.body)
+        consent = config[:store][:consents].delete(body["consent_code"].to_s)
+        raise APIError.new("BAD_REQUEST", message: "invalid consent_code") unless consent
+        raise APIError.new("BAD_REQUEST", message: "expired consent_code") if consent[:expires_at] <= Time.now
+
+        query = consent[:query]
+        if body["accept"] == false || body["accept"].to_s == "false"
+          redirect = OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], error: "access_denied", state: query["state"], iss: OAuthProtocol.issuer(ctx))
+          next ctx.json({redirectURI: redirect})
+        end
+
+        oauth_store_consent(ctx, consent[:client], consent[:session], consent[:scopes])
+        code = Crypto.random_string(32)
+        OAuthProtocol.store_code(
+          config[:store],
+          code: code,
+          client_id: query["client_id"],
+          redirect_uri: query["redirect_uri"],
+          session: consent[:session],
+          scopes: consent[:scopes],
+          code_challenge: query["code_challenge"],
+          code_challenge_method: query["code_challenge_method"]
+        )
+        ctx.json({redirectURI: OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], code: code, state: query["state"], iss: OAuthProtocol.issuer(ctx))})
       end
     end
 
@@ -208,6 +252,7 @@ module BetterAuth
             redirectUris: {type: "string[]", required: false},
             postLogoutRedirectUris: {type: "string[]", required: false},
             tokenEndpointAuthMethod: {type: "string", required: false},
+            skipConsent: {type: "boolean", required: false},
             grantTypes: {type: "string[]", required: false},
             responseTypes: {type: "string[]", required: false},
             scopes: {type: "string[]", required: false},

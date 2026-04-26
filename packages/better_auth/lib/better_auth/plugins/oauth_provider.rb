@@ -22,6 +22,8 @@ module BetterAuth
 
     def oauth_provider(options = {})
       config = {
+        login_page: "/login",
+        consent_page: "/oauth2/consent",
         scopes: [],
         grant_types: [OAuthProtocol::AUTH_CODE_GRANT, OAuthProtocol::CLIENT_CREDENTIALS_GRANT, OAuthProtocol::REFRESH_GRANT],
         store: OAuthProtocol.stores
@@ -44,6 +46,8 @@ module BetterAuth
         get_o_auth_client_public: oauth_get_client_public_endpoint(config),
         list_o_auth_clients: oauth_list_clients_endpoint,
         delete_o_auth_client: oauth_delete_client_endpoint,
+        o_auth2_authorize: oauth_authorize_endpoint(config),
+        o_auth2_consent: oauth_consent_endpoint(config),
         o_auth2_token: oauth_token_endpoint(config),
         o_auth2_introspect: oauth_introspect_endpoint(config),
         o_auth2_revoke: oauth_revoke_endpoint(config),
@@ -154,11 +158,91 @@ module BetterAuth
       end
     end
 
+    def oauth_authorize_endpoint(config)
+      Endpoint.new(path: "/oauth2/authorize", method: "GET") do |ctx|
+        query = OAuthProtocol.stringify_keys(ctx.query)
+        session = Routes.current_session(ctx, allow_nil: true)
+        unless session
+          if OAuthProtocol.parse_scopes(query["prompt"]).include?("none")
+            raise ctx.redirect(OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], error: "login_required", state: query["state"], iss: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx))))
+          end
+
+          raise ctx.redirect(OAuthProtocol.redirect_uri_with_params(config[:login_page], query))
+        end
+
+        client = OAuthProtocol.find_client(ctx, "oauthClient", query["client_id"])
+        raise APIError.new("BAD_REQUEST", message: "invalid_client") unless client
+        OAuthProtocol.validate_redirect_uri!(client, query["redirect_uri"])
+
+        scopes = OAuthProtocol.parse_scopes(query["scope"])
+        scopes = OAuthProtocol.parse_scopes(OAuthProtocol.stringify_keys(client)["scopes"] || config[:scopes]) if scopes.empty?
+        prompts = OAuthProtocol.parse_scopes(query["prompt"])
+        client_data = OAuthProtocol.stringify_keys(client)
+        requires_consent = !client_data["skipConsent"] && (prompts.include?("consent") || !oauth_consent_granted?(ctx, client_data["clientId"], session[:user]["id"], scopes))
+
+        if requires_consent
+          if prompts.include?("none")
+            raise ctx.redirect(OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], error: "consent_required", state: query["state"], iss: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx))))
+          end
+
+          consent_code = Crypto.random_string(32)
+          config[:store][:consents][consent_code] = {
+            query: query,
+            session: session,
+            client: client,
+            scopes: scopes,
+            expires_at: Time.now + 600
+          }
+          raise ctx.redirect(OAuthProtocol.redirect_uri_with_params(config[:consent_page], consent_code: consent_code, client_id: client_data["clientId"], scope: OAuthProtocol.scope_string(scopes)))
+        end
+
+        oauth_redirect_with_code(ctx, config, query, session, client, scopes)
+      end
+    end
+
+    def oauth_consent_endpoint(config)
+      Endpoint.new(path: "/oauth2/consent", method: "POST") do |ctx|
+        Routes.current_session(ctx)
+        body = OAuthProtocol.stringify_keys(ctx.body)
+        consent = config[:store][:consents].delete(body["consent_code"].to_s)
+        raise APIError.new("BAD_REQUEST", message: "invalid consent_code") unless consent
+        raise APIError.new("BAD_REQUEST", message: "expired consent_code") if consent[:expires_at] <= Time.now
+
+        query = consent[:query]
+        if body["accept"] == false || body["accept"].to_s == "false"
+          redirect = OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], error: "access_denied", state: query["state"], iss: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx)))
+          next ctx.json({redirectURI: redirect})
+        end
+
+        oauth_store_consent(ctx, consent[:client], consent[:session], consent[:scopes])
+        redirect = oauth_authorization_redirect(ctx, config, query, consent[:session], consent[:client], consent[:scopes])
+        ctx.json({redirectURI: redirect})
+      end
+    end
+
     def oauth_token_endpoint(config)
       Endpoint.new(path: "/oauth2/token", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
         body = OAuthProtocol.stringify_keys(ctx.body)
         client = OAuthProtocol.authenticate_client!(ctx, "oauthClient")
         response = case body["grant_type"]
+        when OAuthProtocol::AUTH_CODE_GRANT
+          code = OAuthProtocol.consume_code!(
+            config[:store],
+            body["code"],
+            client_id: body["client_id"],
+            redirect_uri: body["redirect_uri"],
+            code_verifier: body["code_verifier"]
+          )
+          OAuthProtocol.issue_tokens(
+            ctx,
+            config[:store],
+            model: "oauthAccessToken",
+            client: client,
+            session: code[:session],
+            scopes: code[:scopes],
+            include_refresh: code[:scopes].include?("offline_access") || OAuthProtocol.parse_scopes(OAuthProtocol.stringify_keys(client)["grantTypes"]).include?(OAuthProtocol::REFRESH_GRANT),
+            issuer: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx))
+          )
         when OAuthProtocol::CLIENT_CREDENTIALS_GRANT
           requested = OAuthProtocol.parse_scopes(body["scope"])
           allowed = OAuthProtocol.parse_scopes(OAuthProtocol.stringify_keys(client)["scopes"] || config[:scopes])
@@ -173,6 +257,57 @@ module BetterAuth
           raise APIError.new("BAD_REQUEST", message: "unsupported_grant_type")
         end
         ctx.json(response)
+      end
+    end
+
+    def oauth_authorization_redirect(ctx, config, query, session, client, scopes)
+      code = Crypto.random_string(32)
+      OAuthProtocol.store_code(
+        config[:store],
+        code: code,
+        client_id: query["client_id"],
+        redirect_uri: query["redirect_uri"],
+        session: session,
+        scopes: scopes,
+        code_challenge: query["code_challenge"],
+        code_challenge_method: query["code_challenge_method"]
+      )
+      OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], code: code, state: query["state"], iss: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx)))
+    end
+
+    def oauth_redirect_with_code(ctx, config, query, session, client, scopes)
+      raise ctx.redirect(oauth_authorization_redirect(ctx, config, query, session, client, scopes))
+    end
+
+    def oauth_consent_granted?(ctx, client_id, user_id, scopes)
+      consent = ctx.context.adapter.find_one(
+        model: "oauthConsent",
+        where: [
+          {field: "clientId", value: client_id},
+          {field: "userId", value: user_id}
+        ]
+      )
+      return false unless consent && consent["consentGiven"]
+
+      granted = OAuthProtocol.parse_scopes(consent["scopes"])
+      scopes.all? { |scope| granted.include?(scope) }
+    end
+
+    def oauth_store_consent(ctx, client, session, scopes)
+      client_id = OAuthProtocol.stringify_keys(client)["clientId"]
+      user_id = session[:user]["id"]
+      existing = ctx.context.adapter.find_one(
+        model: "oauthConsent",
+        where: [
+          {field: "clientId", value: client_id},
+          {field: "userId", value: user_id}
+        ]
+      )
+      data = {clientId: client_id, userId: user_id, scopes: scopes, consentGiven: true}
+      if existing
+        ctx.context.adapter.update(model: "oauthConsent", where: [{field: "id", value: existing.fetch("id")}], update: data)
+      else
+        ctx.context.adapter.create(model: "oauthConsent", data: data)
       end
     end
 

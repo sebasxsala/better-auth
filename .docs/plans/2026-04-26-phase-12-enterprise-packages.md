@@ -45,7 +45,7 @@
 - [x] Add tests for `/sso/register`, `/sign-in/sso`, `/sso/callback/:providerId`, `/sso/saml2/callback/:providerId`, `/sso/saml2/sp/acs/:providerId`, and `/sso/saml2/sp/metadata`.
 - [x] Add focused tests for OIDC discovery validation, domain validation, RelayState open-redirect protection, SAML replay protection, and SAML origin-check skip paths.
 - [x] Implement provider persistence, sanitized responses, domain verification token lifecycle, SSO redirects, OIDC callback user/session creation, and SAML callback/ACS handling.
-- [x] Document unsupported/deferred organization auto-assignment until the organization plugin is ported.
+- [x] Implement and document verified-domain organization membership assignment when the organization plugin is enabled.
 
 ## Task 3: SCIM Plugin
 
@@ -61,6 +61,7 @@
 - [x] Add tests for SCIM metadata endpoints: `/scim/v2/ServiceProviderConfig`, `/scim/v2/Schemas`, `/scim/v2/Schemas/:schemaId`, `/scim/v2/ResourceTypes`, `/scim/v2/ResourceTypes/:resourceTypeId`.
 - [x] Add tests for `/scim/v2/Users` POST/GET and `/scim/v2/Users/:userId` GET/PUT/PATCH/DELETE with SCIM response shapes and errors.
 - [x] Implement token validation, SCIM user/account mapping, filter parsing for common `userName` and `externalId` filters, PATCH `replace/add/remove`, and SCIM error JSON.
+- [x] Expand SCIM PATCH coverage for slash-prefixed paths, `remove`, no-path value objects, and invalid filter errors.
 
 ## Task 4: Stripe Plugin
 
@@ -77,6 +78,7 @@
 - [x] Add tests using an injected fake Stripe client for customer sync, checkout upgrade, billing portal, list subscriptions, cancel, restore, subscription success, and webhook signature handling.
 - [x] Implement `/subscription/upgrade`, `/subscription/cancel`, `/subscription/cancel/callback`, `/subscription/restore`, `/subscription/list`, `/subscription/success`, `/subscription/billing-portal`, and `/stripe/webhook`.
 - [x] Implement metadata helper protection and reference authorization so user/org subscriptions cannot cross reference boundaries.
+- [x] Persist missing subscriptions from Stripe subscription webhook metadata when a created/updated event arrives before a local record exists.
 - [x] Document organization integration as guarded until the organization plugin exists.
 
 ## Task 5: Expo Plugin

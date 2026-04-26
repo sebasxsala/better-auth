@@ -197,7 +197,28 @@ module BetterAuth
       return unless type.start_with?("customer.subscription.")
 
       subscription = ctx.context.adapter.find_one(model: "subscription", where: [{field: "stripeSubscriptionId", value: object[:id]}])
-      return unless subscription
+      unless subscription
+        metadata = normalize_hash(object[:metadata] || {})
+        return if metadata[:reference_id].to_s.empty?
+
+        ctx.context.adapter.create(
+          model: "subscription",
+          data: {
+            plan: metadata[:plan],
+            referenceId: metadata[:reference_id],
+            stripeCustomerId: object[:customer],
+            stripeSubscriptionId: object[:id],
+            status: object[:status],
+            periodStart: stripe_time(object[:current_period_start]),
+            periodEnd: stripe_time(object[:current_period_end]),
+            cancelAtPeriodEnd: object[:cancel_at_period_end],
+            cancelAt: stripe_time(object[:cancel_at]),
+            canceledAt: stripe_time(object[:canceled_at]),
+            endedAt: stripe_time(object[:ended_at])
+          }.compact
+        )
+        return
+      end
 
       ctx.context.adapter.update(
         model: "subscription",

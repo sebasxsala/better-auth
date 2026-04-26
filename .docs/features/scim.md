@@ -16,8 +16,8 @@ Adds `BetterAuth::Plugins.scim` with token generation, Bearer token middleware, 
 
 ## Key Differences
 
-- Current filter support covers focused `field eq "value"` cases for `userName` and `externalId`.
-- PATCH support covers server-tested `replace` and `add` operations for common fields; the full RFC matrix remains future polish.
+- Current filter support covers validated `field eq "value"` cases for `userName` and `externalId`.
+- PATCH support covers server-tested `replace`, `add`, and `remove` operations for common fields, including slash-prefixed paths and no-path value objects; the exhaustive RFC matrix remains future polish.
 - Organization-scoped provisioning is stored on the provider record but membership enforcement is deferred until the organization plugin is ported.
 
 ## Testing

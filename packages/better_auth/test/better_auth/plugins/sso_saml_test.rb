@@ -94,20 +94,86 @@ class BetterAuthPluginsSSOSAMLTest < Minitest::Test
     refute_equal 403, status
   end
 
+  def test_saml_response_validator_can_reject_assertions
+    calls = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.sso(
+          saml: {
+            validate_response: ->(response:, provider:, context:) do
+              calls << [provider.fetch("providerId"), context.context.base_url]
+              response[:email] == "allowed@example.com"
+            end
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth)
+    auth.api.register_sso_provider(
+      headers: {"cookie" => cookie},
+      body: {
+        providerId: "saml",
+        issuer: "https://idp.example.com",
+        domain: "example.com",
+        samlConfig: {entryPoint: "https://idp.example.com/sso", cert: "test-cert", audience: "better-auth-ruby"}
+      }
+    )
+    response = Base64.strict_encode64(JSON.generate({email: "blocked@example.com", name: "Blocked", id: "blocked-1"}))
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.acs_endpoint(params: {providerId: "saml"}, body: {SAMLResponse: response})
+    end
+    assert_equal 400, error.status_code
+    assert_equal "Invalid SAML response", error.message
+    assert_equal [["saml", "http://localhost:3000/api/auth"]], calls
+  end
+
+  def test_sso_assigns_new_domain_user_to_verified_provider_organization
+    auth = build_auth(plugins: [BetterAuth::Plugins.organization, BetterAuth::Plugins.sso])
+    owner_cookie = sign_up_cookie(auth, email: "owner@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Example Org", slug: "example"})
+    auth.api.register_sso_provider(
+      headers: {"cookie" => owner_cookie},
+      body: {
+        providerId: "saml-org",
+        issuer: "https://idp.example.com",
+        domain: "example.com",
+        organizationId: organization.fetch("id"),
+        domainVerified: true,
+        samlConfig: {entryPoint: "https://idp.example.com/sso", cert: "test-cert", audience: "better-auth-ruby"}
+      }
+    )
+    response = Base64.strict_encode64(JSON.generate({email: "new-user@example.com", name: "New User", id: "assertion-org-1"}))
+
+    auth.api.acs_endpoint(params: {providerId: "saml-org"}, body: {SAMLResponse: response}, as_response: true)
+
+    user = auth.context.internal_adapter.find_user_by_email("new-user@example.com").fetch(:user)
+    member = auth.context.adapter.find_one(
+      model: "member",
+      where: [
+        {field: "organizationId", value: organization.fetch("id")},
+        {field: "userId", value: user.fetch("id")}
+      ]
+    )
+    assert_equal "member", member.fetch("role")
+  end
+
   private
 
-  def build_auth
+  def build_auth(options = {})
     BetterAuth.auth(
-      base_url: "http://localhost:3000",
-      secret: SECRET,
-      database: :memory,
-      plugins: [BetterAuth::Plugins.sso]
+      {
+        base_url: "http://localhost:3000",
+        secret: SECRET,
+        database: :memory,
+        plugins: [BetterAuth::Plugins.sso]
+      }.merge(options)
     )
   end
 
-  def sign_up_cookie(auth)
+  def sign_up_cookie(auth, email: "owner@example.com")
     _status, headers, _body = auth.api.sign_up_email(
-      body: {email: "owner@example.com", password: "password123", name: "Owner"},
+      body: {email: email, password: "password123", name: email.split("@").first},
       as_response: true
     )
     headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")

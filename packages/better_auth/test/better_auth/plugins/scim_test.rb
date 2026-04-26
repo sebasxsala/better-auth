@@ -85,6 +85,68 @@ class BetterAuthPluginsSCIMTest < Minitest::Test
     assert_equal 204, deleted.fetch(:status)
   end
 
+  def test_scim_patch_supports_slash_paths_remove_and_no_path_value_object
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "okta"}).fetch(:scimToken)
+    headers = bearer(token)
+    created = auth.api.create_scim_user(
+      headers: headers,
+      body: {userName: "patch@example.com", externalId: "external-1", name: {givenName: "Patch", familyName: "User"}}
+    )
+
+    auth.api.patch_scim_user(
+      headers: headers,
+      params: {userId: created.fetch(:id)},
+      body: {
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        Operations: [
+          {op: "replace", path: "/userName", value: "patched@example.com"},
+          {op: "remove", path: "/externalId"}
+        ]
+      },
+      return_status: true
+    )
+    patched = auth.api.get_scim_user(headers: headers, params: {userId: created.fetch(:id)})
+    assert_equal "patched@example.com", patched.fetch(:userName)
+    refute patched.key?(:externalId)
+
+    auth.api.patch_scim_user(
+      headers: headers,
+      params: {userId: created.fetch(:id)},
+      body: {
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        Operations: [
+          {op: "add", value: {userName: "object@example.com", externalId: "external-2", active: false}}
+        ]
+      },
+      return_status: true
+    )
+    object_patched = auth.api.get_scim_user(headers: headers, params: {userId: created.fetch(:id)})
+    assert_equal "object@example.com", object_patched.fetch(:userName)
+    assert_equal "external-2", object_patched.fetch(:externalId)
+    assert_equal false, object_patched.fetch(:active)
+  end
+
+  def test_scim_filters_external_id_and_rejects_invalid_filter_syntax
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "okta"}).fetch(:scimToken)
+    headers = bearer(token)
+    auth.api.create_scim_user(headers: headers, body: {userName: "a@example.com", externalId: "external-a"})
+    auth.api.create_scim_user(headers: headers, body: {userName: "b@example.com", externalId: "external-b"})
+
+    listed = auth.api.list_scim_users(headers: headers, query: {filter: 'externalId eq "external-b"'})
+    assert_equal 1, listed.fetch(:totalResults)
+    assert_equal "external-b", listed.fetch(:Resources).first.fetch(:externalId)
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.list_scim_users(headers: headers, query: {filter: 'userName co "example.com"'})
+    end
+    assert_equal 400, error.status_code
+    assert_equal "Invalid SCIM filter", error.message
+  end
+
   private
 
   def build_auth(options = {})
