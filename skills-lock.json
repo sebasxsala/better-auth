@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skills": {
+    "mysql-best-practices": {
+      "source": "mindrally/skills",
+      "sourceType": "github",
+      "computedHash": "02283efa91864ce6f56f542415bd69d9855be1ea33847987b15040394e828c23"
+    },
+    "postgresql-code-review": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "computedHash": "1167ec9449aa866e16bc7449e05ab4d391cdce95a0b0c5e1155b793160471eb5"
+    },
+    "postgresql-optimization": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "computedHash": "8022448de70ba9a485e3b5bce34c5bbc644f93eb39b68431c9f7dabcf03aeb09"
+    },
+    "postgresql-table-design": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "dcace78e5cef7d8dce8ffef7ebee146e6c83a438aa4cf80bf502730e870c02d4"
+    },
+    "rails-expert": {
+      "source": "jeffallan/claude-skills",
+      "sourceType": "github",
+      "computedHash": "5f5f0a31ac77498c9046c182aed67d74c4084cf147d55bf78f7bdc403efd2a61"
+    },
+    "ruby-mcp-server-generator": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "computedHash": "ef4e3a11a87fb4765c274e5398bf138db316b86819955217befaaf908a44e79b"
+    }
+  }
+}
