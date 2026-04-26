@@ -1,0 +1,156 @@
+# frozen_string_literal: true
+
+module BetterAuth
+  module Schema
+    module SQL
+      module_function
+
+      def create_statements(options, dialect:)
+        dialect = dialect.to_sym
+        tables = Schema.auth_tables(options)
+        statements = tables.map { |logical_name, table| create_table_statement(logical_name, table, dialect) }
+        statements.concat(tables.flat_map { |_logical_name, table| index_statements(table, dialect) })
+      end
+
+      def create_table_statement(logical_name, table, dialect)
+        table_name = table.fetch(:model_name)
+        columns = table.fetch(:fields).map do |logical_field, attributes|
+          column_definition(table_name, logical_field, attributes, dialect)
+        end
+        constraints = table.fetch(:fields).flat_map do |logical_field, attributes|
+          field_constraints(table_name, logical_field, attributes, dialect)
+        end
+        body = (columns + constraints).join(",\n  ")
+
+        case dialect
+        when :postgres
+          %(CREATE TABLE IF NOT EXISTS #{quote(table_name, dialect)} (\n  #{body}\n);)
+        when :mysql
+          %(CREATE TABLE IF NOT EXISTS #{quote(table_name, dialect)} (\n  #{body}\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;)
+        else
+          raise ArgumentError, "Unsupported SQL dialect: #{dialect}"
+        end
+      end
+
+      def column_definition(table_name, logical_field, attributes, dialect)
+        column = quote(attributes[:field_name] || physical_name(logical_field), dialect)
+        parts = [column, sql_type(logical_field, attributes, dialect)]
+        parts << "PRIMARY KEY" if logical_field == "id"
+        parts << "NOT NULL" if attributes[:required]
+        default = default_sql(attributes, dialect)
+        parts << "DEFAULT #{default}" if default
+        parts.join(" ")
+      end
+
+      def field_constraints(table_name, logical_field, attributes, dialect)
+        constraints = []
+        column = attributes[:field_name] || physical_name(logical_field)
+
+        if attributes[:unique] && logical_field != "id"
+          constraints << unique_constraint(table_name, column, dialect)
+        end
+
+        reference = attributes[:references]
+        if reference
+          constraints << foreign_key_constraint(table_name, column, reference, dialect)
+        end
+
+        constraints
+      end
+
+      def index_statements(table, dialect)
+        table_name = table.fetch(:model_name)
+        table.fetch(:fields).filter_map do |logical_field, attributes|
+          next unless attributes[:index]
+
+          column = attributes[:field_name] || Schema.physical_name(logical_field)
+          name = "index_#{table_name}_on_#{column}"
+          case dialect
+          when :postgres
+            %(CREATE INDEX IF NOT EXISTS #{quote(name, dialect)} ON #{quote(table_name, dialect)} (#{quote(column, dialect)});)
+          when :mysql
+            %(CREATE INDEX #{quote(name, dialect)} ON #{quote(table_name, dialect)} (#{quote(column, dialect)});)
+          end
+        end
+      end
+
+      def sql_type(logical_field, attributes, dialect)
+        case attributes[:type]
+        when "boolean"
+          (dialect == :mysql) ? "tinyint(1)" : "boolean"
+        when "date"
+          (dialect == :mysql) ? "datetime(6)" : "timestamptz"
+        when "number"
+          attributes[:bigint] ? "bigint" : "integer"
+        else
+          if dialect == :mysql
+            indexed = logical_field == "id" || attributes[:unique] || attributes[:index] || attributes[:references]
+            indexed ? "varchar(191)" : "text"
+          else
+            "text"
+          end
+        end
+      end
+
+      def default_sql(attributes, dialect)
+        default = attributes[:default_value]
+        return unless default == false || default == true || default.is_a?(Numeric) || default.is_a?(String) || default.respond_to?(:call)
+
+        if attributes[:type] == "date" && default.respond_to?(:call)
+          return (dialect == :mysql) ? "CURRENT_TIMESTAMP(6)" : "CURRENT_TIMESTAMP"
+        end
+
+        case default
+        when true
+          (dialect == :mysql) ? "1" : "true"
+        when false
+          (dialect == :mysql) ? "0" : "false"
+        when Numeric
+          default.to_s
+        when String
+          "'#{default.gsub("'", "''")}'"
+        end
+      end
+
+      def unique_constraint(table_name, column, dialect)
+        case dialect
+        when :postgres
+          %(UNIQUE (#{quote(column, dialect)}))
+        when :mysql
+          %(UNIQUE KEY #{quote("uniq_#{table_name}_#{column}", dialect)} (#{quote(column, dialect)}))
+        end
+      end
+
+      def foreign_key_constraint(table_name, column, reference, dialect)
+        target_model = reference.fetch(:model)
+        target_field = reference.fetch(:field)
+        on_delete = reference[:on_delete] ? " ON DELETE #{reference[:on_delete].to_s.upcase}" : ""
+
+        case dialect
+        when :postgres
+          %(FOREIGN KEY (#{quote(column, dialect)}) REFERENCES #{quote(target_model, dialect)} (#{quote(target_field, dialect)})#{on_delete})
+        when :mysql
+          %(CONSTRAINT #{quote("fk_#{table_name}_#{column}", dialect)} FOREIGN KEY (#{quote(column, dialect)}) REFERENCES #{quote(target_model, dialect)} (#{quote(target_field, dialect)})#{on_delete})
+        end
+      end
+
+      def quote(identifier, dialect)
+        case dialect
+        when :postgres
+          %("#{identifier.to_s.gsub("\"", "\"\"")}")
+        when :mysql
+          "`#{identifier.to_s.gsub("`", "``")}`"
+        else
+          raise ArgumentError, "Unsupported SQL dialect: #{dialect}"
+        end
+      end
+
+      def physical_name(value)
+        value.to_s
+          .gsub(/([a-z\d])([A-Z])/, "\\1_\\2")
+          .tr("-", "_")
+          .downcase
+      end
+    end
+  end
+end

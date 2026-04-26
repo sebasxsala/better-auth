@@ -197,11 +197,32 @@ module BetterAuth
       end
 
       def set_cookie(name, value, options = {})
-        attributes = options.map do |key, option_value|
-          (option_value == true) ? key.to_s : "#{key}=#{option_value}"
-        end
+        attributes = cookie_attributes(options)
         cookie = (["#{name}=#{value}"] + attributes).join("; ")
         set_header("set-cookie", cookie)
+      end
+
+      def get_cookie(name)
+        cookies[name.to_s]
+      end
+
+      def cookies
+        BetterAuth::Cookies.parse_cookies(headers["cookie"])
+      end
+
+      def set_signed_cookie(name, value, secret, options = {})
+        signature = BetterAuth::Crypto.hmac_signature(value, secret, encoding: :base64url)
+        set_cookie(name, "#{value}.#{signature}", options)
+      end
+
+      def get_signed_cookie(name, secret)
+        value = get_cookie(name)
+        return nil unless value
+
+        payload, signature = value.rpartition(".").values_at(0, 2)
+        return nil if payload.empty? || signature.empty?
+
+        BetterAuth::Crypto.verify_hmac_signature(payload, signature, secret, encoding: :base64url) ? payload : nil
       end
 
       def json(value, status: nil, headers: {})
@@ -268,6 +289,37 @@ module BetterAuth
         raise APIError.new("INTERNAL_SERVER_ERROR", message: "Invalid header value") if header_value.match?(/[\r\n]/)
 
         header_value
+      end
+
+      def cookie_attributes(options)
+        options.compact.filter_map do |key, option_value|
+          next if option_value == false
+
+          name = cookie_attribute_name(key)
+          if option_value == true
+            name
+          else
+            "#{name}=#{cookie_attribute_value(key, option_value)}"
+          end
+        end
+      end
+
+      def cookie_attribute_name(key)
+        case key.to_sym
+        when :max_age then "Max-Age"
+        when :http_only, :httponly then "HttpOnly"
+        when :same_site, :samesite then "SameSite"
+        else
+          key.to_s.split("_").map(&:capitalize).join("-")
+        end
+      end
+
+      def cookie_attribute_value(key, value)
+        if [:same_site, :samesite].include?(key.to_sym)
+          return value.to_s.capitalize
+        end
+
+        value
       end
     end
   end

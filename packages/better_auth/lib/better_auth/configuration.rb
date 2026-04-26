@@ -47,6 +47,7 @@ module BetterAuth
       :secondary_storage,
       :database_hooks,
       :hooks,
+      :on_api_error,
       :disabled_paths,
       :trusted_origins_callback,
       :logger
@@ -64,6 +65,7 @@ module BetterAuth
       @disabled_paths = Array(options[:disabled_paths]).compact.map(&:to_s)
       @database_hooks = options[:database_hooks]
       @hooks = options[:hooks]
+      @on_api_error = symbolize_keys(options[:on_api_error] || options[:on_apierror] || {})
       @social_providers = symbolize_keys(options[:social_providers] || {})
       @trusted_origins_callback = options[:trusted_origins] if options[:trusted_origins].respond_to?(:call)
       @secret = resolve_secret(options)
@@ -83,6 +85,10 @@ module BetterAuth
       trusted_origins.any? do |origin|
         self.class.matches_origin_pattern?(url, origin, allow_relative_paths: allow_relative_paths)
       end
+    end
+
+    def production?
+      production_environment?
     end
 
     def to_h
@@ -105,6 +111,7 @@ module BetterAuth
         secondary_storage: secondary_storage,
         database_hooks: database_hooks,
         hooks: hooks,
+        on_api_error: on_api_error,
         disabled_paths: disabled_paths
       }
     end
