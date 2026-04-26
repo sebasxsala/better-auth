@@ -159,6 +159,8 @@ module BetterAuth
     end
 
     def parse_body(request)
+      return {} unless request.body
+
       request.body.rewind
       raw = request.body.read.to_s
       request.body.rewind

@@ -358,7 +358,7 @@ Progress:
 - [x] `magic-link`: ported `/sign-in/magic-link`, `/magic-link/verify`, verification-table token lifecycle, new-user sign-up, existing-user email verification, redirect/error callback behavior, callback origin validation, custom token generation, and plain/hashed/custom token storage. Ruby adaptation: hashed storage uses core SHA-256/base64url helpers instead of an extra dependency.
 - [x] `email-otp`: ported `/email-otp/send-verification-otp`, `/email-otp/check-verification-otp`, `/email-otp/verify-email`, `/sign-in/email-otp`, `/email-otp/request-password-reset`, deprecated `/forget-password/email-otp`, `/email-otp/reset-password`, server OTP create/get helpers, sign-up OTP sending hook, allowed-attempt tracking, and plain/hashed/encrypted/custom OTP storage. Ruby adaptation: endpoints own Better Auth behavior and call a configured `send_verification_otp` callable for delivery; email/SMS/provider transport is intentionally application code, matching upstream's callback model.
 - [x] `phone-number`: ported `/phone-number/send-otp`, `/phone-number/verify`, `/sign-in/phone-number`, `/phone-number/request-password-reset`, `/phone-number/reset-password`, user schema fields `phoneNumber` and `phoneNumberVerified`, OTP sign-up/session creation, verified phone-number updates, direct update-user prevention, password sign-in, require-verification OTP trigger, reset-password OTP, session revocation, allowed-attempt tracking, custom validator, and custom `verify_otp`. Ruby adaptation: SMS/provider delivery and external OTP verification stay configurable callables; Better Auth owns endpoint behavior and persistence.
-- [ ] `one-time-token`
+- [x] `one-time-token`: ported `/one-time-token/generate`, `/one-time-token/verify`, single-use token verification, token expiration, expired-session rejection, default session-cookie setting, cookie suppression, plain/hashed/custom token storage, server-only generation, and `set-ott` header generation on new sessions. Ruby adaptation: hashed storage uses core SHA-256/base64url helpers and Rack GET requests without bodies now parse as empty bodies.
 - [ ] `one-tap`
 - [ ] `siwe`
 - [ ] `generic-oauth`
@@ -555,7 +555,7 @@ The final Ruby port should cover these upstream product features:
 - [x] Magic link plugin.
 - [x] Email OTP plugin.
 - [x] Phone number plugin.
-- [ ] One-time token plugin.
+- [x] One-time token plugin.
 - [ ] One tap plugin.
 - [ ] SIWE plugin.
 - [ ] Generic OAuth plugin.
