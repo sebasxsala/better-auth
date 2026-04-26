@@ -472,17 +472,18 @@ Completion criteria:
 
 Steps:
 
-- [ ] Decide whether each package lives inside `better_auth` as a plugin namespace or ships as a separate Ruby gem; document the decision before implementation.
-- [ ] Port SSO tests for SAML, OIDC discovery, provider CRUD, domain verification, callbacks, ACS, metadata, and organization assignment.
-- [ ] Port SCIM tests for tokens, service provider config, schemas, resource types, user CRUD, PATCH operations, filters, mappings, and auth middleware.
-- [ ] Port Stripe tests for customer sync, organization mode, subscriptions, billing portal, webhooks, cancellation, restore, and plan behavior.
-- [ ] Port Expo behavior into Rails/Rack-compatible mobile helpers only where Ruby server support applies: origin override, deep-link redirect cookie transfer, and authorization proxy.
-- [ ] Add `.docs/features/sso.md`, `.docs/features/scim.md`, `.docs/features/stripe.md`, and `.docs/features/expo.md`.
-- [ ] Run package-specific tests and document unsupported or deferred package boundaries if Ruby packaging differs.
+- [x] Decide whether each package lives inside `better_auth` as a plugin namespace or ships as a separate Ruby gem; document the decision before implementation.
+- [x] Add partial SSO coverage for SAML, OIDC discovery, provider CRUD, domain verification, callbacks, ACS, metadata, replay protection, and SAML origin bypass. Organization assignment remains deferred until the organization plugin exists.
+- [x] Add partial SCIM coverage for tokens, service provider config, schemas, resource types, user CRUD, PATCH operations, simple filters, mappings, and auth middleware.
+- [x] Add partial Stripe coverage for customer sync, guarded organization mode, subscriptions, billing portal, webhooks, cancellation, restore, and plan behavior using an injected fake client.
+- [x] Port Expo behavior into Rails/Rack-compatible mobile helpers where Ruby server support applies: origin override, deep-link redirect cookie transfer, and authorization proxy.
+- [x] Add `.docs/features/sso.md`, `.docs/features/scim.md`, `.docs/features/stripe.md`, and `.docs/features/expo.md`.
+- [x] Run package-specific tests and document unsupported or deferred package boundaries if Ruby packaging differs.
+- [ ] Full SAML XML signature/encryption/assertion validation, SCIM RFC filter/PATCH matrix, Stripe billing edge-case matrix, and organization-backed enterprise flows remain future polish.
 
 Completion criteria:
 
-- [ ] Enterprise feature docs clearly state parity status and installation/API shape.
+- [x] Enterprise feature docs clearly state parity status and installation/API shape.
 
 ## Phase 13: Rails Adapter
 

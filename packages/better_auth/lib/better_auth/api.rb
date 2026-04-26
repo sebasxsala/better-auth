@@ -11,6 +11,7 @@ module BetterAuth
     end
 
     def call_endpoint(key, input = {})
+      context.reset_runtime! if context.respond_to?(:reset_runtime!)
       endpoint = endpoints.fetch(key.to_sym)
       input = symbolize_keys(input || {})
       endpoint_context = Endpoint::Context.new(

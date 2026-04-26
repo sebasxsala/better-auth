@@ -7,6 +7,10 @@ module BetterAuth
     module_function
 
     def find_current(ctx, disable_cookie_cache: false, disable_refresh: false, sensitive: false)
+      if ctx.context.current_session
+        return ctx.context.current_session
+      end
+
       token_cookie = ctx.context.auth_cookies[:session_token]
       token = ctx.get_signed_cookie(token_cookie.name, ctx.context.secret)
       return nil unless token

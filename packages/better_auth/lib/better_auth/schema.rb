@@ -43,6 +43,8 @@ module BetterAuth
       end.tap do |result|
         data.each { |key, value| result[key] = value unless result.key?(key) || table[:fields].key?(key) }
       end
+    rescue KeyError
+      data
     end
 
     private_class_method def self.user_table(options, plugin_table)

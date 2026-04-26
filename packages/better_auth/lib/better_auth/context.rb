@@ -98,6 +98,11 @@ module BetterAuth
       @trusted_origins = current_trusted_origins(request)
     end
 
+    def reset_runtime!
+      @current_session = nil
+      @new_session = nil
+    end
+
     private
 
     def inferred_base_url(request)

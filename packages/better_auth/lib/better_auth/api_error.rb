@@ -7,6 +7,7 @@ module BetterAuth
       "UNAUTHORIZED" => 401,
       "UNAUTHORIZED_INVALID_OR_EXPIRED_NONCE" => 401,
       "FORBIDDEN" => 403,
+      "CONFLICT" => 409,
       "NOT_FOUND" => 404,
       "METHOD_NOT_ALLOWED" => 405,
       "UNPROCESSABLE_ENTITY" => 422,
@@ -17,18 +18,19 @@ module BetterAuth
       "INTERNAL_SERVER_ERROR" => 500
     }.freeze
 
-    attr_reader :status, :status_code, :headers
+    attr_reader :status, :status_code, :headers, :code
 
-    def initialize(status, message: nil, headers: {})
+    def initialize(status, message: nil, headers: {}, code: nil)
       @status = status.to_s.upcase
       @status_code = STATUS_CODES.fetch(@status, 500)
       @headers = normalize_headers(headers)
+      @code = code || @status
       super(message || default_message)
     end
 
     def to_h
       {
-        code: status,
+        code: code,
         message: message
       }
     end
