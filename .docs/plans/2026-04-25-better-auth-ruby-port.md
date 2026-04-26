@@ -507,20 +507,20 @@ Completion criteria:
 
 Steps:
 
-- [ ] Harden Rails middleware or engine route mounting for `/api/auth/*` after plugin routes are available.
-- [ ] Harden initializer generator for Better Auth configuration.
-- [ ] Harden migration generator for plugin schemas beyond the base auth schema.
-- [ ] Extend ActiveRecord adapter coverage for plugin schemas and advanced query cases.
-- [ ] Harden controller helpers for current session, current user, authenticated checks, and route protection.
-- [ ] Implement Rails cookie/CSRF compatibility behavior while delegating auth decisions to core.
-- [ ] Add RSpec coverage for route mounting, initializer generation, migration generation, ActiveRecord adapter CRUD, cookies, sessions, and helpers.
-- [ ] Update `packages/better_auth-rails/README.md`.
-- [ ] Run `cd packages/better_auth-rails && bundle exec rspec`.
-- [ ] Run workspace `make ci`.
+- [x] Harden Rails middleware or engine route mounting for `/api/auth/*` after plugin routes are available.
+- [x] Harden initializer generator for Better Auth configuration.
+- [x] Harden migration generator for plugin schemas beyond the base auth schema.
+- [x] Extend ActiveRecord adapter coverage for plugin schemas and advanced query cases.
+- [x] Harden controller helpers for current session, current user, authenticated checks, and route protection.
+- [x] Implement Rails cookie/CSRF compatibility behavior while delegating auth decisions to core.
+- [x] Add RSpec coverage for route mounting, initializer generation, migration generation, ActiveRecord adapter CRUD, cookies, sessions, and helpers.
+- [x] Update `packages/better_auth-rails/README.md`.
+- [x] Run `cd packages/better_auth-rails && bundle exec rspec`.
+- [x] Run workspace `make ci`.
 
 Completion criteria:
 
-- [ ] Rails adapter passes specs and no Rails dependency is introduced into `packages/better_auth`.
+- [x] Rails adapter passes specs and no Rails dependency is introduced into `packages/better_auth`.
 
 ## Phase 14: Documentation, Examples, Release Readiness
 

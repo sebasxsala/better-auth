@@ -7,6 +7,24 @@ RSpec.describe "BetterAuth::Rails PostgreSQL integration" do
   let(:url) { ENV.fetch("BETTER_AUTH_POSTGRES_URL", "postgres://user:password@localhost:5432/better_auth") }
   let(:secret) { "test-secret-that-is-long-enough-for-validation" }
   let(:config) { BetterAuth::Configuration.new(secret: secret, database: :memory) }
+  let(:plugin) do
+    BetterAuth::Plugin.new(
+      id: "audit",
+      schema: {
+        auditLog: {
+          model_name: "audit_logs",
+          fields: {
+            id: {type: "string", required: true},
+            userId: {type: "string", required: false, references: {model: "user", field: "id", on_delete: "cascade"}, index: true},
+            action: {type: "string", required: true, unique: true},
+            attempts: {type: "number", required: true, default_value: 0},
+            createdAt: {type: "date", required: true, default_value: -> { Time.now }}
+          }
+        }
+      }
+    )
+  end
+  let(:plugin_config) { BetterAuth::Configuration.new(secret: secret, database: :memory, plugins: [plugin]) }
 
   before do
     require "pg"
@@ -42,11 +60,70 @@ RSpec.describe "BetterAuth::Rails PostgreSQL integration" do
     expect(ActiveRecord::Base.connection.indexes("users").any? { |index| index.columns == ["email"] && index.unique }).to be(true)
   end
 
-  def run_generated_migration
+  it "creates plugin tables and supports ActiveRecord adapter queries for plugin models" do
+    run_generated_migration(plugin_config)
+    active_record_adapter = BetterAuth::Rails::ActiveRecordAdapter.new(plugin_config, connection: ActiveRecord::Base)
+
+    active_record_adapter.create(
+      model: "user",
+      data: {id: "user-1", name: "Ada", email: "ada@example.com"},
+      force_allow_id: true
+    )
+    active_record_adapter.create(model: "auditLog", data: {id: "audit-1", userId: "user-1", action: "login"}, force_allow_id: true)
+    active_record_adapter.create(model: "auditLog", data: {id: "audit-2", userId: "user-1", action: "logout", attempts: 2}, force_allow_id: true)
+
+    selected = active_record_adapter.find_many(
+      model: "auditLog",
+      where: [{field: "action", operator: "contains", value: "log"}],
+      select: ["id", "action"],
+      sort_by: {field: "action", direction: "desc"},
+      limit: 1
+    )
+    by_prefix = active_record_adapter.find_many(model: "auditLog", where: [{field: "action", operator: "starts_with", value: "log"}], sort_by: {field: "action", direction: "asc"})
+    by_suffix = active_record_adapter.find_many(model: "auditLog", where: [{field: "action", operator: "ends_with", value: "out"}])
+    by_in = active_record_adapter.find_many(model: "auditLog", where: [{field: "action", operator: "in", value: ["login", "logout"]}])
+    by_not_in = active_record_adapter.find_many(model: "auditLog", where: [{field: "action", operator: "not_in", value: ["login"]}])
+    by_ne = active_record_adapter.find_many(model: "auditLog", where: [{field: "action", operator: "ne", value: "login"}])
+    by_gt = active_record_adapter.find_many(model: "auditLog", where: [{field: "attempts", operator: "gt", value: 1}])
+    by_gte = active_record_adapter.find_many(model: "auditLog", where: [{field: "attempts", operator: "gte", value: 2}])
+    by_lt = active_record_adapter.find_many(model: "auditLog", where: [{field: "attempts", operator: "lt", value: 1}])
+    by_lte = active_record_adapter.find_many(model: "auditLog", where: [{field: "attempts", operator: "lte", value: 0}])
+    with_offset = active_record_adapter.find_many(model: "auditLog", sort_by: {field: "action", direction: "asc"}, limit: 1, offset: 1)
+    updated = active_record_adapter.update_many(
+      model: "auditLog",
+      where: [{field: "userId", value: "user-1"}],
+      update: {attempts: 3},
+      returning: true
+    )
+    session = active_record_adapter.create(
+      model: "session",
+      data: {id: "session-1", userId: "user-1", token: "token-1", expiresAt: Time.now + 3600},
+      force_allow_id: true
+    )
+    joined = active_record_adapter.find_one(model: "session", where: [{field: "id", value: session["id"]}], join: {user: true})
+
+    expect(selected).to eq([{"id" => "audit-2", "action" => "logout"}])
+    expect(by_prefix.map { |row| row["action"] }).to eq(["login", "logout"])
+    expect(by_suffix.map { |row| row["action"] }).to eq(["logout"])
+    expect(by_in.map { |row| row["action"] }).to contain_exactly("login", "logout")
+    expect(by_not_in.map { |row| row["action"] }).to eq(["logout"])
+    expect(by_ne.map { |row| row["action"] }).to eq(["logout"])
+    expect(by_gt.map { |row| row["action"] }).to eq(["logout"])
+    expect(by_gte.map { |row| row["action"] }).to eq(["logout"])
+    expect(by_lt.map { |row| row["action"] }).to eq(["login"])
+    expect(by_lte.map { |row| row["action"] }).to eq(["login"])
+    expect(with_offset.map { |row| row["action"] }).to eq(["logout"])
+    expect(updated.map { |row| row["attempts"] }).to eq([3, 3])
+    expect(joined.fetch("user")).to include("id" => "user-1", "email" => "ada@example.com")
+    expect(ActiveRecord::Base.connection.data_source_exists?("audit_logs")).to be(true)
+    expect(ActiveRecord::Base.connection.foreign_keys("audit_logs").map(&:to_table)).to include("users")
+  end
+
+  def run_generated_migration(render_config = config)
     Object.send(:remove_const, :CreateBetterAuthTables) if Object.const_defined?(:CreateBetterAuthTables)
     Dir.mktmpdir("better-auth-migration") do |dir|
       path = File.join(dir, "create_better_auth_tables.rb")
-      File.write(path, BetterAuth::Rails::Migration.render(config))
+      File.write(path, BetterAuth::Rails::Migration.render(render_config))
       load path
     end
     CreateBetterAuthTables.migrate(:up)
@@ -54,7 +131,7 @@ RSpec.describe "BetterAuth::Rails PostgreSQL integration" do
 
   def reset_schema
     connection = ActiveRecord::Base.connection
-    %w[rate_limits verifications accounts sessions users].each do |table|
+    %w[audit_logs rate_limits verifications accounts sessions users].each do |table|
       connection.execute(%(DROP TABLE IF EXISTS "#{table}" CASCADE))
     end
   end

@@ -9,7 +9,16 @@ BetterAuth::Rails.configure do |config|
   config.base_url = ENV["BETTER_AUTH_URL"]
   config.base_path = "/api/auth"
   config.database = ->(options) { BetterAuth::Rails::ActiveRecordAdapter.new(options) }
+  config.trusted_origins = [
+    ENV["BETTER_AUTH_URL"]
+  ].compact
 
-  # Add Better Auth plugins here, for example:
-  # config.plugins = []
+  # Add Better Auth plugins here.
+  config.plugins = []
+
+  # Add Better Auth hooks here. Auth decisions still run through the core gem.
+  config.hooks = {
+    before: [],
+    after: []
+  }
 end

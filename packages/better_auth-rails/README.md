@@ -81,11 +81,32 @@ BetterAuth::Rails.configure do |config|
   config.base_url = ENV["BETTER_AUTH_URL"]
   config.base_path = "/api/auth"
   config.database = ->(options) { BetterAuth::Rails::ActiveRecordAdapter.new(options) }
+  config.trusted_origins = [
+    ENV["BETTER_AUTH_URL"]
+  ].compact
+
   config.plugins = []
+  config.hooks = {
+    before: [],
+    after: []
+  }
 end
 ```
 
 The ActiveRecord adapter uses whichever database adapter the Rails app is already configured with, including PostgreSQL and MySQL.
+
+Plugin schemas are included in generated migrations through the same configuration:
+
+```ruby
+BetterAuth::Rails.configure do |config|
+  config.plugins = [
+    BetterAuth::Plugins.api_key
+  ]
+end
+
+# Then regenerate before migrating if this is a new app:
+# bin/rails generate better_auth:migration
+```
 
 ### Routes
 
@@ -97,7 +118,7 @@ Rails.application.routes.draw do
 end
 ```
 
-By default this mounts at `/api/auth`. To customize the path:
+By default this mounts at `/api/auth`. Rails mounts the core Rack auth app through a small wrapper so Better Auth still sees the full auth path after Rails moves the mount prefix into `SCRIPT_NAME`. To customize the path:
 
 ```ruby
 Rails.application.routes.draw do
@@ -126,12 +147,6 @@ class PostsController < ApplicationController
   def index
     @user = current_user
   end
-
-  private
-
-  def require_authentication
-    head :unauthorized unless authenticated?
-  end
 end
 ```
 
@@ -140,6 +155,7 @@ end
 - `current_session` - Returns the current Better Auth session hash
 - `current_user` - Returns the current Better Auth user hash
 - `authenticated?` - Returns true when a user is present
+- `require_authentication` - Halts with `head :unauthorized` and returns `false` when no user is present
 
 ## Development
 
@@ -158,13 +174,13 @@ bundle install
 
 ```bash
 # Run all tests
-bundle exec rspec
+rbenv exec bundle exec rspec
 
 # Run with coverage
-COVERAGE=true bundle exec rspec
+COVERAGE=true rbenv exec bundle exec rspec
 
 # Run specific test
-bundle exec rspec spec/better_auth/rails/controller_helpers_spec.rb
+rbenv exec bundle exec rspec spec/better_auth/rails/controller_helpers_spec.rb
 ```
 
 ### Code Style
@@ -173,10 +189,10 @@ We use StandardRB for linting:
 
 ```bash
 # Check style
-bundle exec standardrb
+RUBOCOP_CACHE_ROOT=/private/var/folders/7x/jrsz946d2w73n42fb1_ff5000000gn/T/rubocop_cache_rails rbenv exec bundle exec standardrb
 
 # Auto-fix issues
-bundle exec standardrb --fix
+RUBOCOP_CACHE_ROOT=/private/var/folders/7x/jrsz946d2w73n42fb1_ff5000000gn/T/rubocop_cache_rails rbenv exec bundle exec standardrb --fix
 ```
 
 ## Contributing

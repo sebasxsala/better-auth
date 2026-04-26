@@ -1,6 +1,6 @@
 # Rails Adapter
 
-**Status:** Phase 5.5 complete for the initial Rails adapter surface.
+**Status:** Phase 13 hardened for Rails mounting, plugin schemas, ActiveRecord plugin-model coverage, helpers, and cookie/CSRF compatibility.
 
 **Upstream Reference:** Better Auth upstream is framework-agnostic at the route/runtime layer. The Rails adapter keeps that shape by mounting the core Rack auth object instead of reimplementing auth routes in controllers.
 
@@ -10,12 +10,12 @@ Rails integration now provides:
 
 - `BetterAuth::Rails.configure` and `BetterAuth::Rails.auth` for building the core auth instance from Rails configuration.
 - `BetterAuth::Rails::ActiveRecordAdapter`, an ActiveRecord-backed adapter that maps logical Better Auth fields like `emailVerified` and `userId` to Rails/PostgreSQL-friendly columns like `email_verified` and `user_id`.
-- `better_auth` route helper for `config/routes.rb`, mounting a single Rack app at `/api/auth` by default.
-- Controller helpers: `current_session`, `current_user`, and `authenticated?`.
+- `better_auth` route helper for `config/routes.rb`, mounting a single Rack app at `/api/auth` by default. The mount uses `BetterAuth::Rails::MountedApp` so core still receives the full auth path after Rails strips the mount prefix into `SCRIPT_NAME`.
+- Controller helpers: `current_session`, `current_user`, `authenticated?`, and `require_authentication`.
 - Generators: `bin/rails generate better_auth:install` and `bin/rails generate better_auth:migration`.
 - Rails task aliases: `bin/rails better_auth:init` and `bin/rails better_auth:generate:migration`.
 
-The install generator creates `config/initializers/better_auth.rb` and the base schema migration. It skips an existing initializer or existing Better Auth migration rather than overwriting app code. The migration is rendered from `BetterAuth::Schema`, so plugin schema can be layered into the same path later.
+The install generator creates `config/initializers/better_auth.rb` and the base schema migration. It skips an existing initializer or existing Better Auth migration rather than overwriting app code. The initializer now exposes `trusted_origins`, `plugins`, and `hooks`, and the migration generator renders from `BetterAuth::Rails.configuration`, so plugin schemas configured for Rails are included in generated migrations.
 
 ## Database Notes
 
@@ -28,9 +28,11 @@ ActiveRecord is declared as a runtime dependency of `better_auth-rails`. The ada
 - verifies the `users` table, unique email index, primary keys, and foreign keys are created;
 - creates and reads a user through `BetterAuth::Rails::ActiveRecordAdapter`;
 - reads the same user through the core `BetterAuth::Adapters::Postgres` SQL adapter.
+- creates plugin tables with logical references like `model: "user"` mapped to physical Rails tables like `users`;
+- exercises plugin-model CRUD and adapter query behavior for `select`, `sort_by`, `limit`, `offset`, string operators, numeric comparison operators, `update_many(returning:)`, and joins;
 - runs Rack signup, signin, and get-session base routes against ActiveRecord persistence, including rebuilding the auth instance between signup and signin.
 
-MySQL real-database Rails coverage and the broader Phase 13 Rails hardening matrix remain pending.
+Rails mounting specs cover default `/api/auth`, custom mount paths, plugin endpoints, request cookies flowing into core, `Set-Cookie` flowing back through Rails, and core origin/CSRF checks staying active for mutating mounted requests. MySQL real-database Rails coverage remains future polish.
 
 ## Verification
 

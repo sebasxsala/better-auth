@@ -17,10 +17,19 @@ module BetterAuth
         !current_user.nil?
       end
 
+      def require_authentication
+        return true if authenticated?
+
+        head(:unauthorized) if respond_to?(:head)
+        false
+      end
+
       private
 
       def better_auth_session_data
-        request.env["better_auth.session"] ||= resolve_better_auth_session
+        return request.env["better_auth.session"] if request.env.key?("better_auth.session")
+
+        request.env["better_auth.session"] = resolve_better_auth_session
       end
 
       def resolve_better_auth_session

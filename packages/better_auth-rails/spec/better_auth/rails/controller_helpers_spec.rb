@@ -5,10 +5,14 @@ require_relative "../../spec_helper"
 class BetterAuthRailsHelperController
   include BetterAuth::Rails::ControllerHelpers
 
-  attr_reader :request
+  attr_reader :request, :head_status
 
   def initialize(request)
     @request = request
+  end
+
+  def head(status)
+    @head_status = status
   end
 end
 
@@ -55,5 +59,21 @@ RSpec.describe BetterAuth::Rails::ControllerHelpers do
 
     expect(controller.current_user).to eq({"id" => "user-1"})
     expect(request.env["better_auth.session"]).to eq(session)
+  end
+
+  it "allows route protection when a current user is present" do
+    request = instance_double("Request", env: {"better_auth.session" => {user: {"id" => "user-1"}}})
+    controller = BetterAuthRailsHelperController.new(request)
+
+    expect(controller.require_authentication).to be(true)
+    expect(controller.head_status).to be_nil
+  end
+
+  it "halts with unauthorized route protection when no current user is present" do
+    request = instance_double("Request", env: {"better_auth.session" => nil})
+    controller = BetterAuthRailsHelperController.new(request)
+
+    expect(controller.require_authentication).to be(false)
+    expect(controller.head_status).to eq(:unauthorized)
   end
 end

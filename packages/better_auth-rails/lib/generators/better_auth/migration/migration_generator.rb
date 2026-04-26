@@ -30,7 +30,10 @@ module BetterAuth
       end
 
       def generator_config
-        BetterAuth::Configuration.new(secret: BetterAuth::Configuration::DEFAULT_SECRET, database: :memory)
+        options = BetterAuth::Rails.configuration.to_auth_options
+        options[:secret] ||= BetterAuth::Configuration::DEFAULT_SECRET
+        options[:database] ||= :memory
+        BetterAuth::Configuration.new(options)
       end
     end
   end

@@ -17,7 +17,7 @@ module BetterAuth
         tables.each_value { |table| lines.concat(create_table_lines(table)) }
         tables.each_value { |table| lines.concat(primary_key_lines(table)) }
         tables.each_value { |table| lines.concat(index_lines(table)) }
-        tables.each_value { |table| lines.concat(foreign_key_lines(table)) }
+        tables.each_value { |table| lines.concat(foreign_key_lines(table, options)) }
         lines.concat(["  end", "end", ""])
         lines.join("\n")
       end
@@ -66,14 +66,14 @@ module BetterAuth
         ]
       end
 
-      def foreign_key_lines(table)
+      def foreign_key_lines(table, options)
         table_name = table.fetch(:model_name)
         table.fetch(:fields).filter_map do |logical_field, attributes|
           reference = attributes[:references]
           next unless reference
 
           column = attributes[:field_name] || physical_name(logical_field)
-          target = reference.fetch(:model)
+          target = foreign_key_target(reference.fetch(:model), options)
           on_delete = reference[:on_delete] ? ", on_delete: :#{reference[:on_delete]}" : ""
           "    add_foreign_key :#{table_name}, :#{target}, column: :#{column}#{on_delete}"
         end
@@ -102,6 +102,10 @@ module BetterAuth
 
       def physical_name(value)
         BetterAuth::Schema.send(:physical_name, value)
+      end
+
+      def foreign_key_target(model, options)
+        BetterAuth::Schema.auth_tables(options).fetch(model.to_s, nil)&.fetch(:model_name) || model
       end
     end
   end

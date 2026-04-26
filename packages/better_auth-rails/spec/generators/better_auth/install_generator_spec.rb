@@ -20,6 +20,9 @@ RSpec.describe BetterAuth::Generators::InstallGenerator do
 
     expect(File.read(initializer)).to include("BetterAuth::Rails.configure")
     expect(File.read(initializer)).to include("ActiveRecordAdapter")
+    expect(File.read(initializer)).to include("config.trusted_origins")
+    expect(File.read(initializer)).to include("config.plugins")
+    expect(File.read(initializer)).to include("config.hooks")
     expect(migrations.length).to eq(1)
     expect(File.read(migrations.first)).to include("create_table :users, id: false")
   end
