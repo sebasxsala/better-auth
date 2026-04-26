@@ -39,6 +39,14 @@ require_relative "better_auth/plugins/siwe"
 require_relative "better_auth/plugins/generic_oauth"
 require_relative "better_auth/plugins/oauth_proxy"
 require_relative "better_auth/plugins/passkey"
+%w[
+  better_auth/plugins/sso
+  better_auth/plugins/scim
+  better_auth/plugins/stripe
+  better_auth/plugins/expo
+].each do |optional_plugin|
+  require_relative optional_plugin if File.file?(File.expand_path("#{optional_plugin}.rb", __dir__))
+end
 require_relative "better_auth/plugins/two_factor"
 require_relative "better_auth/plugins/captcha"
 require_relative "better_auth/plugins/have_i_been_pwned"
