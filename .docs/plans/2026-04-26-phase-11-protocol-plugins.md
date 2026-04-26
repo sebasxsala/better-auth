@@ -41,7 +41,7 @@
 - [x] `cd packages/better_auth && rbenv exec bundle exec rake test TEST=test/better_auth/routes/session_routes_test.rb`
 - [x] `cd packages/better_auth && rbenv exec bundle exec rake test TEST=test/better_auth/session_test.rb`
 - [x] `cd packages/better_auth && rbenv exec bundle exec rake test TEST=test/better_auth/router_test.rb`
-- [ ] `cd packages/better_auth && rbenv exec bundle exec rake test`
+- [x] `cd packages/better_auth && rbenv exec bundle exec rake test`
 - [x] `cd packages/better_auth && RUBOCOP_CACHE_ROOT=/var/folders/7x/jrsz946d2w73n42fb1_ff5000000gn/T/rubocop_cache rbenv exec bundle exec standardrb <phase-11-files>`
 
 ## Assumptions
@@ -51,3 +51,7 @@
 - Upstream behavior wins for public route paths, JSON keys, OAuth parameter names, and error strings.
 - Ruby can store array/json values natively in the memory adapter; SQL encoding differences must be documented.
 - Organization-specific OAuth provider behavior is deferred unless Phase 10 is present in the implementation branch.
+
+## Verification Notes
+
+- Full `rake test` passed outside the sandbox on 2026-04-26 after the sandbox blocked localhost PostgreSQL access: `273 runs, 1377 assertions, 0 failures, 0 errors, 2 skips`.

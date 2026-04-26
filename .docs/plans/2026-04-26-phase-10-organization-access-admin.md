@@ -28,7 +28,7 @@
 - [x] Require the new plugins from `packages/better_auth/lib/better_auth.rb`.
 - [x] Update `.docs/features/access.md`, `.docs/features/organization.md`, `.docs/features/admin.md`, and the upstream parity matrix.
 - [x] Update `.docs/plans/2026-04-25-better-auth-ruby-port.md` phase 10 checkboxes.
-- [ ] Run focused plugin tests, the core test suite, and StandardRB.
+- [x] Run focused plugin tests, the core test suite, and StandardRB.
 
 ## Ruby Adaptations
 
@@ -36,3 +36,8 @@
 - Role collections are stored as comma-separated strings, matching upstream `parseRoles`.
 - Organization and admin callbacks are Ruby callables.
 - No new runtime dependency is introduced for this phase.
+
+## Verification
+
+- Full `rake test` passed outside the sandbox on 2026-04-26 after the sandbox blocked localhost PostgreSQL access: `273 runs, 1377 assertions, 0 failures, 0 errors, 2 skips`.
+- Full `standardrb` passed on 2026-04-26.

@@ -34,10 +34,10 @@
 - [x] Run each new plugin test individually.
 - [x] Run related route and session tests after each plugin.
 - [x] Run StandardRB on Phase 9 files and touched core files.
-- [ ] Run `cd packages/better_auth && rbenv exec bundle exec rake test`.
-- [ ] Run `cd packages/better_auth && rbenv exec bundle exec standardrb`.
+- [x] Run `cd packages/better_auth && rbenv exec bundle exec rake test`.
+- [x] Run `cd packages/better_auth && rbenv exec bundle exec standardrb`.
 
 Notes:
 
-- Full `rake test` currently fails outside Phase 9: sandboxed PostgreSQL connection is blocked, and future-phase SSO/SCIM/Stripe/Expo tests are present but not fully implemented.
-- Full `standardrb` currently fails outside Phase 9 in future-phase plugin files/tests (`admin`, `device_authorization`, `oauth_protocol`, `oidc_provider`, `organization`, `expo`, `sso_saml`). Phase 9 files and touched core files pass targeted StandardRB.
+- Full `rake test` passed outside the sandbox on 2026-04-26 after the sandbox blocked localhost PostgreSQL access: `273 runs, 1377 assertions, 0 failures, 0 errors, 2 skips`.
+- Full `standardrb` passed on 2026-04-26.

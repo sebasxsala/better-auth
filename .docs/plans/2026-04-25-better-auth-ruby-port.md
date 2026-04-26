@@ -572,10 +572,10 @@ The final Ruby port should cover these upstream product features:
 - [ ] Generic OAuth plugin.
 - [ ] OAuth proxy plugin.
 - [ ] Passkey plugin.
-- [ ] Two-factor plugin.
-- [ ] Captcha plugin.
-- [ ] Have I Been Pwned plugin.
-- [ ] API key plugin.
+- [x] Two-factor plugin.
+- [x] Captcha plugin.
+- [x] Have I Been Pwned plugin.
+- [x] API key plugin.
 - [x] Bearer plugin.
 - [x] JWT/JWKS plugin.
 - [x] Multi-session plugin.
@@ -583,17 +583,17 @@ The final Ruby port should cover these upstream product features:
 - [x] Last login method plugin.
 - [x] Additional fields plugin.
 - [x] OpenAPI plugin.
-- [ ] Access control plugin.
-- [ ] Organization plugin.
-- [ ] Admin plugin.
-- [ ] OIDC provider plugin.
-- [ ] OAuth provider package behavior.
-- [ ] Device authorization plugin.
-- [ ] MCP plugin.
-- [ ] SSO plugin.
-- [ ] SCIM plugin.
-- [ ] Stripe plugin.
-- [ ] Expo/mobile server integration behavior.
+- [x] Access control plugin.
+- [x] Organization plugin.
+- [x] Admin plugin.
+- [x] OIDC provider plugin.
+- [x] OAuth provider package behavior.
+- [x] Device authorization plugin.
+- [x] MCP plugin.
+- [x] SSO plugin.
+- [x] SCIM plugin.
+- [x] Stripe plugin.
+- [x] Expo/mobile server integration behavior.
 - [ ] Rails adapter, generators, migrations, middleware, and helpers.
 
 ## Verification Commands
