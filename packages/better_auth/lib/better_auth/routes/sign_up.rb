@@ -64,7 +64,8 @@ module BetterAuth
             created_user["id"],
             dont_remember_me,
             session_overrides(ctx),
-            true
+            true,
+            ctx
           )
           raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["FAILED_TO_CREATE_SESSION"]) unless session
 

@@ -1,0 +1,366 @@
+# frozen_string_literal: true
+
+require "uri"
+
+module BetterAuth
+  module Plugins
+    ADMIN_ERROR_CODES = {
+      "FAILED_TO_CREATE_USER" => "Failed to create user",
+      "USER_ALREADY_EXISTS" => "User already exists.",
+      "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL" => "User already exists. Use another email.",
+      "YOU_CANNOT_BAN_YOURSELF" => "You cannot ban yourself",
+      "YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE" => "You are not allowed to change users role",
+      "YOU_ARE_NOT_ALLOWED_TO_CREATE_USERS" => "You are not allowed to create users",
+      "YOU_ARE_NOT_ALLOWED_TO_LIST_USERS" => "You are not allowed to list users",
+      "YOU_ARE_NOT_ALLOWED_TO_LIST_USERS_SESSIONS" => "You are not allowed to list users sessions",
+      "YOU_ARE_NOT_ALLOWED_TO_BAN_USERS" => "You are not allowed to ban users",
+      "YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS" => "You are not allowed to impersonate users",
+      "YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS" => "You are not allowed to revoke users sessions",
+      "YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS" => "You are not allowed to delete users",
+      "YOU_ARE_NOT_ALLOWED_TO_SET_USERS_PASSWORD" => "You are not allowed to set users password",
+      "BANNED_USER" => "You have been banned from this application",
+      "YOU_ARE_NOT_ALLOWED_TO_GET_USER" => "You are not allowed to get user",
+      "NO_DATA_TO_UPDATE" => "No data to update",
+      "YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS" => "You are not allowed to update users",
+      "YOU_CANNOT_REMOVE_YOURSELF" => "You cannot remove yourself",
+      "YOU_ARE_NOT_ALLOWED_TO_SET_NON_EXISTENT_VALUE" => "You are not allowed to set a non-existent role value",
+      "YOU_CANNOT_IMPERSONATE_ADMINS" => "You cannot impersonate admins",
+      "INVALID_ROLE_TYPE" => "Invalid role type"
+    }.freeze
+
+    ADMIN_DEFAULT_STATEMENTS = {
+      user: ["create", "list", "set-role", "ban", "impersonate", "delete", "set-password", "get", "update"],
+      session: ["list", "revoke", "delete"]
+    }.freeze
+
+    module_function
+
+    def admin(options = {})
+      config = admin_config(options)
+      Plugin.new(
+        id: "admin",
+        init: ->(_context) { {options: {database_hooks: admin_database_hooks(config)}} },
+        schema: AdminSchema.build(config[:schema]),
+        endpoints: {
+          set_role: admin_set_role_endpoint(config),
+          get_user: admin_get_user_endpoint(config),
+          create_user: admin_create_user_endpoint(config),
+          admin_update_user: admin_update_user_endpoint(config),
+          list_users: admin_list_users_endpoint(config),
+          list_user_sessions: admin_list_user_sessions_endpoint(config),
+          unban_user: admin_unban_user_endpoint(config),
+          ban_user: admin_ban_user_endpoint(config),
+          impersonate_user: admin_impersonate_user_endpoint(config),
+          stop_impersonating: admin_stop_impersonating_endpoint,
+          revoke_user_session: admin_revoke_user_session_endpoint(config),
+          revoke_user_sessions: admin_revoke_user_sessions_endpoint(config),
+          remove_user: admin_remove_user_endpoint(config),
+          set_user_password: admin_set_user_password_endpoint(config),
+          user_has_permission: admin_has_permission_endpoint(config)
+        },
+        hooks: {
+          after: [
+            {
+              matcher: ->(ctx) { ctx.path == "/list-sessions" },
+              handler: ->(ctx) { ctx.json(Array(ctx.returned).reject { |session| session["impersonatedBy"] || session[:impersonatedBy] }) }
+            }
+          ]
+        },
+        error_codes: ADMIN_ERROR_CODES,
+        options: config
+      )
+    end
+
+    def admin_config(options)
+      config = normalize_hash(options)
+      config[:default_role] ||= "user"
+      config[:admin_roles] = Array(config[:admin_roles] || ["admin"]).flat_map { |role| role.to_s.split(",") }
+      config[:banned_user_message] ||= "You have been banned from this application. Please contact support if you believe this is an error."
+      config[:impersonation_session_duration] ||= 60 * 60
+      config[:ac] ||= create_access_control(ADMIN_DEFAULT_STATEMENTS)
+      config[:roles] ||= admin_default_roles(config)
+      invalid = config[:admin_roles].reject { |role| config[:roles].key?(role) || config[:roles].key?(role.to_sym) }
+      raise Error, "Invalid admin roles: #{invalid.join(", ")}. Admin roles must be defined in the 'roles' configuration." if invalid.any?
+
+      config
+    end
+
+    def admin_default_roles(config = {})
+      ac = config[:ac] || create_access_control(ADMIN_DEFAULT_STATEMENTS)
+      {
+        "admin" => ac.new_role(ADMIN_DEFAULT_STATEMENTS),
+        "user" => ac.new_role(user: [], session: [])
+      }
+    end
+
+    def admin_database_hooks(config)
+      {
+        user: {
+          create: {
+            before: lambda do |user, _ctx|
+              {data: {"role" => config[:default_role]}.merge(user)}
+            end
+          }
+        },
+        session: {
+          create: {
+            before: lambda do |session, ctx|
+              next unless ctx
+
+              user = ctx.context.internal_adapter.find_user_by_id(session["userId"] || session[:userId])
+              next unless user && user["banned"]
+
+              if user["banExpires"] && Time.parse(user["banExpires"].to_s) < Time.now
+                ctx.context.internal_adapter.update_user(user["id"], banned: false, banReason: nil, banExpires: nil)
+                next
+              end
+
+              if ctx.path.to_s.start_with?("/callback", "/oauth2/callback")
+                url = "#{ctx.context.base_url}/error?error=banned&error_description=#{URI.encode_www_form_component(config[:banned_user_message])}"
+                raise ctx.redirect(url)
+              end
+
+              raise APIError.new("FORBIDDEN", message: config[:banned_user_message], code: "BANNED_USER")
+            end
+          }
+        }
+      }
+    end
+
+    def admin_set_role_endpoint(config)
+      Endpoint.new(path: "/admin/set-role", method: "POST") do |ctx|
+        admin_require_permission!(ctx, config, {user: ["set-role"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE"))
+        body = normalize_hash(ctx.body)
+        user_id = body[:user_id].to_s
+        raise APIError.new("BAD_REQUEST", message: "userId is required") if user_id.empty?
+        update = {role: admin_parse_roles(body[:role])}
+        user = ctx.context.internal_adapter.update_user(user_id, update)
+        ctx.json(Schema.parse_output(ctx.context.options, "user", user || {}))
+      end
+    end
+
+    def admin_get_user_endpoint(config)
+      Endpoint.new(path: "/admin/get-user", method: "GET") do |ctx|
+        admin_require_permission!(ctx, config, {user: ["get"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_GET_USER"))
+        query = normalize_hash(ctx.query)
+        user = if query[:user_id]
+          ctx.context.internal_adapter.find_user_by_id(query[:user_id])
+        elsif query[:email]
+          ctx.context.internal_adapter.find_user_by_email(query[:email])&.fetch(:user)
+        end
+        raise APIError.new("NOT_FOUND", message: "User not found") unless user
+        ctx.json({user: Schema.parse_output(ctx.context.options, "user", user)})
+      end
+    end
+
+    def admin_create_user_endpoint(config)
+      Endpoint.new(path: "/admin/create-user", method: "POST") do |ctx|
+        admin_require_permission!(ctx, config, {user: ["create"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_CREATE_USERS"))
+        body = normalize_hash(ctx.body)
+        email = body[:email].to_s.downcase
+        if ctx.context.internal_adapter.find_user_by_email(email)
+          raise APIError.new("CONFLICT", message: ADMIN_ERROR_CODES.fetch("USER_ALREADY_EXISTS"))
+        end
+        user = ctx.context.internal_adapter.create_user(
+          name: body[:name].to_s,
+          email: email,
+          emailVerified: body.key?(:email_verified) ? body[:email_verified] : true,
+          image: body[:image],
+          role: admin_parse_roles(body[:role] || config[:default_role])
+        )
+        if body[:password].to_s != ""
+          ctx.context.internal_adapter.link_account(userId: user["id"], providerId: "credential", accountId: user["id"], password: Password.hash(body[:password]))
+        end
+        ctx.json({user: Schema.parse_output(ctx.context.options, "user", user)})
+      end
+    end
+
+    def admin_update_user_endpoint(config)
+      Endpoint.new(path: "/admin/update-user", method: "POST") do |ctx|
+        admin_require_permission!(ctx, config, {user: ["update"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS"))
+        body = normalize_hash(ctx.body)
+        data = normalize_hash(body[:data] || body).except(:user_id, :data)
+        raise APIError.new("BAD_REQUEST", message: ADMIN_ERROR_CODES.fetch("NO_DATA_TO_UPDATE")) if data.empty?
+        data[:role] = admin_parse_roles(data[:role]) if data.key?(:role)
+        user = ctx.context.internal_adapter.update_user(body[:user_id], data)
+        ctx.json({user: Schema.parse_output(ctx.context.options, "user", user)})
+      end
+    end
+
+    def admin_list_users_endpoint(config)
+      Endpoint.new(path: "/admin/list-users", method: "GET") do |ctx|
+        admin_require_permission!(ctx, config, {user: ["list"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_LIST_USERS"))
+        query = normalize_hash(ctx.query)
+        users = ctx.context.internal_adapter.list_users(
+          limit: query[:limit],
+          offset: query[:offset],
+          sort_by: query[:sort_by] ? {field: query[:sort_by], direction: query[:sort_direction] || query[:sort_order] || "asc"} : nil
+        )
+        users = admin_filter_users(users, query)
+        ctx.json({
+          users: users.map { |user| Schema.parse_output(ctx.context.options, "user", user) },
+          total: users.length
+        })
+      end
+    end
+
+    def admin_list_user_sessions_endpoint(config)
+      Endpoint.new(path: "/admin/list-user-sessions", method: "POST") do |ctx|
+        admin_require_permission!(ctx, config, {session: ["list"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_LIST_USERS_SESSIONS"))
+        sessions = ctx.context.internal_adapter.list_sessions(normalize_hash(ctx.body)[:user_id])
+        ctx.json(sessions.map { |session| Schema.parse_output(ctx.context.options, "session", session) })
+      end
+    end
+
+    def admin_ban_user_endpoint(config)
+      Endpoint.new(path: "/admin/ban-user", method: "POST") do |ctx|
+        session = admin_require_permission!(ctx, config, {user: ["ban"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_BAN_USERS"))
+        body = normalize_hash(ctx.body)
+        raise APIError.new("BAD_REQUEST", message: ADMIN_ERROR_CODES.fetch("YOU_CANNOT_BAN_YOURSELF")) if body[:user_id] == session[:user]["id"]
+        expires_in = body[:ban_expires_in] || config[:default_ban_expires_in]
+        user = ctx.context.internal_adapter.update_user(body[:user_id], banned: true, banReason: body[:ban_reason] || config[:default_ban_reason], banExpires: expires_in ? Time.now + expires_in.to_i : nil)
+        ctx.context.internal_adapter.delete_sessions(body[:user_id])
+        ctx.json(Schema.parse_output(ctx.context.options, "user", user))
+      end
+    end
+
+    def admin_unban_user_endpoint(config)
+      Endpoint.new(path: "/admin/unban-user", method: "POST") do |ctx|
+        admin_require_permission!(ctx, config, {user: ["ban"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_BAN_USERS"))
+        user = ctx.context.internal_adapter.update_user(normalize_hash(ctx.body)[:user_id], banned: false, banReason: nil, banExpires: nil)
+        ctx.json(Schema.parse_output(ctx.context.options, "user", user))
+      end
+    end
+
+    def admin_impersonate_user_endpoint(config)
+      Endpoint.new(path: "/admin/impersonate-user", method: "POST") do |ctx|
+        session = admin_require_permission!(ctx, config, {user: ["impersonate"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS"))
+        body = normalize_hash(ctx.body)
+        target = ctx.context.internal_adapter.find_user_by_id(body[:user_id])
+        raise APIError.new("NOT_FOUND", message: "User not found") unless target
+        if !config[:allow_impersonating_admins] && admin_user?(target, config)
+          raise APIError.new("FORBIDDEN", message: ADMIN_ERROR_CODES.fetch("YOU_CANNOT_IMPERSONATE_ADMINS"))
+        end
+        impersonated = ctx.context.internal_adapter.create_session(target["id"], false, {impersonatedBy: session[:user]["id"], expiresAt: Time.now + config[:impersonation_session_duration].to_i}, false, ctx)
+        Cookies.set_session_cookie(ctx, {session: impersonated, user: target})
+        ctx.json({session: impersonated, user: Schema.parse_output(ctx.context.options, "user", target), headers: ctx.response_headers})
+      end
+    end
+
+    def admin_stop_impersonating_endpoint
+      Endpoint.new(path: "/admin/stop-impersonating", method: "POST") do |ctx|
+        session = Routes.current_session(ctx, sensitive: true)
+        admin_id = session[:session]["impersonatedBy"]
+        raise APIError.new("BAD_REQUEST", message: "Not impersonating") unless admin_id
+        admin = ctx.context.internal_adapter.find_user_by_id(admin_id)
+        raise APIError.new("NOT_FOUND", message: "User not found") unless admin
+        new_session = ctx.context.internal_adapter.create_session(admin["id"], false, nil, false, ctx)
+        Cookies.set_session_cookie(ctx, {session: new_session, user: admin})
+        ctx.json({status: true})
+      end
+    end
+
+    def admin_revoke_user_session_endpoint(config)
+      Endpoint.new(path: "/admin/revoke-user-session", method: "POST") do |ctx|
+        admin_require_permission!(ctx, config, {session: ["revoke"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS"))
+        ctx.context.internal_adapter.delete_session(normalize_hash(ctx.body)[:session_token])
+        ctx.json({status: true})
+      end
+    end
+
+    def admin_revoke_user_sessions_endpoint(config)
+      Endpoint.new(path: "/admin/revoke-user-sessions", method: "POST") do |ctx|
+        admin_require_permission!(ctx, config, {session: ["revoke"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS"))
+        ctx.context.internal_adapter.delete_sessions(normalize_hash(ctx.body)[:user_id])
+        ctx.json({status: true})
+      end
+    end
+
+    def admin_remove_user_endpoint(config)
+      Endpoint.new(path: "/admin/remove-user", method: "POST") do |ctx|
+        session = admin_require_permission!(ctx, config, {user: ["delete"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS"))
+        user_id = normalize_hash(ctx.body)[:user_id]
+        raise APIError.new("BAD_REQUEST", message: ADMIN_ERROR_CODES.fetch("YOU_CANNOT_REMOVE_YOURSELF")) if user_id == session[:user]["id"]
+        ctx.context.internal_adapter.delete_user(user_id)
+        ctx.json({status: true})
+      end
+    end
+
+    def admin_set_user_password_endpoint(config)
+      Endpoint.new(path: "/admin/set-user-password", method: "POST") do |ctx|
+        admin_require_permission!(ctx, config, {user: ["set-password"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_SET_USERS_PASSWORD"))
+        body = normalize_hash(ctx.body)
+        user_id = body[:user_id].to_s
+        password = body[:new_password].to_s
+        raise APIError.new("BAD_REQUEST", message: "userId is required") if user_id.empty?
+        min = ctx.context.options.email_and_password[:min_password_length]
+        max = ctx.context.options.email_and_password[:max_password_length]
+        raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES.fetch("PASSWORD_TOO_SHORT")) if password.length < min
+        raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES.fetch("PASSWORD_TOO_LONG")) if password.length > max
+        ctx.context.internal_adapter.update_password(user_id, Password.hash(password))
+        ctx.json({status: true})
+      end
+    end
+
+    def admin_has_permission_endpoint(config)
+      Endpoint.new(path: "/admin/has-permission", method: "POST") do |ctx|
+        session = Routes.current_session(ctx, allow_nil: true)
+        body = normalize_hash(ctx.body)
+        user = body[:user_id] ? ctx.context.internal_adapter.find_user_by_id(body[:user_id]) : session&.fetch(:user)
+        role = body[:role] || user&.fetch("role", nil) || config[:default_role]
+        ctx.json({success: admin_permission?(user, role, body[:permissions] || body[:permission], config)})
+      end
+    end
+
+    def admin_require_permission!(ctx, config, permissions, message)
+      session = Routes.current_session(ctx, sensitive: true)
+      return session if admin_permission?(session[:user], session[:user]["role"], permissions, config)
+
+      raise APIError.new("FORBIDDEN", message: message)
+    end
+
+    def admin_permission?(user, role_string, permissions, config)
+      return true if user && Array(config[:admin_user_ids]).map(&:to_s).include?(user["id"].to_s)
+      return false unless permissions
+
+      roles = (config[:roles] || admin_default_roles(config)).transform_keys(&:to_s)
+      role_string.to_s.split(",").any? do |role|
+        roles[role]&.authorize(permissions || {})&.fetch(:success, false)
+      end
+    end
+
+    def admin_user?(user, config)
+      return true if Array(config[:admin_user_ids]).map(&:to_s).include?(user["id"].to_s)
+
+      user["role"].to_s.split(",").any? { |role| config[:admin_roles].map(&:to_s).include?(role) }
+    end
+
+    def admin_parse_roles(roles)
+      Array(roles).join(",")
+    end
+
+    def admin_filter_users(users, query)
+      result = users
+      search_value = query[:search_value].to_s
+      if !search_value.empty?
+        field = (query[:search_field] || "email").to_s
+        result = result.select { |user| user[field].to_s.downcase.include?(search_value.downcase) }
+      end
+      filter_field = (query[:filter_field] || query.dig(:filter, :field)).to_s
+      if !filter_field.empty?
+        filter_value = query[:filter_value] || query.dig(:filter, :value)
+        operator = (query[:filter_operator] || query.dig(:filter, :operator) || "eq").to_s
+        field = (filter_field == "_id") ? "id" : Schema.storage_key(filter_field)
+        result = result.select do |user|
+          current = user[field]
+          case operator
+          when "ne" then current != filter_value
+          when "contains" then current.to_s.include?(filter_value.to_s)
+          else current == filter_value
+          end
+        end
+      end
+      result
+    end
+  end
+end

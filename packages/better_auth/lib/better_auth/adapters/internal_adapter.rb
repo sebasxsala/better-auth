@@ -64,7 +64,7 @@ module BetterAuth
         hooks.delete([{field: "id", value: user_id}], "user")
       end
 
-      def create_session(user_id, dont_remember_me = false, override = nil, override_all = false)
+      def create_session(user_id, dont_remember_me = false, override = nil, override_all = false, context = nil)
         override = stringify_keys(override || {})
         token = override.delete("token") || SecureRandom.hex(16)
         base = {
@@ -81,7 +81,7 @@ module BetterAuth
           session_data
         end
         execute_main = !secondary_storage || options.session[:store_session_in_database]
-        created = hooks.create(data, "session", custom: custom)
+        created = hooks.create(data, "session", custom: custom, context: context)
         adapter.create(model: "session", data: data, force_allow_id: true) if secondary_storage && execute_main
         created
       end

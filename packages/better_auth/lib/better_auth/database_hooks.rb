@@ -9,57 +9,57 @@ module BetterAuth
       @options = options
     end
 
-    def create(data, model, custom: nil)
-      run_before(model, :create, data) do |actual_data|
+    def create(data, model, custom: nil, context: nil)
+      run_before(model, :create, data, context) do |actual_data|
         created = custom ? custom.call(actual_data) : adapter.create(model: model, data: actual_data, force_allow_id: true)
         run_after(model, :create, created)
         created
       end
     end
 
-    def update(data, where, model, custom: nil)
-      run_before(model, :update, data) do |actual_data|
+    def update(data, where, model, custom: nil, context: nil)
+      run_before(model, :update, data, context) do |actual_data|
         updated = custom ? custom.call(actual_data) : adapter.update(model: model, where: where, update: actual_data)
         run_after(model, :update, updated) if updated
         updated
       end
     end
 
-    def update_many(data, where, model, custom: nil)
-      run_before(model, :update, data) do |actual_data|
+    def update_many(data, where, model, custom: nil, context: nil)
+      run_before(model, :update, data, context) do |actual_data|
         updated = custom ? custom.call(actual_data) : adapter.update_many(model: model, where: where, update: actual_data)
         run_after(model, :update, updated) if updated
         updated
       end
     end
 
-    def delete(where, model, custom: nil)
+    def delete(where, model, custom: nil, context: nil)
       entity = adapter.find_one(model: model, where: where)
       return custom ? custom.call(where) : adapter.delete(model: model, where: where) unless entity
 
-      return nil if before_hooks(model, :delete).any? { |hook| hook.call(entity, nil) == false }
+      return nil if before_hooks(model, :delete).any? { |hook| hook.call(entity, context) == false }
 
       deleted = custom ? custom.call(where) : adapter.delete(model: model, where: where)
-      after_hooks(model, :delete).each { |hook| hook.call(entity, nil) }
+      after_hooks(model, :delete).each { |hook| hook.call(entity, context) }
       deleted
     end
 
-    def delete_many(where, model, custom: nil)
+    def delete_many(where, model, custom: nil, context: nil)
       entities = adapter.find_many(model: model, where: where)
       entities.each do |entity|
-        return nil if before_hooks(model, :delete).any? { |hook| hook.call(entity, nil) == false }
+        return nil if before_hooks(model, :delete).any? { |hook| hook.call(entity, context) == false }
       end
       deleted = custom ? custom.call(where) : adapter.delete_many(model: model, where: where)
-      entities.each { |entity| after_hooks(model, :delete).each { |hook| hook.call(entity, nil) } }
+      entities.each { |entity| after_hooks(model, :delete).each { |hook| hook.call(entity, context) } }
       deleted
     end
 
     private
 
-    def run_before(model, action, data)
+    def run_before(model, action, data, context)
       actual_data = stringify_keys(data)
       before_hooks(model, action).each do |hook|
-        result = hook.call(actual_data, nil)
+        result = hook.call(actual_data, context)
         return nil if result == false
 
         hook_data = result.is_a?(Hash) ? (result[:data] || result["data"]) : nil

@@ -172,7 +172,7 @@ module BetterAuth
         user = created[:user]
       end
 
-      session = ctx.context.internal_adapter.create_session(user["id"], false, session_overrides(ctx), true)
+      session = ctx.context.internal_adapter.create_session(user["id"], false, session_overrides(ctx), true, ctx)
       {session: session, user: user}
     end
 
