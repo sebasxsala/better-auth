@@ -351,6 +351,20 @@ Completion criteria:
 10. `oauth-proxy`
 11. `passkey`
 
+Progress:
+
+- [x] `username`: ported schema fields, sign-up/update hooks, `/sign-in/username`, `/is-username-available`, normalization, display username validation, duplicate checks, and email-verification no-leak behavior. Ruby adaptation: memory-adapter duplicate checks are performed by the plugin hook against normalized usernames because memory schema uniqueness is not global.
+- [ ] `anonymous`
+- [ ] `magic-link`
+- [ ] `email-otp`
+- [ ] `phone-number`
+- [ ] `one-time-token`
+- [ ] `one-tap`
+- [ ] `siwe`
+- [ ] `generic-oauth`
+- [ ] `oauth-proxy`
+- [ ] `passkey`
+
 Steps for each plugin:
 
 - [ ] Port upstream tests first.
@@ -536,7 +550,7 @@ The final Ruby port should cover these upstream product features:
 - [ ] Hooks and database hooks.
 - [x] Plugin system.
 - [ ] Client concept parity where server-side Ruby can expose equivalent API/docs.
-- [ ] Username plugin.
+- [x] Username plugin.
 - [ ] Anonymous plugin.
 - [ ] Magic link plugin.
 - [ ] Email OTP plugin.
