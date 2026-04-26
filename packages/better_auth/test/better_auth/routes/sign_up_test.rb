@@ -28,6 +28,20 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
     assert BetterAuth::Password.verify(password: "password123", hash: account["password"])
   end
 
+  def test_sign_up_email_allows_empty_name_and_captures_session_headers
+    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+
+    result = auth.api.sign_up_email(
+      body: {email: "headers@example.com", password: "password123", name: ""},
+      headers: {"x-forwarded-for" => "127.0.0.1", "user-agent" => "SignUpTest"}
+    )
+    session = auth.context.internal_adapter.find_session(result[:token])
+
+    assert_equal "", result[:user]["name"]
+    assert_equal "127.0.0.1", session[:session]["ipAddress"]
+    assert_equal "SignUpTest", session[:session]["userAgent"]
+  end
+
   def test_sign_up_email_sets_session_cookie_for_rack_requests
     auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
 
@@ -43,6 +57,47 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
     assert_equal 200, status
     assert_match(/\A[0-9a-f]{32}\z/, data.fetch("token"))
     assert_includes headers.fetch("set-cookie"), "better-auth.session_token="
+  end
+
+  def test_sign_up_email_accepts_form_urlencoded_rack_requests
+    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    form = "email=form-sign-up%40example.com&password=password123&name=Form+User"
+
+    status, _headers, body = auth.call(
+      rack_env(
+        "POST",
+        "/api/auth/sign-up/email",
+        body: form,
+        content_type: "application/x-www-form-urlencoded"
+      )
+    )
+    data = JSON.parse(body.join)
+
+    assert_equal 200, status
+    assert_match(/\A[0-9a-f]{32}\z/, data.fetch("token"))
+    assert_equal "form-sign-up@example.com", data.fetch("user").fetch("email")
+  end
+
+  def test_sign_up_email_blocks_cross_site_navigation
+    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+
+    status, _headers, body = auth.call(
+      rack_env(
+        "POST",
+        "/api/auth/sign-up/email",
+        body: JSON.generate(email: "csrf@example.com", password: "password123", name: "CSRF"),
+        extra_headers: {
+          "HTTP_SEC_FETCH_SITE" => "cross-site",
+          "HTTP_SEC_FETCH_MODE" => "navigate",
+          "HTTP_SEC_FETCH_DEST" => "document",
+          "HTTP_ORIGIN" => "https://evil.example"
+        }
+      )
+    )
+    data = JSON.parse(body.join)
+
+    assert_equal 403, status
+    assert_equal BetterAuth::BASE_ERROR_CODES["CROSS_SITE_NAVIGATION_LOGIN_BLOCKED"], data.fetch("message")
   end
 
   def test_sign_up_email_rejects_invalid_email_and_short_password
@@ -114,10 +169,32 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
     assert_includes sent.first[:url], "callbackURL=%2Fdashboard"
   end
 
+  def test_sign_up_email_does_not_send_verification_when_send_on_sign_up_is_false
+    sent = []
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      email_and_password: {enabled: true, require_email_verification: true},
+      email_verification: {
+        send_on_sign_up: false,
+        send_verification_email: ->(data, _request = nil) { sent << data }
+      }
+    )
+
+    result = auth.api.sign_up_email(body: {
+      email: "no-send@example.com",
+      password: "password123",
+      name: "No Send"
+    })
+
+    assert_nil result[:token]
+    assert_empty sent
+  end
+
   private
 
-  def rack_env(method, path, body: "")
-    {
+  def rack_env(method, path, body: "", content_type: "application/json", extra_headers: {})
+    base = {
       "REQUEST_METHOD" => method,
       "PATH_INFO" => path,
       "QUERY_STRING" => "",
@@ -126,9 +203,10 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
       "REMOTE_ADDR" => "127.0.0.1",
       "rack.url_scheme" => "http",
       "rack.input" => StringIO.new(body),
-      "CONTENT_TYPE" => "application/json",
+      "CONTENT_TYPE" => content_type,
       "CONTENT_LENGTH" => body.bytesize.to_s,
       "HTTP_ORIGIN" => "http://localhost:3000"
     }
+    base.merge(extra_headers)
   end
 end

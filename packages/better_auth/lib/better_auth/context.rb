@@ -67,6 +67,8 @@ module BetterAuth
     end
 
     def prepare_for_request!(request)
+      @current_session = nil
+      @new_session = nil
       @base_url = inferred_base_url(request) if options.base_url.to_s.empty?
       @trusted_origins = current_trusted_origins(request)
     end

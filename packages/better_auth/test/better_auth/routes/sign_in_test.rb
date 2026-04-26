@@ -70,6 +70,29 @@ class BetterAuthRoutesSignInTest < Minitest::Test
     assert_includes sent.first[:url], "callbackURL=%2Fdashboard"
   end
 
+  def test_sign_in_email_does_not_send_verification_when_send_on_sign_in_is_false
+    sent = []
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      email_and_password: {enabled: true, require_email_verification: true},
+      email_verification: {
+        send_on_sign_up: false,
+        send_on_sign_in: false,
+        send_verification_email: ->(data, _request = nil) { sent << data }
+      }
+    )
+    auth.api.sign_up_email(body: {email: "no-sign-in-send@example.com", password: "password123", name: "No Send"})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_in_email(body: {email: "no-sign-in-send@example.com", password: "password123"})
+    end
+
+    assert_equal 403, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["EMAIL_NOT_VERIFIED"], error.message
+    assert_empty sent
+  end
+
   def test_sign_in_email_accepts_form_urlencoded_rack_requests
     auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
     auth.api.sign_up_email(body: {email: "form-sign-in@example.com", password: "password123", name: "Form"})
@@ -91,10 +114,33 @@ class BetterAuthRoutesSignInTest < Minitest::Test
     assert_includes headers.fetch("set-cookie"), "better-auth.session_token="
   end
 
+  def test_sign_in_email_blocks_cross_site_navigation
+    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    auth.api.sign_up_email(body: {email: "csrf-sign-in@example.com", password: "password123", name: "CSRF"})
+
+    status, _headers, body = auth.call(
+      rack_env(
+        "POST",
+        "/api/auth/sign-in/email",
+        body: JSON.generate(email: "csrf-sign-in@example.com", password: "password123"),
+        extra_headers: {
+          "HTTP_SEC_FETCH_SITE" => "cross-site",
+          "HTTP_SEC_FETCH_MODE" => "navigate",
+          "HTTP_SEC_FETCH_DEST" => "document",
+          "HTTP_ORIGIN" => "https://evil.example"
+        }
+      )
+    )
+    data = JSON.parse(body.join)
+
+    assert_equal 403, status
+    assert_equal BetterAuth::BASE_ERROR_CODES["CROSS_SITE_NAVIGATION_LOGIN_BLOCKED"], data.fetch("message")
+  end
+
   private
 
-  def rack_env(method, path, body:, content_type: "application/json")
-    {
+  def rack_env(method, path, body:, content_type: "application/json", extra_headers: {})
+    base = {
       "REQUEST_METHOD" => method,
       "PATH_INFO" => path,
       "QUERY_STRING" => "",
@@ -107,5 +153,6 @@ class BetterAuthRoutesSignInTest < Minitest::Test
       "CONTENT_LENGTH" => body.bytesize.to_s,
       "HTTP_ORIGIN" => "http://localhost:3000"
     }
+    base.merge(extra_headers)
   end
 end

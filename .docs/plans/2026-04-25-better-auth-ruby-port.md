@@ -249,8 +249,8 @@ Steps:
 - [x] Implement `/sign-up/email` with email normalization, password validation, user creation, account creation, optional email verification, auto sign-in, callback URL behavior, and sign-up disabled behavior.
 - [x] Implement `/sign-in/email` with password validation, banned/sensitive checks once plugins exist, session creation, remember-me behavior, and cookie setting. Admin-plugin ban checks remain deferred until the admin plugin exists.
 - [ ] Implement `/sign-in/social` and `/callback/:providerId` with OAuth state strategy, provider lookup, callback URL validation, new user callback, error callback, account linking, and token storage.
-- [ ] Implement `/sign-out`.
-- [ ] Implement `/get-session`, `/list-sessions`, `/revoke-session`, `/revoke-sessions`, `/revoke-other-sessions`.
+- [x] Implement `/sign-out`.
+- [x] Implement `/get-session`, `/list-sessions`, `/revoke-session`, `/revoke-sessions`, `/revoke-other-sessions`.
 - [ ] Implement `/request-password-reset`, `/request-password-reset/callback`, `/reset-password`, `/verify-password`.
 - [ ] Implement `/send-verification-email` and `/verify-email`.
 - [ ] Implement `/update-user`, `/change-email`, `/change-password`, `/set-password`, `/delete-user`, `/delete-user/callback`.
