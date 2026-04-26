@@ -2,24 +2,14 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Build and validate release without publishing or tagging"
+        description: "Build and validate release without publishing"
         required: false
-        default: false
-        type: boolean
-      force_core:
-        description: "Force publish better_auth gem (even if version unchanged)"
-        required: false
-        default: false
-        type: boolean
-      force_rails:
-        description: "Force publish better_auth-rails gem (even if version unchanged)"
-        required: false
-        default: false
+        default: true
         type: boolean
 
 permissions:
@@ -29,10 +19,27 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  BETTER_AUTH_POSTGRES_URL: postgres://user:password@localhost:5432/better_auth
+
 jobs:
   test-core:
     name: Test better_auth (Core)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: better_auth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U user -d better_auth"
+          --health-interval 1s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -40,10 +47,8 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.3"
-
-      - name: Install dependencies
-        working-directory: packages/better_auth
-        run: bundle install
+          bundler-cache: true
+          working-directory: packages/better_auth
 
       - name: Run linter
         working-directory: packages/better_auth
@@ -56,6 +61,20 @@ jobs:
   test-rails:
     name: Test better_auth-rails (Rails Adapter)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: better_auth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U user -d better_auth"
+          --health-interval 1s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -63,10 +82,8 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.3"
-
-      - name: Install dependencies
-        working-directory: packages/better_auth-rails
-        run: bundle install
+          bundler-cache: true
+          working-directory: packages/better_auth-rails
 
       - name: Run linter
         working-directory: packages/better_auth-rails
@@ -81,24 +98,22 @@ jobs:
     needs: [test-core, test-rails]
     runs-on: ubuntu-latest
     outputs:
-      core_changed: ${{ steps.detect.outputs.core_changed }}
       core_version: ${{ steps.detect.outputs.core_version }}
-      rails_changed: ${{ steps.detect.outputs.rails_changed }}
       rails_version: ${{ steps.detect.outputs.rails_version }}
-      should_release: ${{ steps.detect.outputs.should_release }}
-      release_version: ${{ steps.detect.outputs.release_version }}
+      tag_version: ${{ steps.detect.outputs.tag_version }}
+      core_releases: ${{ steps.detect.outputs.core_releases }}
+      rails_releases: ${{ steps.detect.outputs.rails_releases }}
+      should_publish: ${{ steps.detect.outputs.should_publish }}
       dry_run: ${{ steps.detect.outputs.dry_run }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
-      - name: Detect release changes
+      - name: Detect release packages
         id: detect
         env:
           DRY_RUN_INPUT: ${{ github.event.inputs.dry_run || 'false' }}
-          FORCE_CORE_INPUT: ${{ github.event.inputs.force_core || 'false' }}
-          FORCE_RAILS_INPUT: ${{ github.event.inputs.force_rails || 'false' }}
         run: |
           set -euo pipefail
 
@@ -108,59 +123,81 @@ jobs:
           core_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$core_file")
           rails_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$rails_file")
 
-          core_previous=$(git show HEAD^:"$core_file" 2>/dev/null | ruby -e 'content = STDIN.read; print content[/VERSION\s*=\s*"([^"]+)"/, 1].to_s')
-          rails_previous=$(git show HEAD^:"$rails_file" 2>/dev/null | ruby -e 'content = STDIN.read; print content[/VERSION\s*=\s*"([^"]+)"/, 1].to_s')
-
-          core_changed=false
-          rails_changed=false
-
-          # Check for version changes or force flags
-          if [ "$core_version" != "$core_previous" ] || [ "$FORCE_CORE_INPUT" = "true" ]; then
-            core_changed=true
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            tag_name="${GITHUB_REF_NAME}"
+            tag_version="${tag_name#v}"
+          else
+            tag_name=""
+            tag_version=""
           fi
 
-          if [ "$rails_version" != "$rails_previous" ] || [ "$FORCE_RAILS_INPUT" = "true" ]; then
-            rails_changed=true
-          fi
+          core_releases=false
+          rails_releases=false
+          should_publish=false
 
-          should_release=false
-          release_version=""
+          if [ -n "$tag_version" ]; then
+            git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+            containing_branches=$(git branch -r --contains "$GITHUB_SHA" | sed 's/^[[:space:]]*//' || true)
+            is_prerelease=false
+            if [[ "$tag_version" =~ [a-zA-Z] ]]; then
+              is_prerelease=true
+            fi
 
-          if [ "$core_changed" = true ] || [ "$rails_changed" = true ]; then
-            should_release=true
-          fi
+            branch_allowed=false
+            while IFS= read -r branch; do
+              if [ "$is_prerelease" = "true" ]; then
+                if [[ "$branch" == "origin/canary" || "$branch" == "origin/main" || "$branch" =~ ^origin/v[0-9]+\.[0-9]+\.x$ ]]; then
+                  branch_allowed=true
+                fi
+              else
+                if [[ "$branch" == "origin/main" || "$branch" =~ ^origin/v[0-9]+\.[0-9]+\.x$ ]]; then
+                  branch_allowed=true
+                fi
+              fi
+            done <<< "$containing_branches"
 
-          if [ "$core_changed" = true ] && [ "$rails_changed" = true ]; then
-            if [ "$core_version" != "$rails_version" ]; then
-              echo "Version mismatch: better_auth=$core_version, better_auth-rails=$rails_version"
-              echo "When bumping both gems in one release, use the same version."
+            if [ "$branch_allowed" != "true" ]; then
+              echo "::error ::Release tag ${tag_name} is not on an allowed release branch."
+              echo "Stable tags must be contained in main or a vX.Y.x maintenance branch."
+              echo "Prerelease tags may also be contained in canary."
+              echo "Containing branches:"
+              echo "$containing_branches"
               exit 1
             fi
-            release_version="$core_version"
-          elif [ "$core_changed" = true ]; then
-            release_version="$core_version"
-          elif [ "$rails_changed" = true ]; then
-            release_version="$rails_version"
+
+            if [ "$core_version" = "$tag_version" ]; then
+              core_releases=true
+            fi
+            if [ "$rails_version" = "$tag_version" ]; then
+              rails_releases=true
+            fi
+            if [ "$core_releases" != "true" ] && [ "$rails_releases" != "true" ]; then
+              echo "::error ::Tag ${tag_name} does not match better_auth (${core_version}) or better_auth-rails (${rails_version})."
+              exit 1
+            fi
+            should_publish=true
           fi
 
-          echo "core_changed=$core_changed" >> "$GITHUB_OUTPUT"
           echo "core_version=$core_version" >> "$GITHUB_OUTPUT"
-          echo "rails_changed=$rails_changed" >> "$GITHUB_OUTPUT"
           echo "rails_version=$rails_version" >> "$GITHUB_OUTPUT"
-          echo "should_release=$should_release" >> "$GITHUB_OUTPUT"
-          echo "release_version=$release_version" >> "$GITHUB_OUTPUT"
+          echo "tag_version=$tag_version" >> "$GITHUB_OUTPUT"
+          echo "core_releases=$core_releases" >> "$GITHUB_OUTPUT"
+          echo "rails_releases=$rails_releases" >> "$GITHUB_OUTPUT"
+          echo "should_publish=$should_publish" >> "$GITHUB_OUTPUT"
           echo "dry_run=$DRY_RUN_INPUT" >> "$GITHUB_OUTPUT"
 
-          echo "core_changed=$core_changed (force: $FORCE_CORE_INPUT)"
-          echo "rails_changed=$rails_changed (force: $FORCE_RAILS_INPUT)"
-          echo "should_release=$should_release"
-          echo "release_version=$release_version"
+          echo "core_version=$core_version"
+          echo "rails_version=$rails_version"
+          echo "tag_version=${tag_version:-manual-dry-run}"
+          echo "core_releases=$core_releases"
+          echo "rails_releases=$rails_releases"
+          echo "should_publish=$should_publish"
           echo "dry_run=$DRY_RUN_INPUT"
 
   publish:
-    name: Publish gems to RubyGems
+    name: Build and publish gems
     needs: [prepare-release]
-    if: needs.prepare-release.outputs.should_release == 'true'
+    if: needs.prepare-release.outputs.should_publish == 'true' || needs.prepare-release.outputs.dry_run == 'true'
     runs-on: ubuntu-latest
     outputs:
       published_core: ${{ steps.publish-core.outputs.published }}
@@ -169,10 +206,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Ruby
+      - name: Set up Ruby for better_auth
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: packages/better_auth
+
+      - name: Set up Ruby for better_auth-rails
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: packages/better_auth-rails
 
       - name: Configure RubyGems credentials
         if: needs.prepare-release.outputs.dry_run != 'true'
@@ -186,16 +232,15 @@ jobs:
           GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
 
       - name: Build better_auth gem
-        if: needs.prepare-release.outputs.core_changed == 'true'
+        if: needs.prepare-release.outputs.core_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
         working-directory: packages/better_auth
         run: |
           set -euo pipefail
           rm -f better_auth-*.gem
-          bundle install
           gem build better_auth.gemspec
 
       - name: Publish better_auth gem
-        if: needs.prepare-release.outputs.core_changed == 'true'
+        if: needs.prepare-release.outputs.core_releases == 'true'
         id: publish-core
         working-directory: packages/better_auth
         env:
@@ -220,17 +265,17 @@ jobs:
           gem push better_auth-*.gem
           echo "published=true" >> "$GITHUB_OUTPUT"
 
-      - name: Build better_auth-rails gem
-        if: needs.prepare-release.outputs.rails_changed == 'true'
+      - name: Build better_auth-rails gems
+        if: needs.prepare-release.outputs.rails_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
         working-directory: packages/better_auth-rails
         run: |
           set -euo pipefail
-          rm -f better_auth-rails-*.gem
-          bundle install
+          rm -f better_auth-rails-*.gem better_auth_rails-*.gem
           gem build better_auth-rails.gemspec
+          gem build better_auth_rails.gemspec
 
       - name: Publish better_auth-rails gem
-        if: needs.prepare-release.outputs.rails_changed == 'true'
+        if: needs.prepare-release.outputs.rails_releases == 'true'
         id: publish-rails
         working-directory: packages/better_auth-rails
         env:
@@ -255,16 +300,8 @@ jobs:
           gem push better_auth-rails-*.gem
           echo "published=true" >> "$GITHUB_OUTPUT"
 
-      - name: Build better_auth_rails gem
-        if: needs.prepare-release.outputs.rails_changed == 'true'
-        working-directory: packages/better_auth-rails
-        run: |
-          set -euo pipefail
-          rm -f better_auth_rails-*.gem
-          gem build better_auth_rails.gemspec
-
       - name: Publish better_auth_rails gem
-        if: needs.prepare-release.outputs.rails_changed == 'true'
+        if: needs.prepare-release.outputs.rails_releases == 'true'
         id: publish-rails-compat
         working-directory: packages/better_auth-rails
         env:
@@ -289,58 +326,21 @@ jobs:
           gem push better_auth_rails-*.gem
           echo "published=true" >> "$GITHUB_OUTPUT"
 
-  create-tag:
-    name: Create git tag
-    needs: [prepare-release, publish]
-    if: needs.prepare-release.outputs.should_release == 'true' && needs.prepare-release.outputs.dry_run != 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      tag_name: ${{ steps.tag.outputs.tag_name }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Create and push tag
-        id: tag
-        env:
-          RELEASE_VERSION: ${{ needs.prepare-release.outputs.release_version }}
-        run: |
-          set -euo pipefail
-          tag_name="v${RELEASE_VERSION}"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          if git ls-remote --tags origin "refs/tags/${tag_name}" | grep -q "refs/tags/${tag_name}"; then
-            echo "Tag ${tag_name} already exists, skipping creation"
-          else
-            git tag -a "$tag_name" -m "Release $tag_name"
-            git push origin "refs/tags/${tag_name}"
-          fi
-
-          echo "tag_name=$tag_name" >> "$GITHUB_OUTPUT"
-
   create-release:
     name: Create GitHub release
-    needs: [prepare-release, create-tag]
-    if: needs.prepare-release.outputs.should_release == 'true' && needs.prepare-release.outputs.dry_run != 'true'
+    needs: [prepare-release, publish]
+    if: needs.prepare-release.outputs.should_publish == 'true' && needs.prepare-release.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.create-tag.outputs.tag_name }}
+          tag_name: ${{ github.ref_name }}
           generate_release_notes: true
-          name: "Better Auth Ruby ${{ needs.create-tag.outputs.tag_name }}"
+          name: "Better Auth Ruby ${{ github.ref_name }}"
           body: |
-            ## Changes
+            ## Published packages
 
-            This release was created automatically after tests passed and gem publishing completed.
-
-            ### Published packages
-            - `better_auth` version `${{ needs.prepare-release.outputs.core_version }}` (changed: `${{ needs.prepare-release.outputs.core_changed }}`)
-            - `better_auth-rails` version `${{ needs.prepare-release.outputs.rails_version }}` (changed: `${{ needs.prepare-release.outputs.rails_changed }}`)
-            - `better_auth_rails` version `${{ needs.prepare-release.outputs.rails_version }}` (changed: `${{ needs.prepare-release.outputs.rails_changed }}`)
+            - `better_auth` version `${{ needs.prepare-release.outputs.core_version }}` (released: `${{ needs.prepare-release.outputs.core_releases }}`)
+            - `better_auth-rails` version `${{ needs.prepare-release.outputs.rails_version }}` (released: `${{ needs.prepare-release.outputs.rails_releases }}`)
+            - `better_auth_rails` version `${{ needs.prepare-release.outputs.rails_version }}` (released: `${{ needs.prepare-release.outputs.rails_releases }}`)

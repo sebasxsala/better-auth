@@ -5,11 +5,14 @@ on:
     types:
       - opened
       - synchronize
+      - reopened
     paths:
       - 'packages/**'
       - 'Gemfile'
       - 'Rakefile'
+      - 'docker-compose.yml'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/release.yml'
   push:
     branches:
       - main
@@ -18,12 +21,36 @@ on:
       - 'packages/**'
       - 'Gemfile'
       - 'Rakefile'
+      - 'docker-compose.yml'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/release.yml'
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  BETTER_AUTH_POSTGRES_URL: postgres://user:password@localhost:5432/better_auth
 
 jobs:
   test-core:
     name: Test better_auth (Core)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: better_auth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U user -d better_auth"
+          --health-interval 1s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -31,10 +58,8 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
-
-      - name: Install dependencies for better_auth
-        working-directory: packages/better_auth
-        run: bundle install
+          bundler-cache: true
+          working-directory: packages/better_auth
 
       - name: Run linter
         working-directory: packages/better_auth
@@ -47,6 +72,20 @@ jobs:
   test-rails:
     name: Test better_auth-rails (Rails Adapter)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: better_auth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U user -d better_auth"
+          --health-interval 1s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -54,10 +93,8 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
-
-      - name: Install dependencies for better_auth-rails
-        working-directory: packages/better_auth-rails
-        run: bundle install
+          bundler-cache: true
+          working-directory: packages/better_auth-rails
 
       - name: Run linter
         working-directory: packages/better_auth-rails
