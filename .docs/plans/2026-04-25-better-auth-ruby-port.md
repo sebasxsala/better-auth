@@ -354,7 +354,7 @@ Completion criteria:
 Progress:
 
 - [x] `username`: ported schema fields, sign-up/update hooks, `/sign-in/username`, `/is-username-available`, normalization, display username validation, duplicate checks, and email-verification no-leak behavior. Ruby adaptation: memory-adapter duplicate checks are performed by the plugin hook against normalized usernames because memory schema uniqueness is not global.
-- [ ] `anonymous`
+- [x] `anonymous`: ported `isAnonymous` schema, `/sign-in/anonymous`, `/delete-anonymous-user`, generated email/name options, repeat anonymous sign-in rejection, anonymous deletion, and real sign-in linking cleanup. Ruby adaptation: dependency-free email validation uses the core route email pattern; social callback cleanup uses the same response-cookie/new-session hook and remains covered by base social route tests.
 - [ ] `magic-link`
 - [ ] `email-otp`
 - [ ] `phone-number`
@@ -551,7 +551,7 @@ The final Ruby port should cover these upstream product features:
 - [x] Plugin system.
 - [ ] Client concept parity where server-side Ruby can expose equivalent API/docs.
 - [x] Username plugin.
-- [ ] Anonymous plugin.
+- [x] Anonymous plugin.
 - [ ] Magic link plugin.
 - [ ] Email OTP plugin.
 - [ ] Phone number plugin.
