@@ -43,6 +43,7 @@ module BetterAuth
       :verification,
       :advanced,
       :email_and_password,
+      :email_verification,
       :social_providers,
       :secondary_storage,
       :database_hooks,
@@ -75,6 +76,7 @@ module BetterAuth
       @user = symbolize_keys(options[:user] || {})
       @verification = symbolize_keys(options[:verification] || {})
       @email_and_password = normalize_email_and_password(options[:email_and_password])
+      @email_verification = symbolize_keys(options[:email_verification] || {})
       @rate_limit = normalize_rate_limit(options[:rate_limit])
       @trusted_origins = normalize_trusted_origins(options[:trusted_origins])
 
@@ -107,6 +109,7 @@ module BetterAuth
         verification: verification,
         advanced: advanced,
         email_and_password: email_and_password,
+        email_verification: email_verification,
         social_providers: social_providers,
         secondary_storage: secondary_storage,
         database_hooks: database_hooks,

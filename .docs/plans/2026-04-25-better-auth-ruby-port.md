@@ -246,8 +246,8 @@ Steps:
 
 - [ ] Port upstream base route tests from `api/routes/*.test.ts`.
 - [x] Implement `/ok` and `/error`.
-- [ ] Implement `/sign-up/email` with email normalization, password validation, user creation, account creation, optional email verification, auto sign-in, callback URL behavior, and sign-up disabled behavior.
-- [ ] Implement `/sign-in/email` with password validation, banned/sensitive checks once plugins exist, session creation, remember-me behavior, and cookie setting.
+- [x] Implement `/sign-up/email` with email normalization, password validation, user creation, account creation, optional email verification, auto sign-in, callback URL behavior, and sign-up disabled behavior.
+- [x] Implement `/sign-in/email` with password validation, banned/sensitive checks once plugins exist, session creation, remember-me behavior, and cookie setting. Admin-plugin ban checks remain deferred until the admin plugin exists.
 - [ ] Implement `/sign-in/social` and `/callback/:providerId` with OAuth state strategy, provider lookup, callback URL validation, new user callback, error callback, account linking, and token storage.
 - [ ] Implement `/sign-out`.
 - [ ] Implement `/get-session`, `/list-sessions`, `/revoke-session`, `/revoke-sessions`, `/revoke-other-sessions`.
@@ -257,7 +257,7 @@ Steps:
 - [ ] Implement `/list-accounts`, `/link-social`, `/unlink-account`, `/get-access-token`, `/refresh-token`, `/account-info`.
 - [ ] Preserve upstream response statuses, JSON keys, redirects, `Set-Cookie` behavior, and error codes.
 - [ ] Run every route test file individually, then run the full core test suite.
-- [ ] Add `.docs/features/base-auth-routes.md`.
+- [x] Add `.docs/features/base-auth-routes.md`.
 
 ## Phase 5.5: Rails ActiveRecord Adapter And Mounting
 

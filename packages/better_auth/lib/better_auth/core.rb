@@ -5,7 +5,9 @@ module BetterAuth
     def self.base_endpoints
       {
         ok: Routes.ok,
-        error: Routes.error
+        error: Routes.error,
+        sign_up_email: Routes.sign_up_email,
+        sign_in_email: Routes.sign_in_email
       }
     end
   end

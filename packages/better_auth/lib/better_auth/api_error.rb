@@ -8,6 +8,7 @@ module BetterAuth
       "FORBIDDEN" => 403,
       "NOT_FOUND" => 404,
       "METHOD_NOT_ALLOWED" => 405,
+      "UNPROCESSABLE_ENTITY" => 422,
       "TOO_MANY_REQUESTS" => 429,
       "FOUND" => 302,
       "INTERNAL_SERVER_ERROR" => 500
