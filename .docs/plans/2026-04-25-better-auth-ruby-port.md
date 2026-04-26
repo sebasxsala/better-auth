@@ -272,13 +272,13 @@ Steps:
 
 Steps:
 
-- [ ] Implement `config/initializers/better_auth.rb` generator that configures `BetterAuth.auth(...)` with Rails credentials/secrets and selected adapter.
-- [ ] Implement route mounting helper for a single Rack app, defaulting to `/api/auth/*`, with no per-route Rails controller magic.
-- [ ] Implement ActiveRecord adapter satisfying the core adapter contract after direct SQL and base routes are stable.
-- [ ] Implement migration generator that reads core schema plus plugin schema and emits Rails migrations matching the direct SQL schema decisions.
-- [ ] Implement controller helpers for `current_session`, `current_user`, authenticated checks, and route protection.
-- [ ] Document non-Rails routing: any Rack app can mount the auth object with `map "/api/auth" { run auth }` or call it directly as Rack middleware.
-- [ ] Run Rails specs and core route specs against ActiveRecord once Phase 5 base routes exist.
+- [x] Implement `config/initializers/better_auth.rb` generator that configures `BetterAuth.auth(...)` with Rails credentials/secrets and selected adapter.
+- [x] Implement route mounting helper for a single Rack app, defaulting to `/api/auth/*`, with no per-route Rails controller magic.
+- [x] Implement ActiveRecord adapter satisfying the core adapter contract after direct SQL and base routes are stable.
+- [x] Implement migration generator that reads core schema plus plugin schema and emits Rails migrations matching the direct SQL schema decisions.
+- [x] Implement controller helpers for `current_session`, `current_user`, authenticated checks, and route protection.
+- [x] Document non-Rails routing: any Rack app can mount the auth object with `map "/api/auth" { run auth }` or call it directly as Rack middleware.
+- [ ] Run Rails specs and core route specs against ActiveRecord once Phase 5 base routes exist. Rails specs pass for the initial adapter/generator surface, including a real PostgreSQL smoke test for generated migration, table/index/FK creation, ActiveRecord user read/write, and direct SQL adapter readback. Full base-route specs against ActiveRecord and MySQL real-database coverage remain pending.
 
 ## Phase 6: Plugin Contract
 

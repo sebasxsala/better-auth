@@ -38,4 +38,5 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "standardrb", "~> 1.0"
   spec.add_development_dependency "rake", "~> 13.2"
   spec.add_development_dependency "simplecov", "~> 0.22"
+  spec.add_development_dependency "pg", "~> 1.5"
 end

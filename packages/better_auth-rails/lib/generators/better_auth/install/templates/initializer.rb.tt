@@ -1,0 +1,15 @@
+# frozen_string_literal: true
+
+BetterAuth::Rails.configure do |config|
+  config.secret =
+    Rails.application.credentials.dig(:better_auth, :secret) ||
+    Rails.application.credentials.secret_key_base ||
+    Rails.application.secret_key_base
+
+  config.base_url = ENV["BETTER_AUTH_URL"]
+  config.base_path = "/api/auth"
+  config.database = ->(options) { BetterAuth::Rails::ActiveRecordAdapter.new(options) }
+
+  # Add Better Auth plugins here, for example:
+  # config.plugins = []
+end

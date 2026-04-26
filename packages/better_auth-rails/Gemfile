@@ -10,6 +10,7 @@ gem "better_auth", path: "../better_auth"
 gemspec name: "better_auth-rails"
 
 group :development, :test do
+  gem "pg", "~> 1.5"
   gem "standardrb", "~> 1.0"
   gem "rspec", "~> 3.13"
   gem "rake", "~> 13.2"

@@ -1,0 +1,108 @@
+# frozen_string_literal: true
+
+module BetterAuth
+  module Rails
+    module Migration
+      module_function
+
+      def render(options, migration_version: nil)
+        migration_version ||= self.migration_version
+        tables = BetterAuth::Schema.auth_tables(options)
+        lines = [
+          "# frozen_string_literal: true",
+          "",
+          "class CreateBetterAuthTables < ActiveRecord::Migration[#{migration_version}]",
+          "  def change"
+        ]
+        tables.each_value { |table| lines.concat(create_table_lines(table)) }
+        tables.each_value { |table| lines.concat(primary_key_lines(table)) }
+        tables.each_value { |table| lines.concat(index_lines(table)) }
+        tables.each_value { |table| lines.concat(foreign_key_lines(table)) }
+        lines.concat(["  end", "end", ""])
+        lines.join("\n")
+      end
+
+      def migration_version
+        return ::ActiveRecord::Migration.current_version if defined?(::ActiveRecord::Migration)
+
+        "7.0"
+      end
+
+      def create_table_lines(table)
+        table_name = table.fetch(:model_name)
+        lines = ["", "    create_table :#{table_name}, id: false do |t|"]
+        table.fetch(:fields).each do |logical_field, attributes|
+          lines << column_line(logical_field, attributes)
+        end
+        lines << "    end"
+      end
+
+      def column_line(logical_field, attributes)
+        column = attributes[:field_name] || physical_name(logical_field)
+        parts = ["t.#{rails_type(attributes)} :#{column}"]
+        parts << "null: false" if attributes[:required]
+        default = default_value(attributes)
+        parts << "default: #{default}" unless default.nil?
+        "      #{parts.join(", ")}"
+      end
+
+      def index_lines(table)
+        table_name = table.fetch(:model_name)
+        table.fetch(:fields).filter_map do |logical_field, attributes|
+          next unless attributes[:unique] || attributes[:index]
+
+          column = attributes[:field_name] || physical_name(logical_field)
+          unique = attributes[:unique] ? ", unique: true" : ""
+          "    add_index :#{table_name}, :#{column}#{unique}"
+        end
+      end
+
+      def primary_key_lines(table)
+        table_name = table.fetch(:model_name)
+        return [] unless table.fetch(:fields).key?("id")
+
+        [
+          %(    execute "ALTER TABLE \#{quote_table_name(:#{table_name})} ADD PRIMARY KEY (\#{quote_column_name(:id)})")
+        ]
+      end
+
+      def foreign_key_lines(table)
+        table_name = table.fetch(:model_name)
+        table.fetch(:fields).filter_map do |logical_field, attributes|
+          reference = attributes[:references]
+          next unless reference
+
+          column = attributes[:field_name] || physical_name(logical_field)
+          target = reference.fetch(:model)
+          on_delete = reference[:on_delete] ? ", on_delete: :#{reference[:on_delete]}" : ""
+          "    add_foreign_key :#{table_name}, :#{target}, column: :#{column}#{on_delete}"
+        end
+      end
+
+      def rails_type(attributes)
+        case attributes[:type]
+        when "boolean" then "boolean"
+        when "date" then "datetime"
+        when "number" then attributes[:bigint] ? "bigint" : "integer"
+        else "string"
+        end
+      end
+
+      def default_value(attributes)
+        default = attributes[:default_value]
+        return if default.respond_to?(:call)
+
+        case default
+        when true then "true"
+        when false then "false"
+        when Numeric then default.to_s
+        when String then default.inspect
+        end
+      end
+
+      def physical_name(value)
+        BetterAuth::Schema.send(:physical_name, value)
+      end
+    end
+  end
+end

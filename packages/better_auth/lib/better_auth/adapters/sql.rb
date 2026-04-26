@@ -252,7 +252,7 @@ module BetterAuth
         fields = schema_for(model).fetch(:fields)
         record = fields.each_with_object({}) do |(field, attributes), output|
           column = attributes[:field_name] || physical_name(field)
-          output[field] = fetch_row(row, column) if row_key?(row, column)
+          output[field] = coerce_output_value(fetch_row(row, column), attributes) if row_key?(row, column)
         end
 
         join&.each_key do |join_model|
@@ -267,7 +267,7 @@ module BetterAuth
         schema_for(model).fetch(:fields).each_with_object({}) do |(field, attributes), output|
           column = attributes[:field_name] || physical_name(field)
           key = "#{model}__#{column}"
-          output[field] = fetch_row(row, key) if row_key?(row, key)
+          output[field] = coerce_output_value(fetch_row(row, key), attributes) if row_key?(row, key)
         end
       end
 
@@ -331,6 +331,22 @@ module BetterAuth
       def coerce_value(value, attributes)
         return value if value.nil?
         return Time.parse(value) if attributes[:type] == "date" && value.is_a?(String)
+
+        value
+      end
+
+      def coerce_output_value(value, attributes)
+        return value if value.nil?
+        return coerce_boolean(value) if attributes[:type] == "boolean"
+        return Time.parse(value) if attributes[:type] == "date" && value.is_a?(String)
+
+        value
+      end
+
+      def coerce_boolean(value)
+        return value if value == true || value == false
+        return false if value == 0 || value.to_s == "0" || value.to_s.downcase == "f" || value.to_s.downcase == "false"
+        return true if value == 1 || value.to_s == "1" || value.to_s.downcase == "t" || value.to_s.downcase == "true"
 
         value
       end

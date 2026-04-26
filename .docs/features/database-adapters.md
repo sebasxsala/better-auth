@@ -27,6 +27,7 @@ Ruby keeps upstream logical and wire field names such as `emailVerified`, `userI
 - The memory adapter implements Better Auth-specific where operators, basic joins for `session -> user`, `account -> user`, and `user -> account`, sorting, pagination, counts, and rollbackable in-memory transactions.
 - The direct SQL layer generates PostgreSQL and MySQL schema DDL from the same `BetterAuth::Schema` metadata. PostgreSQL uses `text`, `boolean`, `timestamptz`, `bigint`, FK constraints, and explicit FK indexes. MySQL uses InnoDB, `utf8mb4`, `varchar(191)` for indexed strings, `text`, `tinyint(1)`, `datetime(6)`, FK constraints, and explicit FK indexes.
 - `BetterAuth::Adapters::SQL` implements parameterized CRUD, count, transactions, logical-to-physical field mapping, current internal-adapter joins for SQL-backed storage, and collection aggregation for `user -> account`. `BetterAuth::Adapters::Postgres` and `BetterAuth::Adapters::MySQL` are thin wrappers that require `pg` or `mysql2` only when instantiated without an injected connection.
+- PostgreSQL output normalization now coerces `pg` string values such as `"f"`/`"t"` and timestamp strings back into Ruby booleans and `Time` values before returning logical Better Auth hashes.
 
 ## Configuration Examples
 
@@ -88,4 +89,4 @@ Key test files:
 
 ## Notes
 
-Direct SQL support is partial until `pg` and `mysql2` are installed in the bundle and exercised against the Docker services. ActiveRecord is intentionally deferred until after base routes so Rails remains a thin integration layer over the same core route and adapter contracts.
+PostgreSQL direct SQL support is exercised against the Docker service when `pg` is available in the core bundle. MySQL real-database coverage remains pending until `mysql2` is added to the test bundle and run against the Docker service. ActiveRecord lives in `better_auth-rails` so Rails remains a thin integration layer over the same core route and adapter contracts.

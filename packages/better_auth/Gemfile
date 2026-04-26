@@ -5,6 +5,7 @@ ruby file: ".ruby-version"
 gemspec
 
 group :development, :test do
+  gem "pg", "~> 1.5"
   gem "standardrb", "~> 1.0"
   gem "minitest", "~> 5.25"
   gem "rake", "~> 13.2"

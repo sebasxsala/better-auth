@@ -7,7 +7,7 @@ Rails adapter for Better Auth Ruby. Provides seamless integration with Ruby on R
 Add this line to your application's Gemfile:
 
 ```ruby
-gem 'better_auth-rails'
+gem "better_auth-rails"
 ```
 
 ### Defensive alias package
@@ -29,20 +29,83 @@ bundle install
 Add to your `config/application.rb`:
 
 ```ruby
-require 'better_auth/rails'
+require "better_auth/rails"
 ```
 
 Compatibility require is also supported:
 
 ```ruby
-require 'better_auth_rails'
+require "better_auth_rails"
 ```
 
 Or in your Gemfile:
 
 ```ruby
-gem 'better_auth-rails', require: 'better_auth/rails'
+gem "better_auth-rails", require: "better_auth/rails"
 ```
+
+### Initializer And Migration
+
+Create the default initializer and base migration:
+
+```bash
+bin/rails generate better_auth:install
+```
+
+The same install path is available as a Rails task:
+
+```bash
+bin/rails better_auth:init
+```
+
+To generate only the base migration:
+
+```bash
+bin/rails generate better_auth:migration
+bin/rails better_auth:generate:migration
+```
+
+The generators skip an existing `config/initializers/better_auth.rb` or existing `*_create_better_auth_tables.rb` migration instead of overwriting them.
+
+### Configuration
+
+The install generator creates `config/initializers/better_auth.rb`:
+
+```ruby
+BetterAuth::Rails.configure do |config|
+  config.secret =
+    Rails.application.credentials.dig(:better_auth, :secret) ||
+    Rails.application.credentials.secret_key_base ||
+    Rails.application.secret_key_base
+
+  config.base_url = ENV["BETTER_AUTH_URL"]
+  config.base_path = "/api/auth"
+  config.database = ->(options) { BetterAuth::Rails::ActiveRecordAdapter.new(options) }
+  config.plugins = []
+end
+```
+
+The ActiveRecord adapter uses whichever database adapter the Rails app is already configured with, including PostgreSQL and MySQL.
+
+### Routes
+
+Mount the Better Auth Rack app in your routes:
+
+```ruby
+Rails.application.routes.draw do
+  better_auth
+end
+```
+
+By default this mounts at `/api/auth`. To customize the path:
+
+```ruby
+Rails.application.routes.draw do
+  better_auth at: "/auth"
+end
+```
+
+The Better Auth core router handles internal routes such as `/callback/:providerId`.
 
 ### Controller Helpers
 
@@ -58,55 +121,25 @@ Now you have access to authentication methods:
 
 ```ruby
 class PostsController < ApplicationController
-  before_action :authenticate_user!
+  before_action :require_authentication
 
   def index
-    @posts = current_user.posts
+    @user = current_user
   end
 
-  def create
-    @post = current_user.posts.build(post_params)
-    # ...
+  private
+
+  def require_authentication
+    head :unauthorized unless authenticated?
   end
 end
 ```
 
 ### Available Methods
 
-- `current_user` - Returns the currently authenticated user
-- `authenticate_user!` - Redirects to login if not authenticated
-- `user_signed_in?` - Returns true if user is authenticated
-- `sign_in(user)` - Signs in a user
-- `sign_out` - Signs out the current user
-
-### Configuration
-
-Create an initializer `config/initializers/better_auth.rb`:
-
-```ruby
-BetterAuth.configure do |config|
-  config.secret_key = Rails.application.credentials.secret_key_base
-  config.database_url = Rails.application.credentials.database_url
-  
-  # Optional: Configure session store
-  config.session_store = :redis
-  config.session_options = {
-    url: ENV['REDIS_URL']
-  }
-end
-```
-
-### Routes
-
-Mount the Better Auth engine in your routes:
-
-```ruby
-Rails.application.routes.draw do
-  mount BetterAuth::Rails::Engine => '/auth'
-  
-  # Your routes...
-end
-```
+- `current_session` - Returns the current Better Auth session hash
+- `current_user` - Returns the current Better Auth user hash
+- `authenticated?` - Returns true when a user is present
 
 ## Development
 

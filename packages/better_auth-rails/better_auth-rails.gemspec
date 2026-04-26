@@ -29,6 +29,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency "better_auth", "~> 0.1"
   spec.add_dependency "railties", ">= 6.0", "< 9"
   spec.add_dependency "activesupport", ">= 6.0", "< 9"
+  spec.add_dependency "activerecord", ">= 6.0", "< 9"
 
   # Development dependencies
   spec.add_development_dependency "bundler", "~> 2.5"
@@ -36,4 +37,5 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "standardrb", "~> 1.0"
   spec.add_development_dependency "rake", "~> 13.2"
   spec.add_development_dependency "simplecov", "~> 0.22"
+  spec.add_development_dependency "pg", "~> 1.5"
 end

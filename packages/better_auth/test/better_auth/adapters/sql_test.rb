@@ -61,6 +61,27 @@ class BetterAuthSQLAdapterTest < Minitest::Test
     assert_includes connection.sql.first, 'LEFT JOIN "users" AS "user" ON "user"."id" = "sessions"."user_id"'
   end
 
+  def test_sql_adapter_coerces_database_output_types
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+    connection = RecordingConnection.new([
+      {
+        "id" => "user-1",
+        "name" => "Ada",
+        "email" => "ada@example.com",
+        "email_verified" => "f",
+        "created_at" => "2026-04-26 02:49:07.41301",
+        "updated_at" => "2026-04-26 02:49:07.413012"
+      }
+    ])
+    adapter = BetterAuth::Adapters::SQL.new(config, connection: connection, dialect: :postgres)
+
+    found = adapter.find_one(model: "user", where: [{field: "id", value: "user-1"}])
+
+    assert_equal false, found["emailVerified"]
+    assert_kind_of Time, found["createdAt"]
+    assert_kind_of Time, found["updatedAt"]
+  end
+
   def test_sql_adapter_builds_user_account_collection_join
     config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
     connection = RecordingConnection.new([
