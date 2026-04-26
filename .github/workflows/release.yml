@@ -46,7 +46,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.3"
+          ruby-version: .ruby-version
           bundler-cache: true
           working-directory: packages/better_auth
 
@@ -81,7 +81,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.3"
+          ruby-version: .ruby-version
           bundler-cache: true
           working-directory: packages/better_auth-rails
 
@@ -209,14 +209,14 @@ jobs:
       - name: Set up Ruby for better_auth
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.3"
+          ruby-version: .ruby-version
           bundler-cache: true
           working-directory: packages/better_auth
 
       - name: Set up Ruby for better_auth-rails
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.3"
+          ruby-version: .ruby-version
           bundler-cache: true
           working-directory: packages/better_auth-rails
 
