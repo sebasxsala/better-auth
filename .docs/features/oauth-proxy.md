@@ -12,6 +12,7 @@ Adds OAuth callback proxy support for preview/current URLs that differ from the 
 - Adds `/oauth-proxy-callback`.
 - Adds hooks around `/sign-in/social`, `/sign-in/oauth2`, `/callback/:providerId`, and `/oauth2/callback/:providerId`.
 - Rewrites callback URLs to the current URL, unwraps same-origin proxy redirects, and appends encrypted cookie payloads for cross-origin proxy redirects.
+- Validates the proxy `callbackURL` against trusted origins, allowing safe relative paths.
 - Decrypts cookie payloads, rejects expired/future/malformed payloads, sets cookies, and redirects to the original callback URL.
 
 ## Key Differences

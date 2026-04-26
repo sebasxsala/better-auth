@@ -36,6 +36,9 @@ module BetterAuth
     def oauth_proxy_endpoint(config)
       Endpoint.new(path: "/oauth-proxy-callback", method: "GET") do |ctx|
         query = normalize_hash(ctx.query)
+        callback_url = query[:callback_url] || "/"
+        oauth_proxy_validate_callback!(ctx, callback_url)
+
         decrypted = Crypto.symmetric_decrypt(key: ctx.context.secret, data: query[:cookies].to_s)
         raise ctx.redirect(oauth_proxy_error_url(ctx, "OAuthProxy - Invalid cookies or secret")) unless decrypted
 
@@ -54,7 +57,7 @@ module BetterAuth
         oauth_proxy_parse_set_cookie(cookies).each do |cookie|
           ctx.set_cookie(cookie[:name], cookie[:value], cookie[:options])
         end
-        raise ctx.redirect(query[:callback_url] || query[:callbackURL] || "/")
+        raise ctx.redirect(callback_url)
       rescue JSON::ParserError
         raise ctx.redirect(oauth_proxy_error_url(ctx, "OAuthProxy - Invalid payload format"))
       end
@@ -127,6 +130,13 @@ module BetterAuth
 
     def oauth_proxy_strip_trailing(value)
       value.to_s.sub(%r{/+\z}, "")
+    end
+
+    def oauth_proxy_validate_callback!(ctx, callback_url)
+      return if callback_url.to_s.empty?
+      return if ctx.context.trusted_origin?(callback_url.to_s, allow_relative_paths: true)
+
+      raise APIError.new("FORBIDDEN", message: "Invalid callbackURL")
     end
 
     def oauth_proxy_error_url(ctx, message)

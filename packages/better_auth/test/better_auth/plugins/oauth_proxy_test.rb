@@ -88,6 +88,22 @@ class BetterAuthPluginsOAuthProxyTest < Minitest::Test
     assert_includes URI.decode_www_form_component(headers.fetch("location")), "Invalid cookies or secret"
   end
 
+  def test_oauth_proxy_callback_rejects_untrusted_callback_url
+    auth = build_auth(trusted_origins: ["http://localhost:3000"], plugins: [BetterAuth::Plugins.oauth_proxy(max_age: 60)])
+    payload = {
+      cookies: "better-auth.session_token=session-token; Path=/; HttpOnly",
+      timestamp: (Time.now.to_f * 1000).to_i
+    }
+    encrypted = BetterAuth::Crypto.symmetric_encrypt(key: auth.context.secret, data: JSON.generate(payload))
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.o_auth_proxy(query: {callbackURL: "https://evil.example/dashboard", cookies: encrypted})
+    end
+
+    assert_equal 403, error.status_code
+    assert_equal "Invalid callbackURL", error.message
+  end
+
   private
 
   def build_auth(options = {})
