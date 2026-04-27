@@ -895,7 +895,7 @@ git commit -m "fix: apply advanced ip address config to sessions"
 - Modify: `packages/better_auth/test/better_auth/adapters/internal_adapter_test.rb`
 - Modify: `.docs/features/database-adapters.md`
 
-- [ ] **Step 1: Write failing configuration test**
+- [x] **Step 1: Write failing configuration test**
 
 Add to `packages/better_auth/test/better_auth/configuration_test.rb`:
 
@@ -909,7 +909,7 @@ def test_experimental_joins_option_accepts_camel_and_snake_case
 end
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -920,7 +920,7 @@ rbenv exec bundle exec rake test TEST=test/better_auth/configuration_test.rb
 
 Expected: FAIL because `experimental` is not an exposed configuration attribute.
 
-- [ ] **Step 3: Add `experimental` to configuration**
+- [x] **Step 3: Add `experimental` to configuration**
 
 Modify `packages/better_auth/lib/better_auth/configuration.rb`:
 
@@ -951,7 +951,7 @@ Add:
     end
 ```
 
-- [ ] **Step 4: Write internal adapter tests for join fallback**
+- [x] **Step 4: Write internal adapter tests for join fallback**
 
 Add to `packages/better_auth/test/better_auth/adapters/internal_adapter_test.rb`:
 
@@ -983,7 +983,7 @@ def test_find_session_falls_back_to_separate_queries_when_experimental_joins_dis
 end
 ```
 
-- [ ] **Step 5: Implement join gate in internal adapter**
+- [x] **Step 5: Implement join gate in internal adapter**
 
 Modify `packages/better_auth/lib/better_auth/adapters/internal_adapter.rb`:
 
@@ -1007,7 +1007,7 @@ In methods that currently pass `join: {user: true}` directly, use:
 
 Keep this as an internal optimization gate: behavior must be the same with joins enabled or disabled.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run:
 
@@ -1019,7 +1019,7 @@ rbenv exec bundle exec rake test TEST=test/better_auth/adapters/internal_adapter
 
 Expected: PASS.
 
-- [ ] **Step 7: Update database docs**
+- [x] **Step 7: Update database docs**
 
 Append to `.docs/features/database-adapters.md`:
 
@@ -1029,7 +1029,7 @@ Append to `.docs/features/database-adapters.md`:
 Ruby accepts the upstream public option `experimental: { joins: true }`. Joins are treated as an optimization, not a behavior switch: when enabled and supported by the adapter, the internal adapter requests native joins; when disabled or unsupported, it performs separate adapter reads and combines the same logical response. This keeps the option safe for production Ruby apps while preserving upstream's documented configuration shape.
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/better_auth/lib/better_auth/configuration.rb packages/better_auth/lib/better_auth/adapters/internal_adapter.rb packages/better_auth/test/better_auth/configuration_test.rb packages/better_auth/test/better_auth/adapters/internal_adapter_test.rb .docs/features/database-adapters.md

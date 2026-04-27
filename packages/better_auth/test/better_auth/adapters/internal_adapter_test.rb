@@ -76,6 +76,32 @@ class BetterAuthInternalAdapterTest < Minitest::Test
     assert_nil internal.find_session("token-1")
   end
 
+  def test_find_session_uses_adapter_join_when_experimental_joins_enabled
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, experimental: {joins: true})
+    adapter = BetterAuth::Adapters::Memory.new(config)
+    internal = BetterAuth::Adapters::InternalAdapter.new(adapter, config)
+    user = internal.create_user("name" => "Ada", "email" => "ada@example.com")
+    session = internal.create_session(user["id"])
+
+    found = internal.find_session(session["token"])
+
+    assert_equal session["token"], found[:session]["token"]
+    assert_equal user["id"], found[:user]["id"]
+  end
+
+  def test_find_session_falls_back_to_separate_queries_when_experimental_joins_disabled
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, experimental: {joins: false})
+    adapter = BetterAuth::Adapters::Memory.new(config)
+    internal = BetterAuth::Adapters::InternalAdapter.new(adapter, config)
+    user = internal.create_user("name" => "Ada", "email" => "ada@example.com")
+    session = internal.create_session(user["id"])
+
+    found = internal.find_session(session["token"])
+
+    assert_equal session["token"], found[:session]["token"]
+    assert_equal user["id"], found[:user]["id"]
+  end
+
   def test_verification_lifecycle_runs_hooks_and_cleans_expired_values
     calls = []
     internal = internal_adapter(

@@ -29,6 +29,10 @@ Ruby keeps upstream logical and wire field names such as `emailVerified`, `userI
 - `BetterAuth::Adapters::SQL` implements parameterized CRUD, count, transactions, logical-to-physical field mapping, current internal-adapter joins for SQL-backed storage, and collection aggregation for `user -> account`. `BetterAuth::Adapters::Postgres` and `BetterAuth::Adapters::MySQL` are thin wrappers that require `pg` or `mysql2` only when instantiated without an injected connection.
 - PostgreSQL output normalization now coerces `pg` string values such as `"f"`/`"t"` and timestamp strings back into Ruby booleans and `Time` values before returning logical Better Auth hashes.
 
+### Experimental Joins
+
+Ruby accepts the upstream public option `experimental: { joins: true }`. Joins are treated as an optimization, not a behavior switch: when enabled and supported by the adapter, the internal adapter requests native joins; when disabled or unsupported, it performs separate adapter reads and combines the same logical response. This keeps the option safe for production Ruby apps while preserving upstream's documented configuration shape.
+
 ## Configuration Examples
 
 Framework-agnostic Rack apps can instantiate auth directly:

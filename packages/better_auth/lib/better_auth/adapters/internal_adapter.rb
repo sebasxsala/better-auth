@@ -97,7 +97,7 @@ module BetterAuth
           }
         end
 
-        found = adapter.find_one(model: "session", where: [{field: "token", value: token}], join: {user: true})
+        found = find_session_with_user(token)
         return nil unless found && found["user"]
 
         user = found.delete("user")
@@ -159,7 +159,7 @@ module BetterAuth
       end
 
       def find_oauth_user(email, account_id, provider_id)
-        account = adapter.find_one(model: "account", where: [{field: "accountId", value: account_id}, {field: "providerId", value: provider_id}], join: {user: true})
+        account = find_account_with_user(account_id, provider_id)
         if account
           user = account["user"] || adapter.find_one(model: "user", where: [{field: "email", value: email.to_s.downcase}])
           return nil unless user
@@ -255,6 +255,28 @@ module BetterAuth
 
       def secondary_storage
         options.secondary_storage
+      end
+
+      def joins_enabled?
+        !!options.experimental[:joins]
+      end
+
+      def find_session_with_user(token)
+        return adapter.find_one(model: "session", where: [{field: "token", value: token}], join: {user: true}) if joins_enabled?
+
+        session = adapter.find_one(model: "session", where: [{field: "token", value: token}])
+        user = session && adapter.find_one(model: "user", where: [{field: "id", value: session["userId"]}])
+        (session && user) ? session.merge("user" => user) : nil
+      end
+
+      def find_account_with_user(account_id, provider_id)
+        if joins_enabled?
+          return adapter.find_one(model: "account", where: [{field: "accountId", value: account_id}, {field: "providerId", value: provider_id}], join: {user: true})
+        end
+
+        account = adapter.find_one(model: "account", where: [{field: "accountId", value: account_id}, {field: "providerId", value: provider_id}])
+        user = account && adapter.find_one(model: "user", where: [{field: "id", value: account["userId"]}])
+        (account && user) ? account.merge("user" => user) : account
       end
 
       def timestamps

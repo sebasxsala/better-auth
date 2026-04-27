@@ -45,6 +45,7 @@ module BetterAuth
       :email_and_password,
       :email_verification,
       :social_providers,
+      :experimental,
       :secondary_storage,
       :database_hooks,
       :hooks,
@@ -78,6 +79,7 @@ module BetterAuth
       @verification = symbolize_keys(options[:verification] || {})
       @email_and_password = normalize_email_and_password(options[:email_and_password])
       @email_verification = symbolize_keys(options[:email_verification] || {})
+      @experimental = normalize_experimental(options[:experimental])
       @rate_limit = normalize_rate_limit(options[:rate_limit])
       @trusted_origins = normalize_trusted_origins(options[:trusted_origins])
 
@@ -112,6 +114,7 @@ module BetterAuth
         email_and_password: email_and_password,
         email_verification: email_verification,
         social_providers: social_providers,
+        experimental: experimental,
         secondary_storage: secondary_storage,
         database_hooks: database_hooks,
         hooks: hooks,
@@ -275,6 +278,13 @@ module BetterAuth
 
     def normalize_email_and_password(value)
       deep_merge(DEFAULT_EMAIL_AND_PASSWORD, symbolize_keys(value || {}))
+    end
+
+    def normalize_experimental(value)
+      configured = symbolize_keys(value || {})
+      {
+        joins: !!configured[:joins]
+      }
     end
 
     def normalize_rate_limit(value)

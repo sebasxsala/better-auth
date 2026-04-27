@@ -132,6 +132,14 @@ class BetterAuthConfigurationTest < Minitest::Test
     assert_equal ["first", "second"], config.plugins.map { |plugin| plugin[:id] }
   end
 
+  def test_experimental_joins_option_accepts_camel_and_snake_case
+    camel = BetterAuth::Configuration.new(secret: SECRET, experimental: {joins: true})
+    snake = BetterAuth::Configuration.new(secret: SECRET, experimental: {joins: false})
+
+    assert_equal({joins: true}, camel.experimental)
+    assert_equal({joins: false}, snake.experimental)
+  end
+
   def test_context_exposes_runtime_fields_and_new_session_mutator
     auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
     context = auth.context
