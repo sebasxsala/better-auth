@@ -1,0 +1,119 @@
+---
+title: Rails Integration
+description: Use Better Auth Ruby in Rails.
+---
+
+The Rails adapter mounts the core Rack auth object and provides generators,
+ActiveRecord persistence, migrations, and controller helpers.
+
+## Install
+
+```ruby title="Gemfile"
+gem "better_auth-rails"
+```
+
+```bash title="Terminal"
+bundle install
+bin/rails generate better_auth:install
+```
+
+The install generator creates:
+
+- `config/initializers/better_auth.rb`
+- a Better Auth migration for the configured core/plugin schema
+
+## Configure
+
+```ruby title="config/initializers/better_auth.rb"
+BetterAuth::Rails.configure do |config|
+  config.secret =
+    Rails.application.credentials.dig(:better_auth, :secret) ||
+    Rails.application.credentials.secret_key_base ||
+    Rails.application.secret_key_base
+
+  config.base_url = ENV["BETTER_AUTH_URL"]
+  config.base_path = "/api/auth"
+  config.database = ->(options) {
+    BetterAuth::Rails::ActiveRecordAdapter.new(options)
+  }
+
+  config.email_and_password = {
+    enabled: true
+  }
+
+  config.plugins = [
+    # BetterAuth::Plugins.username
+  ]
+end
+```
+
+## Mount Routes
+
+```ruby title="config/routes.rb"
+Rails.application.routes.draw do
+  better_auth
+end
+```
+
+By default this mounts Better Auth at `/api/auth`.
+
+Customize the path:
+
+```ruby title="config/routes.rb"
+Rails.application.routes.draw do
+  better_auth at: "/auth"
+end
+```
+
+## Run Migrations
+
+```bash title="Terminal"
+bin/rails db:migrate
+```
+
+When you add plugins that introduce schema tables or fields, regenerate a
+migration before migrating a new app:
+
+```bash title="Terminal"
+bin/rails generate better_auth:migration
+```
+
+## Controller Helpers
+
+```ruby title="app/controllers/application_controller.rb"
+class ApplicationController < ActionController::Base
+  include BetterAuth::Rails::ControllerHelpers
+end
+```
+
+Available helpers:
+
+- `current_session`
+- `current_user`
+- `authenticated?`
+- `require_authentication`
+
+Example:
+
+```ruby title="app/controllers/dashboard_controller.rb"
+class DashboardController < ApplicationController
+  before_action :require_authentication
+
+  def show
+    @user = current_user
+  end
+end
+```
+
+## JavaScript Client
+
+Use the upstream Better Auth JavaScript client against the Rails app.
+
+```ts title="auth-client.ts"
+import { createAuthClient } from "better-auth/client";
+
+export const authClient = createAuthClient({
+  baseURL: "http://localhost:3000",
+  basePath: "/api/auth",
+});
+```

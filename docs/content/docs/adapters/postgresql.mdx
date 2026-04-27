@@ -1,0 +1,92 @@
+---
+title: PostgreSQL
+description: Use Better Auth Ruby with PostgreSQL.
+---
+
+Better Auth Ruby includes a direct PostgreSQL adapter for Rack applications and
+an ActiveRecord adapter for Rails applications backed by PostgreSQL.
+
+<Callout type="info">
+PostgreSQL support is implemented, but exhaustive upstream adapter parity is
+still being expanded. See `.docs/features/database-adapters.md` for the current
+parity notes.
+</Callout>
+
+## Install Dependencies
+
+```ruby title="Gemfile"
+gem "better_auth"
+gem "pg"
+```
+
+```bash title="Terminal"
+bundle install
+```
+
+## Configure The Adapter
+
+```ruby title="config/auth.rb"
+require "better_auth"
+
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL"),
+  database: BetterAuth::Adapters::Postgres.new(
+    url: ENV.fetch("DATABASE_URL")
+  )
+)
+```
+
+You may also pass an existing connection object when your app owns connection
+management.
+
+```ruby title="config/auth.rb"
+connection = PG.connect(ENV.fetch("DATABASE_URL"))
+
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  database: BetterAuth::Adapters::Postgres.new(
+    connection: connection
+  )
+)
+```
+
+## Rails
+
+Rails apps should normally use `better_auth-rails` and the ActiveRecord adapter.
+
+```ruby title="Gemfile"
+gem "better_auth-rails"
+gem "pg"
+```
+
+```bash title="Terminal"
+bin/rails generate better_auth:install
+bin/rails db:migrate
+```
+
+The generated initializer wires Better Auth to ActiveRecord:
+
+```ruby title="config/initializers/better_auth.rb"
+BetterAuth::Rails.configure do |config|
+  config.database = ->(options) {
+    BetterAuth::Rails::ActiveRecordAdapter.new(options)
+  }
+end
+```
+
+## Schema
+
+The Ruby schema maps Better Auth logical fields to PostgreSQL-friendly physical
+columns. For example:
+
+| Better Auth field | PostgreSQL column |
+| --- | --- |
+| `emailVerified` | `email_verified` |
+| `userId` | `user_id` |
+| `createdAt` | `created_at` |
+| `expiresAt` | `expires_at` |
+
+Plugin schemas are merged into the same migration generation path.
+
+{/* Upstream TypeScript PostgreSQL guide is preserved in upstream/docs/content/docs/adapters/postgresql.mdx. */}

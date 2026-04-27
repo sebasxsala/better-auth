@@ -200,6 +200,8 @@ end
 
 ## Development
 
+Full documentation is being adapted in the root [`docs/`](/Users/sebastiansala/projects/better-auth/docs/README.md) app. The Rails guide lives at `docs/content/docs/integrations/rails.mdx`; pages with a Ruby port warning still contain upstream TypeScript examples for reference.
+
 ### Setup
 
 ```bash

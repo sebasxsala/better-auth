@@ -1,0 +1,140 @@
+---
+title: Database
+description: Learn how Better Auth Ruby stores auth data.
+---
+
+Better Auth Ruby stores users, sessions, accounts, verification tokens, rate
+limit counters, and plugin tables through an adapter contract. The core gem stays
+framework-agnostic; Rails support is implemented as a separate ActiveRecord
+adapter.
+
+## Supported Adapters
+
+| Adapter | Status | Typical Use |
+| --- | --- | --- |
+| `BetterAuth::Adapters::Memory` | Supported | Tests, local demos, stateless experiments |
+| `BetterAuth::Adapters::Postgres` | Partial | Rack apps using PostgreSQL directly |
+| `BetterAuth::Adapters::MySQL` | Partial | Rack apps using MySQL directly |
+| `BetterAuth::Rails::ActiveRecordAdapter` | Partial | Rails apps using ActiveRecord |
+
+SQLite, Prisma, Drizzle, MongoDB, MSSQL, and other upstream JavaScript adapters
+are not built-in Ruby adapters yet.
+
+## Configure A Database
+
+Memory:
+
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  database: BetterAuth::Adapters::Memory.new
+)
+```
+
+PostgreSQL:
+
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  database: BetterAuth::Adapters::Postgres.new(
+    url: ENV.fetch("DATABASE_URL")
+  )
+)
+```
+
+MySQL:
+
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  database: BetterAuth::Adapters::MySQL.new(
+    url: ENV.fetch("DATABASE_URL")
+  )
+)
+```
+
+Rails:
+
+```ruby title="config/initializers/better_auth.rb"
+BetterAuth::Rails.configure do |config|
+  config.database = ->(options) {
+    BetterAuth::Rails::ActiveRecordAdapter.new(options)
+  }
+end
+```
+
+## Migrations
+
+Rails apps can generate migrations from the core schema plus configured plugin
+schemas.
+
+```bash title="Terminal"
+bin/rails generate better_auth:install
+
+# or only migration files
+bin/rails generate better_auth:migration
+```
+
+Rack apps using direct SQL adapters can generate DDL from the Ruby schema APIs in
+application-specific migration tooling. The core schema uses Better Auth logical
+field names such as `emailVerified` and `userId`, while SQL adapters map them to
+PostgreSQL/MySQL-friendly physical names such as `email_verified` and `user_id`.
+
+## Core Tables
+
+The base schema contains:
+
+- `user`
+- `session`
+- `account`
+- `verification`
+- `rateLimit`
+
+Plugins add their own tables through the same schema merge path. For example,
+organization, admin, passkey, SCIM, SSO, and Stripe add plugin-specific tables
+when configured.
+
+## Secondary Storage
+
+The Ruby port supports secondary storage for session and token style data. Pass
+an object that responds to `get`, `set`, and `delete`.
+
+```ruby title="config/auth.rb"
+secondary_storage = Class.new do
+  def get(key)
+    redis.get(key)
+  end
+
+  def set(key, value, ttl = nil)
+    ttl ? redis.setex(key, ttl, value) : redis.set(key, value)
+  end
+
+  def delete(key)
+    redis.del(key)
+  end
+end.new
+
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  secondary_storage: secondary_storage
+)
+```
+
+## Adapter Contract
+
+Adapters implement:
+
+- `create`
+- `find_one`
+- `find_many`
+- `update`
+- `update_many`
+- `delete`
+- `delete_many`
+- `count`
+- `transaction`
+
+The internal adapter builds user, account, session, verification, and plugin
+operations on top of this contract.
+
+{/* Upstream TypeScript database guide is preserved in upstream/docs/content/docs/concepts/database.mdx. */}

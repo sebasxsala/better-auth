@@ -531,13 +531,16 @@ Completion criteria:
 Steps:
 
 - [x] Update root `README.md` with accurate port status.
-- [ ] Update `packages/better_auth/README.md` with Rack quickstart, configuration, routes, plugins, and testing.
-- [ ] Update `packages/better_auth-rails/README.md` with Rails quickstart, generator usage, routes, migrations, and helpers.
+- [x] Update `packages/better_auth/README.md` with Rack quickstart, configuration, routes, plugins, and testing.
+- [x] Update `packages/better_auth-rails/README.md` with Rails quickstart, generator usage, routes, migrations, and helpers.
+- [x] Copy upstream docs source into root `docs/` excluding generated `.next`, `node_modules`, and `.env`.
+- [x] Add Ruby-first starter docs for introduction, installation, basic usage, database, Rack, Rails, PostgreSQL, and MySQL.
+- [x] Preserve upstream docs pages with top-of-page Ruby port warnings when not adapted yet.
 - [ ] Add a Rack/Sinatra example app if the repo structure allows examples.
 - [ ] Add a Rails example app or dummy app for specs if needed.
 - [ ] Maintain `.docs/features/upstream-parity-matrix.md` until every feature has a status.
-- [ ] Add a release checklist covering `make ci`, gem build, changelog, version updates, and manual smoke flows.
-- [ ] Run `make release-check`.
+- [x] Add a release checklist covering `make ci`, gem build, changelog, version updates, and manual smoke flows.
+- [x] Run `make release-check`.
 
 Completion criteria:
 

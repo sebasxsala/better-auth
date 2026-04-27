@@ -1,0 +1,110 @@
+---
+title: Rack Integration
+description: Mount Better Auth Ruby in a Rack application.
+---
+
+Better Auth Ruby is Rack-first. `BetterAuth.auth(...)` returns an object that can
+be called directly by Rack.
+
+## Gemfile
+
+```ruby title="Gemfile"
+gem "better_auth"
+```
+
+## Auth Instance
+
+```ruby title="config/auth.rb"
+require "better_auth"
+
+AUTH = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
+  email_and_password: {
+    enabled: true
+  },
+  database: BetterAuth::Adapters::Postgres.new(
+    url: ENV.fetch("DATABASE_URL")
+  )
+)
+```
+
+## Mount In Rack
+
+```ruby title="config.ru"
+require_relative "config/auth"
+
+map "/api/auth" do
+  run AUTH
+end
+```
+
+Verify the mount:
+
+```bash title="Terminal"
+curl http://localhost:3000/api/auth/ok
+```
+
+```json
+{ "ok": true }
+```
+
+## Sinatra Example
+
+```ruby title="app.rb"
+require "sinatra/base"
+require_relative "config/auth"
+
+class App < Sinatra::Base
+  use Rack::Session::Cookie, secret: ENV.fetch("RACK_SESSION_SECRET")
+
+  get "/" do
+    "Hello"
+  end
+end
+
+run Rack::URLMap.new(
+  "/" => App,
+  "/api/auth" => AUTH
+)
+```
+
+## Server-Side API Calls
+
+You can also call endpoints from Ruby code:
+
+```ruby
+result = AUTH.api.sign_in_email(
+  body: {
+    email: "ada@example.com",
+    password: "password123"
+  }
+)
+```
+
+When you need to forward cookies, request a Rack response:
+
+```ruby
+status, headers, body = AUTH.api.sign_in_email(
+  {
+    body: {
+      email: "ada@example.com",
+      password: "password123"
+    },
+    as_response: true
+  }
+)
+```
+
+## Frontend Client
+
+Use the upstream JavaScript client and point it at the Rack server.
+
+```ts title="auth-client.ts"
+import { createAuthClient } from "better-auth/client";
+
+export const authClient = createAuthClient({
+  baseURL: "http://localhost:3000",
+  basePath: "/api/auth",
+});
+```

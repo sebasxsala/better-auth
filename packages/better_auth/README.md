@@ -129,6 +129,8 @@ end
 
 ## Development
 
+Full documentation is being adapted in the root [`docs/`](/Users/sebastiansala/projects/better-auth/docs/README.md) app. Start with the Ruby-first installation, basic usage, Rack, Rails, PostgreSQL, and MySQL pages there; pages with a Ruby port warning still contain upstream TypeScript examples for reference.
+
 ### Quick Start
 
 ```bash

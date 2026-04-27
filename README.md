@@ -206,11 +206,18 @@ bundle install
 bundle exec rake test
 ```
 
+## Documentation
+
+The upstream docs app has been copied into [`docs/`](/Users/sebastiansala/projects/better-auth/docs/README.md) and is being adapted for Ruby/Rack/Rails. Pages that still contain upstream TypeScript examples include a warning callout at the top.
+
+Ruby-first starter pages are available under `docs/content/docs/introduction.mdx`, `docs/content/docs/installation.mdx`, `docs/content/docs/basic-usage.mdx`, `docs/content/docs/concepts/database.mdx`, `docs/content/docs/integrations/rack.mdx`, and `docs/content/docs/integrations/rails.mdx`.
+
 ## Monorepo Layout
 
 ```txt
 better-auth/
 ├── upstream/                   # Submodule: upstream TypeScript Better Auth
+├── docs/                       # Adapted upstream docs app
 ├── packages/
 │   ├── better_auth/            # Core gem, Minitest
 │   └── better_auth-rails/      # Rails adapter, RSpec

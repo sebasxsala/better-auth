@@ -1,0 +1,164 @@
+---
+title: Installation
+description: Install and configure Better Auth Ruby.
+---
+
+<Steps>
+
+<Step>
+### Install The Gem
+
+For Rack, Sinatra, Hanami, Roda, or another Rack-based app:
+
+```ruby title="Gemfile"
+gem "better_auth"
+```
+
+For Rails:
+
+```ruby title="Gemfile"
+gem "better_auth-rails"
+```
+
+Then install dependencies:
+
+```bash title="Terminal"
+bundle install
+```
+</Step>
+
+<Step>
+### Set Environment Variables
+
+Set a high-entropy secret and the public base URL of your app.
+
+```txt title=".env"
+BETTER_AUTH_SECRET=
+BETTER_AUTH_URL=http://localhost:3000
+```
+
+You can generate a secret with:
+
+```bash title="Terminal"
+openssl rand -base64 32
+```
+
+<Callout type="warn">
+Use a real secret outside test. The Ruby port allows the default test secret only
+in test environments.
+</Callout>
+</Step>
+
+<Step>
+### Create A Better Auth Instance
+
+```ruby title="config/auth.rb"
+require "better_auth"
+
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
+  email_and_password: {
+    enabled: true
+  },
+  database: BetterAuth::Adapters::Memory.new
+)
+```
+
+The memory adapter is useful for development and tests. Production apps should
+use PostgreSQL, MySQL, or the Rails ActiveRecord adapter.
+</Step>
+
+<Step>
+### Configure Persistence
+
+PostgreSQL:
+
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL"),
+  database: BetterAuth::Adapters::Postgres.new(
+    url: ENV.fetch("DATABASE_URL")
+  )
+)
+```
+
+MySQL:
+
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL"),
+  database: BetterAuth::Adapters::MySQL.new(
+    url: ENV.fetch("DATABASE_URL")
+  )
+)
+```
+
+Rails apps normally use the generated ActiveRecord adapter configuration:
+
+```bash title="Terminal"
+bin/rails generate better_auth:install
+```
+</Step>
+
+<Step>
+### Mount The Handler
+
+Rack:
+
+```ruby title="config.ru"
+require_relative "config/auth"
+
+map "/api/auth" do
+  run auth
+end
+```
+
+Rails:
+
+```ruby title="config/routes.rb"
+Rails.application.routes.draw do
+  better_auth
+end
+```
+
+The default base path is `/api/auth`.
+</Step>
+
+<Step>
+### Verify The Server
+
+Send a request to the health endpoint:
+
+```bash title="Terminal"
+curl http://localhost:3000/api/auth/ok
+```
+
+Expected response:
+
+```json
+{ "ok": true }
+```
+</Step>
+
+<Step>
+### Add The JavaScript Client
+
+Frontend apps should use the upstream Better Auth JavaScript client and point it
+at the Ruby server.
+
+```ts title="auth-client.ts"
+import { createAuthClient } from "better-auth/client";
+
+export const authClient = createAuthClient({
+  baseURL: "http://localhost:3000",
+  basePath: "/api/auth",
+});
+```
+</Step>
+
+</Steps>
+
+{/* Upstream TypeScript installation guide is preserved in upstream/docs/content/docs/installation.mdx. */}

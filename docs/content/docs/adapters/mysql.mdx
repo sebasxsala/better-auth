@@ -1,0 +1,86 @@
+---
+title: MySQL
+description: Use Better Auth Ruby with MySQL.
+---
+
+Better Auth Ruby includes a direct MySQL adapter for Rack applications and an
+ActiveRecord path for Rails applications backed by MySQL.
+
+<Callout type="info">
+MySQL support is implemented, but exhaustive upstream adapter parity is still
+being expanded. See `.docs/features/database-adapters.md` for the current parity
+notes.
+</Callout>
+
+## Install Dependencies
+
+```ruby title="Gemfile"
+gem "better_auth"
+gem "mysql2"
+```
+
+```bash title="Terminal"
+bundle install
+```
+
+## Configure The Adapter
+
+```ruby title="config/auth.rb"
+require "better_auth"
+
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL"),
+  database: BetterAuth::Adapters::MySQL.new(
+    url: ENV.fetch("DATABASE_URL")
+  )
+)
+```
+
+You may also pass an existing client when your app owns connection management.
+
+```ruby title="config/auth.rb"
+client = Mysql2::Client.new(
+  host: "localhost",
+  username: "root",
+  password: ENV.fetch("MYSQL_PASSWORD"),
+  database: "app_development"
+)
+
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  database: BetterAuth::Adapters::MySQL.new(
+    connection: client
+  )
+)
+```
+
+## Rails
+
+Rails apps should normally use `better_auth-rails` and the ActiveRecord adapter.
+
+```ruby title="Gemfile"
+gem "better_auth-rails"
+gem "mysql2"
+```
+
+```bash title="Terminal"
+bin/rails generate better_auth:install
+bin/rails db:migrate
+```
+
+## Schema
+
+The Ruby schema maps Better Auth logical fields to MySQL-friendly physical
+columns. MySQL DDL uses InnoDB and `utf8mb4`.
+
+| Better Auth field | MySQL column |
+| --- | --- |
+| `emailVerified` | `email_verified` |
+| `userId` | `user_id` |
+| `createdAt` | `created_at` |
+| `expiresAt` | `expires_at` |
+
+Plugin schemas are merged into the same migration generation path.
+
+{/* Upstream TypeScript MySQL guide is preserved in upstream/docs/content/docs/adapters/mysql.mdx. */}
