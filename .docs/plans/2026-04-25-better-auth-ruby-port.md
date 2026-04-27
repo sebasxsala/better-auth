@@ -549,6 +549,7 @@ The final Ruby port should cover these upstream product features:
 - [x] Server-side API calls.
 - [x] Email and password authentication.
 - [x] Social OAuth sign-in and callback flow.
+- [x] Common social provider factories for Google, GitHub, GitLab, Discord, Apple, and Microsoft Entra ID.
 - [x] Session management and cookie cache.
 - [x] Password reset.
 - [x] Email verification.

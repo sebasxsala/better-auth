@@ -60,11 +60,30 @@ gem install better_auth
 ```ruby
 require 'better_auth'
 
-# Configure Better Auth
-BetterAuth.configure do |config|
-  config.secret_key = ENV['BETTER_AUTH_SECRET']
-  config.database_url = ENV['DATABASE_URL']
-end
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  database: :memory
+)
+```
+
+### Social Providers
+
+```ruby
+require "better_auth"
+
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  social_providers: {
+    google: BetterAuth::SocialProviders.google(
+      client_id: ENV.fetch("GOOGLE_CLIENT_ID"),
+      client_secret: ENV.fetch("GOOGLE_CLIENT_SECRET")
+    ),
+    github: BetterAuth::SocialProviders.github(
+      client_id: ENV.fetch("GITHUB_CLIENT_ID"),
+      client_secret: ENV.fetch("GITHUB_CLIENT_SECRET")
+    )
+  }
+)
 ```
 
 ### Rails Integration
