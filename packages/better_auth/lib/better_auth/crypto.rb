@@ -5,6 +5,7 @@ require "json"
 require "jwt"
 require "openssl"
 require "securerandom"
+require_relative "crypto/jwe"
 
 module BetterAuth
   module Crypto
@@ -84,24 +85,11 @@ module BetterAuth
     end
 
     def symmetric_encode_jwt(payload, secret, salt, expires_in: 3600)
-      claims = stringify_keys(payload).merge(
-        "iat" => Time.now.to_i,
-        "exp" => Time.now.to_i + expires_in.to_i,
-        "jti" => SecureRandom.uuid
-      )
-      symmetric_encrypt(key: "#{secret}:#{salt}", data: JSON.generate(claims))
+      JWE.encode(payload, secret, salt, expires_in: expires_in)
     end
 
     def symmetric_decode_jwt(token, secret, salt)
-      decoded = symmetric_decrypt(key: "#{secret}:#{salt}", data: token)
-      return nil unless decoded
-
-      payload = JSON.parse(decoded)
-      return nil if payload["exp"] && payload["exp"].to_i < Time.now.to_i
-
-      payload
-    rescue JSON::ParserError
-      nil
+      JWE.decode(token, secret, salt)
     end
 
     def base64url_encode(value)

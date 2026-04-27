@@ -31,4 +31,46 @@ class BetterAuthCryptoTest < Minitest::Test
     assert_equal "user-1", BetterAuth::Crypto.verify_jwt(token, "secret")["sub"]
     assert_nil BetterAuth::Crypto.verify_jwt("#{token}x", "secret")
   end
+
+  def test_symmetric_jwe_uses_compact_jwe_header_and_round_trips
+    token = BetterAuth::Crypto.symmetric_encode_jwt(
+      {"sub" => "user-1"},
+      "secret-with-enough-entropy-for-jwe",
+      "better-auth-session",
+      expires_in: 60
+    )
+
+    segments = token.split(".")
+    assert_equal 5, segments.length
+
+    header = JSON.parse(BetterAuth::Crypto.base64url_decode(segments.first))
+    assert_equal "dir", header.fetch("alg")
+    assert_equal "A256CBC-HS512", header.fetch("enc")
+    assert header.fetch("kid").is_a?(String)
+    refute_includes token, "user-1"
+
+    payload = BetterAuth::Crypto.symmetric_decode_jwt(
+      token,
+      "secret-with-enough-entropy-for-jwe",
+      "better-auth-session"
+    )
+
+    assert_equal "user-1", payload.fetch("sub")
+    assert payload.fetch("iat").is_a?(Integer)
+    assert payload.fetch("exp").is_a?(Integer)
+    assert payload.fetch("jti").is_a?(String)
+  end
+
+  def test_symmetric_jwe_rejects_wrong_secret_wrong_salt_and_tampering
+    token = BetterAuth::Crypto.symmetric_encode_jwt(
+      {"sub" => "user-1"},
+      "secret-with-enough-entropy-for-jwe",
+      "better-auth-session",
+      expires_in: 60
+    )
+
+    assert_nil BetterAuth::Crypto.symmetric_decode_jwt(token, "wrong-secret", "better-auth-session")
+    assert_nil BetterAuth::Crypto.symmetric_decode_jwt(token, "secret-with-enough-entropy-for-jwe", "wrong-salt")
+    assert_nil BetterAuth::Crypto.symmetric_decode_jwt("#{token}x", "secret-with-enough-entropy-for-jwe", "better-auth-session")
+  end
 end

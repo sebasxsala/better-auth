@@ -166,7 +166,7 @@ Docs/plans:
 - Modify: `packages/better_auth/lib/better_auth/crypto.rb`
 - Test: `packages/better_auth/test/better_auth/crypto_test.rb`
 
-- [ ] **Step 1: Write failing crypto tests for upstream-compatible JWE shape**
+- [x] **Step 1: Write failing crypto tests for upstream-compatible JWE shape**
 
 Add these tests to `packages/better_auth/test/better_auth/crypto_test.rb`:
 
@@ -214,7 +214,7 @@ def test_symmetric_jwe_rejects_wrong_secret_wrong_salt_and_tampering
 end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -225,7 +225,7 @@ rbenv exec bundle exec rake test TEST=test/better_auth/crypto_test.rb
 
 Expected: FAIL because the existing `symmetric_encode_jwt` returns the internal AES-GCM payload instead of five-segment compact JWE.
 
-- [ ] **Step 3: Add the `jwe` dependency**
+- [x] **Step 3: Add the `jwe` dependency**
 
 Modify `packages/better_auth/better_auth.gemspec`:
 
@@ -244,7 +244,7 @@ rbenv exec bundle install
 
 Expected: `Gemfile.lock` includes `jwe`.
 
-- [ ] **Step 4: Create the JWE helper**
+- [x] **Step 4: Create the JWE helper**
 
 Create `packages/better_auth/lib/better_auth/crypto/jwe.rb`:
 
@@ -318,7 +318,7 @@ module BetterAuth
 end
 ```
 
-- [ ] **Step 5: Route symmetric JWT helpers through standard JWE**
+- [x] **Step 5: Route symmetric JWT helpers through standard JWE**
 
 Modify `packages/better_auth/lib/better_auth/crypto.rb`:
 
@@ -339,7 +339,7 @@ Replace `symmetric_encode_jwt` and `symmetric_decode_jwt`:
     end
 ```
 
-- [ ] **Step 6: Run crypto tests**
+- [x] **Step 6: Run crypto tests**
 
 Run:
 
@@ -350,7 +350,7 @@ rbenv exec bundle exec rake test TEST=test/better_auth/crypto_test.rb
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/better_auth/better_auth.gemspec packages/better_auth/Gemfile.lock packages/better_auth/lib/better_auth/crypto.rb packages/better_auth/lib/better_auth/crypto/jwe.rb packages/better_auth/test/better_auth/crypto_test.rb
