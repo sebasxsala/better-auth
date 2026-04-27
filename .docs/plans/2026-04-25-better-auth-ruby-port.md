@@ -47,7 +47,7 @@ BetterAuth.auth(options)
   -> BetterAuth::Endpoint + BetterAuth::API
   -> BetterAuth::Cookies / BetterAuth::SessionStore
   -> BetterAuth::Adapters::InternalAdapter
-  -> BetterAuth::Adapters::{Memory, SQL, Rails}
+  -> BetterAuth::Adapters::{Memory, SQL, Rails, Hanami}
   -> BetterAuth::Plugins::*
 ```
 
@@ -539,7 +539,30 @@ Completion criteria:
 
 - [x] Rails adapter passes specs and no Rails dependency is introduced into `packages/better_auth`.
 
-## Phase 14: Documentation, Examples, Release Readiness
+## Phase 14: Hanami Adapter
+
+**Purpose:** Add Hanami ergonomics after the Rack/core and Rails integration are stable, while keeping auth behavior in the framework-agnostic core layer.
+
+**Architecture decision:** Hanami mounts the same core Rack auth object. The Hanami package owns provider setup, route helpers, ROM::SQL migration rendering, Sequel persistence through Hanami's DB gateway, action helpers, and Rake/generator commands.
+
+**Files:**
+
+- Create package under `/Users/sebastiansala/projects/better-auth/packages/better_auth-hanami/`
+- Create feature notes at `/Users/sebastiansala/projects/better-auth/.docs/features/hanami-adapter.md`
+- Create public guide at `/Users/sebastiansala/projects/better-auth/docs/content/docs/integrations/hanami.mdx`
+
+Steps:
+
+- [x] Implement `BetterAuth::Hanami.configure` and `BetterAuth::Hanami.auth`.
+- [x] Implement Hanami route mounting through `BetterAuth::Hanami::Routing` and `MountedApp`.
+- [x] Implement `BetterAuth::Hanami::SequelAdapter` for Hanami ROM/Sequel persistence.
+- [x] Implement ROM::SQL migration generation from `BetterAuth::Schema`, including plugin schemas.
+- [x] Implement action helpers and Rake/generator commands.
+- [x] Generate Hanami `app/repo.rb`, relations, and repos for Better Auth core and configured plugin tables.
+- [x] Document limitations: Hanami 2.3+ only, no Hanami 1.x or 2.2/Rack 2 support, no stable `hanami better_auth` CLI integration.
+- [x] Add RSpec coverage for route mounting, configuration, generated migrations, generated relations/repos, Sequel CRUD/joins, Rack signup/signin/get-session flow, action helpers, and generators.
+
+## Phase 15: Documentation, Examples, Release Readiness
 
 **Purpose:** Make the port usable and maintainable.
 

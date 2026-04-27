@@ -1,0 +1,86 @@
+# frozen_string_literal: true
+
+require_relative "../../spec_helper"
+
+class BetterAuthHanamiFakeRoutes
+  include BetterAuth::Hanami::Routing
+
+  attr_reader :calls
+
+  def initialize
+    @calls = []
+  end
+
+  BetterAuth::Hanami::Routing::HTTP_METHODS.each do |method_name|
+    define_method(method_name) do |path, to:, **options|
+      calls << [method_name, path, to, options]
+    end
+  end
+end
+
+RSpec.describe BetterAuth::Hanami::Routing do
+  it "registers all supported methods for the base path and wildcard path" do
+    routes = BetterAuthHanamiFakeRoutes.new
+    auth = BetterAuth.auth(secret: secret, database: :memory)
+
+    routes.better_auth(auth: auth)
+
+    expect(routes.calls.map { |call| call[0] }.uniq).to eq(%i[get post put patch delete options])
+    expect(routes.calls.map { |call| call[1] }).to include("/api/auth", "/api/auth/*path")
+    expect(routes.calls.all? { |call| call[2].is_a?(BetterAuth::Hanami::MountedApp) }).to be(true)
+  end
+
+  it "normalizes custom mount paths" do
+    routes = BetterAuthHanamiFakeRoutes.new
+    routes.better_auth(auth: BetterAuth.auth(secret: secret, database: :memory), at: "auth/")
+
+    expect(routes.calls.map { |call| call[1] }).to include("/auth", "/auth/*path")
+  end
+
+  it "dispatches core endpoints through a real Hanami route set" do
+    auth = BetterAuth.auth(secret: secret, database: :memory)
+    router = build_hanami_router(auth)
+
+    response = Rack::MockRequest.new(router).get("/api/auth/ok")
+
+    expect(response.status).to eq(200)
+    expect(JSON.parse(response.body)).to eq("ok" => true)
+  end
+
+  it "dispatches plugin endpoints with request cookies and response Set-Cookie headers" do
+    plugin = BetterAuth::Plugin.new(
+      id: "hanami-plugin",
+      endpoints: {
+        hanami_probe: BetterAuth::Endpoint.new(path: "/hanami-probe", method: "GET") do |ctx|
+          ctx.set_cookie("hanami_probe", "1", path: "/")
+          {mounted: true, path: ctx.path, cookie: ctx.get_cookie("hanami_input")}
+        end
+      }
+    )
+    auth = BetterAuth.auth(secret: secret, database: :memory, plugins: [plugin])
+    router = build_hanami_router(auth)
+
+    response = Rack::MockRequest.new(router).get("/api/auth/hanami-probe", "HTTP_COOKIE" => "hanami_input=present")
+
+    expect(response.status).to eq(200)
+    expect(JSON.parse(response.body)).to eq("mounted" => true, "path" => "/hanami-probe", "cookie" => "present")
+    expect(response["set-cookie"]).to include("hanami_probe=1")
+  end
+
+  def secret
+    "test-secret-that-is-long-enough-for-validation"
+  end
+
+  def build_hanami_router(auth)
+    require "hanami/routes"
+    require "hanami/slice/router"
+    require "dry/inflector"
+
+    routes = Class.new(Hanami::Routes) do
+      include BetterAuth::Hanami::Routing
+
+      better_auth auth: auth
+    end
+    Hanami::Slice::Router.new(routes: routes.routes, inflector: Dry::Inflector.new) {}
+  end
+end

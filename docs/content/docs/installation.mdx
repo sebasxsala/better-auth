@@ -20,6 +20,12 @@ For Rails:
 gem "better_auth-rails"
 ```
 
+For Hanami 2.3+ apps:
+
+```ruby title="Gemfile"
+gem "better_auth-hanami"
+```
+
 Then install dependencies:
 
 ```bash title="Terminal"
@@ -66,7 +72,8 @@ auth = BetterAuth.auth(
 ```
 
 The memory adapter is useful for development and tests. Production apps should
-use PostgreSQL, MySQL, or the Rails ActiveRecord adapter.
+use PostgreSQL, MySQL, the Rails ActiveRecord adapter, or the Hanami Sequel
+adapter.
 </Step>
 
 <Step>
@@ -100,6 +107,13 @@ Rails apps normally use the generated ActiveRecord adapter configuration:
 
 ```bash title="Terminal"
 bin/rails generate better_auth:install
+```
+
+For Hanami:
+
+```bash title="Terminal"
+bundle exec rake better_auth:init
+bin/hanami db migrate
 ```
 </Step>
 

@@ -1,0 +1,52 @@
+# frozen_string_literal: true
+
+require_relative "../../spec_helper"
+
+RSpec.describe BetterAuth::Hanami::Migration do
+  let(:config) { BetterAuth::Configuration.new(secret: secret, database: :memory) }
+
+  it "renders a ROM SQL migration from the core Better Auth schema" do
+    migration = described_class.render(config)
+
+    expect(migration).to include("ROM::SQL.migration do")
+    expect(migration).to include("create_table :users do")
+    expect(migration).to include("column :id, String, null: false")
+    expect(migration).to include("primary_key [:id]")
+    expect(migration).to include("column :email_verified, TrueClass, null: false, default: false")
+    expect(migration).to include("index :email, unique: true")
+    expect(migration).to include("foreign_key :user_id, :users, type: String, null: false, on_delete: :cascade")
+  end
+
+  it "renders plugin tables, defaults, indexes, and foreign keys" do
+    plugin = BetterAuth::Plugin.new(
+      id: "audit",
+      schema: {
+        auditLog: {
+          model_name: "audit_logs",
+          fields: {
+            id: {type: "string", required: true},
+            userId: {type: "string", references: {model: "user", field: "id", on_delete: "cascade"}, index: true},
+            action: {type: "string", required: true, unique: true},
+            attempts: {type: "number", required: true, default_value: 0},
+            createdAt: {type: "date", required: true}
+          }
+        }
+      }
+    )
+    plugin_config = BetterAuth::Configuration.new(secret: secret, database: :memory, plugins: [plugin])
+
+    migration = described_class.render(plugin_config)
+
+    expect(migration).to include("create_table :audit_logs do")
+    expect(migration).to include("foreign_key :user_id, :users, type: String, on_delete: :cascade")
+    expect(migration).to include("column :action, String, null: false")
+    expect(migration).to include("column :attempts, Integer, null: false, default: 0")
+    expect(migration).to include("column :created_at, DateTime, null: false")
+    expect(migration).to include("index :user_id")
+    expect(migration).to include("index :action, unique: true")
+  end
+
+  def secret
+    "test-secret-that-is-long-enough-for-validation"
+  end
+end

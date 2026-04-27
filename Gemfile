@@ -11,6 +11,7 @@ ruby file: "packages/better_auth/.ruby-version"
 # Esto permite trabajar en todos los packages simultáneamente
 gem "better_auth", path: "packages/better_auth"
 gem "better_auth-rails", path: "packages/better_auth-rails"
+gem "better_auth-hanami", path: "packages/better_auth-hanami"
 
 # Dependencias de desarrollo del workspace
 group :development, :test do
@@ -25,6 +26,9 @@ group :development, :test do
   gem "sqlite3", "~> 2.0"
   gem "mongo", "~> 2.21"
   gem "sequel", "~> 5.83"
+  gem "hanami", ">= 2.3", "< 2.4"
+  gem "hanami-router", ">= 2.3", "< 3"
+  gem "rom-sql", ">= 3.7", "< 4"
   gem "tiny_tds", "~> 2.1"
 
   # Build tasks
