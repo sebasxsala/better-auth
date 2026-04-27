@@ -15,6 +15,7 @@ RSpec.describe BetterAuth::Hanami do
       config.base_url = "http://localhost:2300"
       config.trusted_origins = ["http://localhost:2300"]
       config.email_and_password = {enabled: true}
+      config.password_hasher = :bcrypt
     end
 
     auth = described_class.auth
@@ -23,6 +24,7 @@ RSpec.describe BetterAuth::Hanami do
     expect(auth.context.options.base_path).to eq("/api/auth")
     expect(auth.context.options.base_url).to eq("http://localhost:2300")
     expect(auth.context.options.trusted_origins).to eq(["http://localhost:2300"])
+    expect(auth.context.options.password_hasher).to eq(:bcrypt)
   end
 
   it "returns a fresh auth instance when overrides are provided" do

@@ -15,6 +15,7 @@ RSpec.describe BetterAuth::Sinatra do
       config.database = :memory
       config.email_and_password = {enabled: true}
       config.trusted_origins = ["http://localhost:9292"]
+      config.password_hasher = :bcrypt
     end
 
     auth = described_class.auth
@@ -25,6 +26,7 @@ RSpec.describe BetterAuth::Sinatra do
     expect(auth.options.base_path).to eq("/api/auth")
     expect(auth.options.email_and_password[:enabled]).to be(true)
     expect(auth.options.trusted_origins).to include("http://localhost:9292")
+    expect(auth.options.password_hasher).to eq(:bcrypt)
   end
 
   it "does not memoize override auth instances" do

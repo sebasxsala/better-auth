@@ -227,7 +227,7 @@ module BetterAuth
         raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["USER_NOT_FOUND"]) unless found
 
         Routes.validate_password_length!(password, ctx.context.options.email_and_password)
-        hashed = Password.hash(password, hasher: ctx.context.options.email_and_password.dig(:password, :hash))
+        hashed = Routes.hash_password(ctx, password)
         account = found[:accounts].find { |entry| entry["providerId"] == "credential" }
         if account
           ctx.context.internal_adapter.update_password(found[:user]["id"], hashed)

@@ -27,7 +27,7 @@ Ruby exposes `BetterAuth::Endpoint`, `BetterAuth::API`, and `BetterAuth::Router`
 
 ### Dependency Decision
 
-Phase 2 intentionally does not add `rack-attack`, `rack-protection`, `dry-validation`, `addressable`, or `public_suffix` as runtime dependencies. The core gem instructions currently limit runtime dependencies to Rack/JSON/JWT/BCrypt, and upstream has Better Auth-specific behavior for endpoint hooks, origin callbacks, Fetch Metadata CSRF checks, plugin rate-limit rules, and schema error shapes. Adding generic Rack middleware here would make the Ruby port less flexible and could drift from upstream semantics.
+Phase 2 intentionally does not add `rack-attack`, `rack-protection`, `dry-validation`, `addressable`, or `public_suffix` as runtime dependencies. The core gem keeps endpoint behavior implemented locally with its core runtime dependencies plus Ruby/OpenSSL primitives; BCrypt is optional for applications that configure `password_hasher: :bcrypt`. Upstream has Better Auth-specific behavior for endpoint hooks, origin callbacks, Fetch Metadata CSRF checks, plugin rate-limit rules, and schema error shapes. Adding generic Rack middleware here would make the Ruby port less flexible and could drift from upstream semantics.
 
 The current design keeps extension points open:
 

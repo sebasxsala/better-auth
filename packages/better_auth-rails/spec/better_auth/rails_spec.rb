@@ -24,6 +24,7 @@ RSpec.describe BetterAuth::Rails do
       config.plugins = [plugin]
       config.trusted_origins = ["https://app.example.com"]
       config.hooks = {after: [after_hook]}
+      config.password_hasher = :bcrypt
     end
 
     auth = described_class.auth
@@ -33,6 +34,7 @@ RSpec.describe BetterAuth::Rails do
     expect(auth.options.plugins.map(&:id)).to eq(["rails-config"])
     expect(auth.options.trusted_origins).to eq(["https://app.example.com"])
     expect(auth.options.hooks).to eq(after: [after_hook])
+    expect(auth.options.password_hasher).to eq(:bcrypt)
   end
 
   it "passes session advanced experimental and social provider options to core auth" do

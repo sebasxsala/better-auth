@@ -42,7 +42,7 @@ module BetterAuth
             )
           end
 
-          hashed_password = Password.hash(password, hasher: email_config.dig(:password, :hash))
+          hashed_password = hash_password(ctx, password)
           created_user = create_sign_up_user(ctx, body, email, name, image)
           raise APIError.new("UNPROCESSABLE_ENTITY", message: BASE_ERROR_CODES["FAILED_TO_CREATE_USER"]) unless created_user
 

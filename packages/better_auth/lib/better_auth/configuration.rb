@@ -16,6 +16,8 @@ module BetterAuth
       min_password_length: 8,
       max_password_length: 128
     }.freeze
+    DEFAULT_PASSWORD_HASHER = :scrypt
+    SUPPORTED_PASSWORD_HASHERS = [:scrypt, :bcrypt].freeze
     DEFAULT_STATELESS_SESSION = {
       cookie_cache: {
         enabled: true,
@@ -43,6 +45,7 @@ module BetterAuth
       :verification,
       :advanced,
       :email_and_password,
+      :password_hasher,
       :email_verification,
       :social_providers,
       :experimental,
@@ -78,6 +81,7 @@ module BetterAuth
       @user = symbolize_keys(options[:user] || {})
       @verification = symbolize_keys(options[:verification] || {})
       @email_and_password = normalize_email_and_password(options[:email_and_password])
+      @password_hasher = normalize_password_hasher(options[:password_hasher])
       @email_verification = symbolize_keys(options[:email_verification] || {})
       @experimental = normalize_experimental(options[:experimental])
       @rate_limit = normalize_rate_limit(options[:rate_limit])
@@ -112,6 +116,7 @@ module BetterAuth
         verification: verification,
         advanced: advanced,
         email_and_password: email_and_password,
+        password_hasher: password_hasher,
         email_verification: email_verification,
         social_providers: social_providers,
         experimental: experimental,
@@ -278,6 +283,13 @@ module BetterAuth
 
     def normalize_email_and_password(value)
       deep_merge(DEFAULT_EMAIL_AND_PASSWORD, symbolize_keys(value || {}))
+    end
+
+    def normalize_password_hasher(value)
+      hasher = (value || DEFAULT_PASSWORD_HASHER).to_sym
+      return hasher if SUPPORTED_PASSWORD_HASHERS.include?(hasher)
+
+      raise Error, "Unsupported password hasher: #{value}. Supported hashers are :scrypt and :bcrypt."
     end
 
     def normalize_experimental(value)

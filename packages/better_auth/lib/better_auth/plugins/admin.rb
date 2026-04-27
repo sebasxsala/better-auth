@@ -180,7 +180,7 @@ module BetterAuth
         raise APIError.new("INTERNAL_SERVER_ERROR", message: ADMIN_ERROR_CODES.fetch("FAILED_TO_CREATE_USER")) unless user
 
         if body[:password].to_s != ""
-          ctx.context.internal_adapter.link_account(userId: user["id"], providerId: "credential", accountId: user["id"], password: Password.hash(body[:password]))
+          ctx.context.internal_adapter.link_account(userId: user["id"], providerId: "credential", accountId: user["id"], password: Routes.hash_password(ctx, body[:password]))
         end
         ctx.json({user: Schema.parse_output(ctx.context.options, "user", user)})
       end
@@ -340,7 +340,7 @@ module BetterAuth
         max = ctx.context.options.email_and_password[:max_password_length]
         raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES.fetch("PASSWORD_TOO_SHORT")) if password.length < min
         raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES.fetch("PASSWORD_TOO_LONG")) if password.length > max
-        ctx.context.internal_adapter.update_password(user_id, Password.hash(password))
+        ctx.context.internal_adapter.update_password(user_id, Routes.hash_password(ctx, password))
         ctx.json({status: true})
       end
     end

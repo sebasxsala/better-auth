@@ -64,7 +64,7 @@ module BetterAuth
         raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["INVALID_TOKEN"]) unless verification && !expired_time?(verification["expiresAt"])
 
         user_id = verification["value"]
-        hashed = Password.hash(password, hasher: ctx.context.options.email_and_password.dig(:password, :hash))
+        hashed = hash_password(ctx, password)
         account = ctx.context.internal_adapter.find_accounts(user_id).find { |entry| entry["providerId"] == "credential" }
         if account
           ctx.context.internal_adapter.update_password(user_id, hashed)
@@ -88,11 +88,7 @@ module BetterAuth
         session = current_session(ctx, sensitive: true)
         password = normalize_hash(ctx.body)["password"].to_s
         account = credential_account(ctx, session[:user]["id"])
-        valid = account && account["password"] && Password.verify(
-          password: password,
-          hash: account["password"],
-          verifier: ctx.context.options.email_and_password.dig(:password, :verify)
-        )
+        valid = account && account["password"] && verify_password_value(ctx, password, account["password"])
         raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["INVALID_PASSWORD"]) unless valid
 
         ctx.json({status: true})
@@ -105,6 +101,23 @@ module BetterAuth
       end
       raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["PASSWORD_TOO_SHORT"]) if password.length < email_config[:min_password_length].to_i
       raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["PASSWORD_TOO_LONG"]) if password.length > email_config[:max_password_length].to_i
+    end
+
+    def self.hash_password(ctx, password)
+      Password.hash(
+        password,
+        hasher: ctx.context.options.email_and_password.dig(:password, :hash),
+        algorithm: ctx.context.options.password_hasher
+      )
+    end
+
+    def self.verify_password_value(ctx, password, digest)
+      Password.verify(
+        password: password,
+        hash: digest,
+        verifier: ctx.context.options.email_and_password.dig(:password, :verify),
+        algorithm: ctx.context.options.password_hasher
+      )
     end
 
     def self.credential_account(ctx, user_id)

@@ -23,11 +23,11 @@ module BetterAuth
         current_password = body["currentPassword"] || body["current_password"]
         validate_password_length!(new_password, ctx.context.options.email_and_password)
         account = credential_account(ctx, session[:user]["id"])
-        unless account && account["password"] && Password.verify(password: current_password.to_s, hash: account["password"])
+        unless account && account["password"] && verify_password_value(ctx, current_password.to_s, account["password"])
           raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["INVALID_PASSWORD"])
         end
 
-        ctx.context.internal_adapter.update_account(account["id"], password: Password.hash(new_password))
+        ctx.context.internal_adapter.update_account(account["id"], password: hash_password(ctx, new_password))
         token = nil
         if body["revokeOtherSessions"] || body["revoke_other_sessions"]
           ctx.context.internal_adapter.delete_sessions(session[:user]["id"])
@@ -52,7 +52,7 @@ module BetterAuth
           userId: session[:user]["id"],
           providerId: "credential",
           accountId: session[:user]["id"],
-          password: Password.hash(new_password)
+          password: hash_password(ctx, new_password)
         )
         ctx.json({status: true})
       end
@@ -67,7 +67,7 @@ module BetterAuth
         body = normalize_hash(ctx.body)
         if body["password"]
           account = credential_account(ctx, session[:user]["id"])
-          unless account && account["password"] && Password.verify(password: body["password"], hash: account["password"])
+          unless account && account["password"] && verify_password_value(ctx, body["password"], account["password"])
             raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["INVALID_PASSWORD"])
           end
         end

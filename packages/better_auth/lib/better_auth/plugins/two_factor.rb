@@ -382,7 +382,7 @@ module BetterAuth
 
     def two_factor_check_password!(ctx, user_id, password)
       account = ctx.context.internal_adapter.find_accounts(user_id).find { |entry| entry["providerId"] == "credential" }
-      unless account && account["password"] && Password.verify(password: password.to_s, hash: account["password"], verifier: ctx.context.options.email_and_password.dig(:password, :verify))
+      unless account && account["password"] && Routes.verify_password_value(ctx, password.to_s, account["password"])
         raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["INVALID_PASSWORD"])
       end
     end

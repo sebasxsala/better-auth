@@ -94,11 +94,11 @@ The most important issue is not just "missing tests"; in several areas the curre
 
 ## Highest-Priority Findings
 
-### P1 - BCrypt long-password truncation
+### P1 - Password hashing default drift
 
-Ruby hashes passwords with BCrypt in `packages/better_auth/lib/better_auth/password.rb`. Upstream uses scrypt over normalized input and has tests for very long passwords. BCrypt only considers the first 72 bytes, so two long passwords that differ after that boundary can verify as the same password.
+Ruby previously hashed passwords with BCrypt in `packages/better_auth/lib/better_auth/password.rb`. Upstream uses scrypt over normalized input and has tests for very long passwords. BCrypt only considers the first 72 bytes, so two long passwords that differ after that boundary can verify as the same password.
 
-Resolved 2026-04-27: `BetterAuth::Password` now pre-hashes password input with SHA-256 before BCrypt for new hashes, keeps legacy raw BCrypt verification, and covers upstream-equivalent long-password, unique-salt, case-sensitive, and Unicode tests.
+Resolved 2026-04-27: `BetterAuth::Password` now defaults to upstream-compatible scrypt with NFKC-normalized input, exposes `password_hasher: :bcrypt` as an optional Ruby adaptation, keeps legacy raw BCrypt and `bcrypt_sha256$` verification when `bcrypt` is installed, and covers upstream-equivalent long-password, unique-salt, case-sensitive, Unicode, custom-callback, and optional-BCrypt tests.
 
 ### P1 - Session cookie cache stores unfiltered fields
 
@@ -214,7 +214,7 @@ Covered locally:
 - Signed session token cookie parsing.
 - Basic cookie attributes, chunk reassembly, cache version check.
 - HMAC, AES-GCM helper round trip, JWT tamper rejection.
-- BCrypt happy path and invalid hash.
+- Scrypt default, optional BCrypt, legacy BCrypt, custom callbacks, and invalid hash handling.
 
 Missing or thin versus upstream:
 
@@ -228,7 +228,7 @@ Missing or thin versus upstream:
 
 Important logic mismatches:
 
-- Password hashing now avoids BCrypt truncation for new hashes by pre-hashing input before BCrypt.
+- Password hashing now defaults to upstream-compatible scrypt; BCrypt is optional and legacy hashes still verify when the optional gem is installed.
 - Unfiltered cache fields.
 - Dont-remember refresh behavior.
 - Tampered cache can fall back to database while upstream invalidates/returns null in several paths.
@@ -383,7 +383,7 @@ The docs are useful but need continuous status synchronization:
 ## Recommended Next Work Order
 
 1. Fix security-sensitive session/cookie/password gaps:
-   - Long-password hashing. (Resolved 2026-04-27.)
+   - Password hashing default drift and long-password behavior. (Resolved 2026-04-27.)
    - Filter `returned: false` fields from cookie cache.
    - Preserve `rememberMe: false` semantics through refresh.
    - Validate GET callback URLs.

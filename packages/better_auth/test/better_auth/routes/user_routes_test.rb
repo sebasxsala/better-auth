@@ -36,6 +36,27 @@ class BetterAuthRoutesUserTest < Minitest::Test
     assert auth.api.sign_in_email(body: {email: "change-password@example.com", password: "new-password"})[:token]
   end
 
+  def test_change_password_uses_configured_custom_password_callbacks
+    auth = build_auth(
+      email_and_password: {
+        password: {
+          hash: ->(password) { "custom:#{password.reverse}" },
+          verify: ->(password, digest) { digest == "custom:#{password.reverse}" }
+        }
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "custom-change@example.com", password: "password123")
+
+    auth.api.change_password(
+      headers: {"cookie" => cookie},
+      body: {currentPassword: "password123", newPassword: "new-password"}
+    )
+
+    account = auth.context.adapter.find_one(model: "account", where: [{field: "providerId", value: "credential"}])
+    assert_equal "custom:drowssap-wen", account["password"]
+    assert auth.api.sign_in_email(body: {email: "custom-change@example.com", password: "new-password"})[:token]
+  end
+
   def test_set_password_creates_credential_account_for_session_user_without_password
     auth = build_auth
     user = auth.context.internal_adapter.create_user(email: "set-password@example.com", name: "Set", emailVerified: true)
