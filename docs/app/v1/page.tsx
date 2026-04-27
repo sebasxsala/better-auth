@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { GITHUB_REPO } from "@/lib/constants";
 import { BackgroundLines } from "./bg-line";
 
 export const metadata: Metadata = {
@@ -184,7 +185,7 @@ function ReleaseRelated() {
 						</p>
 						<Link
 							className="w-full"
-							href="https://github.com/sebasxala/better-off"
+							href={GITHUB_REPO.url}
 						>
 							<Button variant="outline" className="w-full justify-between">
 								<div className="flex items-center gap-2">

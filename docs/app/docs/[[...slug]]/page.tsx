@@ -20,6 +20,7 @@ import { AddToCursor } from "@/components/mdx/add-to-cursor";
 import DatabaseTable from "@/components/mdx/database-tables";
 import { Callout } from "@/components/ui/callout";
 import { AnimatePresence } from "@/components/ui/fade-in";
+import { GITHUB_REPO } from "@/lib/constants";
 import { source } from "@/lib/source";
 import { absoluteUrl, cn, isSubpageOf } from "@/lib/utils";
 import { LLMCopyButton, ViewOptions } from "./page.client";
@@ -47,9 +48,9 @@ export default async function Page({
 			toc={page.data.toc}
 			full={page.data.full}
 			editOnGithub={{
-				owner: "sebasxala",
-				repo: "better-off",
-				branch: "canary",
+				owner: GITHUB_REPO.owner,
+				repo: GITHUB_REPO.name,
+				branch: "main",
 				path: `/docs/content/docs/${page.path}`,
 			}}
 			tableOfContent={{
@@ -65,7 +66,7 @@ export default async function Page({
 					<LLMCopyButton />
 					<ViewOptions
 						markdownUrl={`${page.url}.mdx`}
-						githubUrl={`https://github.com/sebasxala/better-off/blob/canary/docs/content/docs/${page.path}`}
+						githubUrl={`${GITHUB_REPO.url}/blob/main/docs/content/docs/${page.path}`}
 					/>
 				</div>
 			)}

@@ -1,4 +1,5 @@
 import { Feed } from "feed";
+import { SHOW_UPSTREAM_BLOG_CONTENT } from "./constants";
 import { blogs } from "./source";
 import { baseUrl } from "./utils";
 
@@ -15,7 +16,10 @@ export function getRSS() {
 		copyright: `All rights reserved ${new Date().getFullYear()}, Better Auth Inc.`,
 	});
 
-	for (const page of blogs.getPages()) {
+	// Upstream blog entries stay in docs/content/blogs, but RSS should not expose them while hidden.
+	const pages = SHOW_UPSTREAM_BLOG_CONTENT ? blogs.getPages() : [];
+
+	for (const page of pages) {
 		const url = page.url.replace("blogs/", "blog/");
 
 		feed.addItem({

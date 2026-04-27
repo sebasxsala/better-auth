@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useId } from "react";
 import Markdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
+import { GITHUB_REPO } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { IconLink } from "./changelog-layout";
 import { BookIcon, GitHubIcon, XIcon } from "./icons";
@@ -23,7 +24,7 @@ const ChangelogPage = async () => {
 			prerelease: boolean;
 			published_at: string;
 		}[]
-	>("https://api.github.com/repos/better-auth/better-auth/releases");
+	>(`${GITHUB_REPO.apiUrl}/releases`);
 
 	const messages = releases
 		?.filter((release) => !release.prerelease)
@@ -93,7 +94,7 @@ const ChangelogPage = async () => {
 							Documentation
 						</IconLink>
 						<IconLink
-							href="https://github.com/sebasxala/better-off"
+							href={GITHUB_REPO.url}
 							icon={GitHubIcon}
 							className="flex-none text-gray-600 dark:text-gray-300"
 						>

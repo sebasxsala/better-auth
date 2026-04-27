@@ -16,6 +16,7 @@ import DatabaseTable from "@/components/mdx/database-tables";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Callout } from "@/components/ui/callout";
 import { AnimatePresence } from "@/components/ui/fade-in";
+import { SHOW_UPSTREAM_BLOG_CONTENT } from "@/lib/constants";
 import { blogs } from "@/lib/source";
 import { absoluteUrl, cn, formatDate } from "@/lib/utils";
 import { BlogPage } from "../_components/blog-list";
@@ -33,6 +34,9 @@ export default async function Page({
 	params: Promise<{ slug?: string[] }>;
 }) {
 	const { slug } = await params;
+	if (!SHOW_UPSTREAM_BLOG_CONTENT) {
+		return <BlogPage />;
+	}
 	if (!slug) {
 		return <BlogPage />;
 	}
@@ -212,7 +216,7 @@ export async function generateMetadata({
 	const baseUrl = process.env.NEXT_PUBLIC_URL || process.env.VERCEL_URL;
 	const ogImage = `${baseUrl?.startsWith("http") ? baseUrl : `https://${baseUrl}`}/release-og/blogs.png`;
 
-	if (!slug) {
+	if (!slug || !SHOW_UPSTREAM_BLOG_CONTENT) {
 		return {
 			metadataBase: new URL(
 				`${baseUrl?.startsWith("http") ? baseUrl : `https://${baseUrl}`}/blogs`,
@@ -273,5 +277,8 @@ export async function generateMetadata({
 }
 
 export function generateStaticParams() {
+	if (!SHOW_UPSTREAM_BLOG_CONTENT) {
+		return [];
+	}
 	return blogs.generateParams();
 }

@@ -2,6 +2,7 @@
 import { ArrowUpRight, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { GITHUB_REPO } from "@/lib/constants";
 import { kFormatter } from "@/lib/utils";
 export default function Stats({
 	npmDownloads,
@@ -217,7 +218,7 @@ export default function Stats({
 							<div className="flex -p-8 items-end w-full gap-2 mt-4 text-gray-400">
 								<Link
 									className="w-full"
-									href="https://github.com/sebasxala/better-off"
+									href={GITHUB_REPO.url}
 									rel="noopener noreferrer"
 									target="_blank"
 								>

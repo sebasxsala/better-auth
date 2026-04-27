@@ -3,6 +3,7 @@ import { RssIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { formatBlogDate } from "@/lib/blog";
+import { GITHUB_REPO, SHOW_UPSTREAM_BLOG_CONTENT } from "@/lib/constants";
 import { blogs } from "@/lib/source";
 import { IconLink } from "./changelog-layout";
 import { Glow } from "./default-changelog";
@@ -13,6 +14,17 @@ export async function BlogPage() {
 	const posts = blogs.getPages().sort((a, b) => {
 		return new Date(b.data.date).getTime() - new Date(a.data.date).getTime();
 	});
+	if (!SHOW_UPSTREAM_BLOG_CONTENT) {
+		return (
+			<div className="mx-auto flex min-h-[60vh] max-w-3xl flex-col justify-center px-6 py-24 text-center">
+				{/* Upstream blog index and article rendering are intentionally kept below in this file.
+				    Hidden while the Ruby docs content strategy is rebuilt. */}
+				<p className="text-sm uppercase tracking-wider text-muted-foreground">
+					Blog
+				</p>
+			</div>
+		);
+	}
 	return (
 		<div className="md:grid md:grid-cols-2 items-start">
 			<div className="bg-gradient-to-tr hidden md:block overflow-hidden px-12 py-24 md:py-0 -mt-[100px] md:h-dvh relative md:sticky top-0 from-transparent dark:via-stone-950/5 via-stone-100/30 to-stone-200/20 dark:to-transparent/10">
@@ -37,7 +49,7 @@ export async function BlogPage() {
 							Documentation
 						</IconLink>
 						<IconLink
-							href="https://github.com/sebasxala/better-off"
+							href={GITHUB_REPO.url}
 							icon={GitHubIcon}
 							className="flex-none text-gray-600 dark:text-gray-300"
 						>

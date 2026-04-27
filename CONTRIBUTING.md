@@ -170,4 +170,4 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ## Security Issues
 
-For security vulnerabilities, **do not open a public issue**. Email [security@better-auth.com](mailto:security@better-auth.com) with details. See [SECURITY.md](SECURITY.md) for the full policy.
+For security vulnerabilities, **do not open a public issue**. Email [security@openparcel.dev](mailto:security@openparcel.dev) with details. See [SECURITY.md](SECURITY.md) for the full policy.

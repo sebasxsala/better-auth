@@ -13,6 +13,7 @@ import { GenerateSecret } from "@/components/generate-secret";
 import DatabaseTable from "@/components/mdx/database-tables";
 import { Callout } from "@/components/ui/callout";
 import { AnimatePresence } from "@/components/ui/fade-in";
+import { SHOW_UPSTREAM_CHANGELOG_CONTENT } from "@/lib/constants";
 import { changelogs } from "@/lib/source";
 import { absoluteUrl, cn, formatDate } from "@/lib/utils";
 import { IconLink } from "../_components/changelog-layout";
@@ -24,12 +25,27 @@ import { StarField } from "../_components/stat-field";
 const metaTitle = "Changelogs";
 const metaDescription = "Latest changes , fixes and updates.";
 
+function HiddenChangelogPage() {
+	return (
+		<div className="mx-auto flex min-h-[60vh] max-w-3xl flex-col justify-center px-6 py-24 text-center">
+			{/* Upstream changelog rendering and MDX entries are preserved below and in docs/content/changelogs.
+			    Hidden while Ruby changelogs are planned separately. */}
+			<p className="text-sm uppercase tracking-wider text-muted-foreground">
+				Changelogs
+			</p>
+		</div>
+	);
+}
+
 export default async function Page({
 	params,
 }: {
 	params: Promise<{ slug?: string[] }>;
 }) {
 	const { slug } = await params;
+	if (!SHOW_UPSTREAM_CHANGELOG_CONTENT) {
+		return <HiddenChangelogPage />;
+	}
 	const page = changelogs.getPage(slug);
 	if (!slug) {
 		return <ChangelogPage />;
@@ -129,7 +145,7 @@ export async function generateMetadata({
 	const baseUrl = process.env.NEXT_PUBLIC_URL || process.env.VERCEL_URL;
 	const ogImage = `${baseUrl?.startsWith("http") ? baseUrl : `https://${baseUrl}`}/release-og/changelogs.png`;
 
-	if (!slug) {
+	if (!slug || !SHOW_UPSTREAM_CHANGELOG_CONTENT) {
 		return {
 			metadataBase: new URL(
 				`${baseUrl?.startsWith("http") ? baseUrl : `https://${baseUrl}`}/changelogs`,
@@ -186,5 +202,8 @@ export async function generateMetadata({
 }
 
 export function generateStaticParams() {
+	if (!SHOW_UPSTREAM_CHANGELOG_CONTENT) {
+		return [];
+	}
 	return changelogs.generateParams();
 }

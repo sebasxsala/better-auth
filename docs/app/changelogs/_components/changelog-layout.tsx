@@ -2,6 +2,7 @@ import { DiscordLogoIcon } from "@radix-ui/react-icons";
 import clsx from "clsx";
 import Link from "next/link";
 import { useId } from "react";
+import { GITHUB_REPO } from "@/lib/constants";
 
 function BookIcon(props: React.ComponentPropsWithoutRef<"svg">) {
 	return (
@@ -49,7 +50,7 @@ export function Intro() {
 					Documentation
 				</IconLink>
 				<IconLink
-					href="https://github.com/sebasxala/better-off"
+					href={GITHUB_REPO.url}
 					icon={GitHubIcon}
 					className="flex-none text-gray-600 dark:text-gray-300"
 				>

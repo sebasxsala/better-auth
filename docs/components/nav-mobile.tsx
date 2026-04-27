@@ -223,10 +223,7 @@ export const navMenu: {
 		name: "examples",
 		path: "/docs/examples/next-js",
 	},
-	{
-		name: "changelogs",
-		path: "/changelogs",
-	},
+	// Ruby changelogs will be surfaced differently, so keep the route but hide the nav item.
 	{
 		name: "blogs",
 		path: "/blog",
@@ -235,8 +232,5 @@ export const navMenu: {
 		name: "community",
 		path: "/community",
 	},
-	{
-		name: "enterprise",
-		path: "/enterprise",
-	},
+	// Enterprise remains available at /enterprise, but is hidden from mobile nav for now.
 ];

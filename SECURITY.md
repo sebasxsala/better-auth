@@ -5,7 +5,7 @@
 If you believe you've found a security vulnerability, please follow these steps:
 
 1. **Do not** disclose the vulnerability publicly until it has been addressed by our team.
-2. Email your findings to `security@better-auth.com`. Include:
+2. Email your findings to `security@openparcel.dev`. Include:
    - A description of the vulnerability
    - Steps to reproduce the vulnerability
    - Potential impact of the vulnerability

@@ -1,3 +1,4 @@
+import { GITHUB_REPO } from "@/lib/constants";
 import { kFormatter } from "@/lib/utils";
 
 export function GithubStat({ stars }: { stars: string | null }) {
@@ -10,7 +11,7 @@ export function GithubStat({ stars }: { stars: string | null }) {
 
 	return (
 		<a
-			href="https://github.com/sebasxala/better-off"
+			href={GITHUB_REPO.url}
 			target="_blank"
 			rel="noopener noreferrer"
 			aria-label={`Star Better Auth on GitHub - ${kFormatter(result)} stars`}

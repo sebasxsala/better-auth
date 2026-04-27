@@ -1,5 +1,6 @@
 import { ImageResponse } from "@vercel/og";
 import * as z from "zod";
+import { GITHUB_REPO } from "@/lib/constants";
 export const runtime = "edge";
 
 const ogSchema = z.object({
@@ -176,7 +177,7 @@ export async function GET(req: Request) {
 								}}
 								tw="flex ml-2"
 							>
-								github.com/sebasxala/better-off
+								github.com/{GITHUB_REPO.owner}/{GITHUB_REPO.name}
 							</span>
 						</div>
 					</div>

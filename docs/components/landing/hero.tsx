@@ -9,6 +9,7 @@ import { Highlight, themes } from "prism-react-renderer";
 import { useEffect, useId, useState } from "react";
 import useMeasure from "react-use-measure";
 import { Button } from "@/components/ui/button";
+import { GITHUB_REPO } from "@/lib/constants";
 import { GradientBG } from "./gradient-bg";
 import { Spotlight } from "./spotlight";
 
@@ -85,10 +86,10 @@ export default function Hero() {
 											<span className="font-mono text-xs font-semibold">gem</span>
 										</Link>
 										<Link
-											href="https://github.com/sebasxala/better-off"
+											href={GITHUB_REPO.url}
 											target="_blank"
 											rel="noopener noreferrer"
-											aria-label="View better-off repository on GitHub"
+											aria-label="View Better Auth Ruby repository on GitHub"
 										>
 											<svg
 												xmlns="http://www.w3.org/2000/svg"

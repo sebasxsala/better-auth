@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Section from "@/components/landing/section";
+import { GITHUB_REPO } from "@/lib/constants";
 import CommunityHeader from "./_components/header";
 import Stats from "./_components/stats";
 
@@ -59,7 +60,7 @@ async function getNPMPackageDownloads() {
 async function getGitHubStars() {
 	try {
 		const response = await fetch(
-			"https://api.github.com/repos/better-auth/better-auth",
+			GITHUB_REPO.apiUrl,
 			{
 				next: {
 					revalidate: 60,

@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { GithubStat } from "./github-stat";
-import { Testimonial } from "./landing/testimonials";
 import { Ripple } from "./ripple";
 
 const features = [
@@ -117,9 +116,8 @@ export default function Features({ stars }: { stars: string | null }) {
 						</div>
 					))}
 				</div>
-				<div className="w-full md:border-l-[1.2px] md:border-t-[1.2px]">
-					<Testimonial />
-				</div>
+				{/* Upstream social-proof testimonials are preserved in ./landing/testimonials.tsx.
+				    Hidden for the Ruby docs until Ruby-specific proof is ready. */}
 
 				<div className="relative col-span-3 md:border-l-[1.2px]  h-full py-20">
 					<div className="w-full h-full p-16 pt-10 md:px-10 2xl:px-16">

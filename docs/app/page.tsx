@@ -2,11 +2,12 @@ import Link from "next/link";
 import Features from "@/components/features";
 import Hero from "@/components/landing/hero";
 import Section from "@/components/landing/section";
+import { GITHUB_REPO } from "@/lib/constants";
 
 async function getGitHubStars() {
 	try {
 		const response = await fetch(
-			"https://api.github.com/repos/sebasxala/better-off",
+			GITHUB_REPO.apiUrl,
 			{
 				next: {
 					revalidate: 60,
@@ -38,14 +39,14 @@ export default async function HomePage() {
 								</span>
 								<span className="text-zinc-400 hidden md:block">|</span>
 								<Link
-									href="https://github.com/sebasxala/better-off"
+									href={GITHUB_REPO.url}
 									className="font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 hidden dark:hover:text-blue-300 transition-colors md:block"
 								>
 									View on GitHub →
 								</Link>
 							</span>
 							<Link
-								href="https://github.com/sebasxala/better-off"
+								href={GITHUB_REPO.url}
 								className="font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 text-xs dark:hover:text-blue-300 transition-colors md:hidden"
 							>
 								View on GitHub →

@@ -7,6 +7,7 @@ import { Logo } from "./logo";
 import LogoContextMenu from "./logo-context-menu";
 import { NavLink } from "./nav-link";
 import { NavbarMobile, NavbarMobileBtn } from "./nav-mobile";
+import { GITHUB_REPO } from "@/lib/constants";
 
 export const navMenu = [
 	{
@@ -19,10 +20,8 @@ export const navMenu = [
 
 		path: "/docs",
 	},
-	{
-		name: "changelogs",
-		path: "/changelogs",
-	},
+	// Ruby changelogs will be published through a Ruby-specific flow later.
+	// Keep the /changelogs route in the app, but hide it from the primary nav.
 	{
 		name: "blogs",
 		path: "/blog",
@@ -107,11 +106,9 @@ export const Navbar = () => {
 								{menu.name}
 							</NavLink>
 						))}
-						<NavLink href="/enterprise" className="relative bg-muted/30">
-							enterprise
-						</NavLink>
+						{/* Enterprise page is preserved at /enterprise, but hidden from nav until the Ruby offering is ready. */}
 						<NavLink
-							href="https://github.com/sebasxala/better-off"
+							href={GITHUB_REPO.url}
 							className="bg-muted/20"
 							external
 							aria-label="View Better Auth repository on GitHub"

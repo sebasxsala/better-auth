@@ -27,7 +27,7 @@ We are committed to fostering an environment that respects and promotes the dign
 
 ## Reporting an Issue
 
-When an incident occurs, report it promptly. To report a possible violation, **email community@better-auth.com**.
+When an incident occurs, report it promptly. To report a possible violation, **email community@openparcel.dev**.
 
 Community Moderators take reports seriously and will respond in a timely manner. All investigations prioritize safety and confidentiality.
 
