@@ -530,7 +530,7 @@ Completion criteria:
 
 Steps:
 
-- [ ] Update root `README.md` with accurate port status.
+- [x] Update root `README.md` with accurate port status.
 - [ ] Update `packages/better_auth/README.md` with Rack quickstart, configuration, routes, plugins, and testing.
 - [ ] Update `packages/better_auth-rails/README.md` with Rails quickstart, generator usage, routes, migrations, and helpers.
 - [ ] Add a Rack/Sinatra example app if the repo structure allows examples.
