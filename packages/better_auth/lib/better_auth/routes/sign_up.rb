@@ -131,7 +131,7 @@ module BetterAuth
 
     def self.session_overrides(ctx)
       {
-        ipAddress: ctx.headers["x-forwarded-for"].to_s.split(",").first.to_s.strip,
+        ipAddress: RequestIP.client_ip(ctx, ctx.context.options).to_s,
         userAgent: ctx.headers["user-agent"].to_s
       }
     end

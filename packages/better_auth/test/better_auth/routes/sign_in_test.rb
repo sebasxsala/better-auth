@@ -29,6 +29,20 @@ class BetterAuthRoutesSignInTest < Minitest::Test
     assert_equal "Minitest", session[:session]["userAgent"]
   end
 
+  def test_sign_in_session_respects_disable_ip_tracking
+    auth = build_auth(advanced: {ip_address: {disable_ip_tracking: true}})
+    sign_up_cookie(auth, email: "no-ip@example.com")
+
+    _status, headers, _body = auth.api.sign_in_email(
+      body: {email: "no-ip@example.com", password: "password123"},
+      headers: {"x-forwarded-for" => "203.0.113.10", "user-agent" => "SignInTest"},
+      as_response: true
+    )
+    session = auth.api.get_session(headers: {"cookie" => cookie_header(headers.fetch("set-cookie"))})
+
+    assert_equal "", session[:session]["ipAddress"].to_s
+  end
+
   def test_sign_in_email_rejects_invalid_credentials
     auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
     auth.api.sign_up_email(body: {email: "bad-password@example.com", password: "password123", name: "Bad Password"})
@@ -138,6 +152,22 @@ class BetterAuthRoutesSignInTest < Minitest::Test
   end
 
   private
+
+  def build_auth(options = {})
+    BetterAuth.auth({base_url: "http://localhost:3000", secret: SECRET}.merge(options))
+  end
+
+  def sign_up_cookie(auth, email:)
+    _status, headers, _body = auth.api.sign_up_email(
+      body: {email: email, password: "password123", name: "Sign In User"},
+      as_response: true
+    )
+    cookie_header(headers.fetch("set-cookie"))
+  end
+
+  def cookie_header(set_cookie)
+    set_cookie.lines.map { |line| line.split(";").first }.join("; ")
+  end
 
   def rack_env(method, path, body:, content_type: "application/json", extra_headers: {})
     base = {

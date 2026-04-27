@@ -679,7 +679,7 @@ git commit -m "fix: harden session cookie cache semantics"
 - Modify: `packages/better_auth/test/better_auth/routes/sign_in_test.rb`
 - Create: `packages/better_auth/test/better_auth/request_ip_test.rb`
 
-- [ ] **Step 1: Write failing request IP tests**
+- [x] **Step 1: Write failing request IP tests**
 
 Create `packages/better_auth/test/better_auth/request_ip_test.rb`:
 
@@ -728,7 +728,7 @@ class BetterAuthRequestIPTest < Minitest::Test
 end
 ```
 
-- [ ] **Step 2: Write failing route tests for stored session IP**
+- [x] **Step 2: Write failing route tests for stored session IP**
 
 Add to `packages/better_auth/test/better_auth/routes/sign_up_test.rb`:
 
@@ -771,7 +771,7 @@ def test_sign_in_session_respects_disable_ip_tracking
 end
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run:
 
@@ -784,7 +784,7 @@ rbenv exec bundle exec rake test TEST=test/better_auth/routes/sign_in_test.rb
 
 Expected: the new request IP file fails until `BetterAuth::RequestIP` exists; route tests fail while routes parse only `x-forwarded-for`.
 
-- [ ] **Step 4: Implement `BetterAuth::RequestIP`**
+- [x] **Step 4: Implement `BetterAuth::RequestIP`**
 
 Create `packages/better_auth/lib/better_auth/request_ip.rb`:
 
@@ -843,7 +843,7 @@ Modify `packages/better_auth/lib/better_auth/core.rb` to require it:
 require_relative "request_ip"
 ```
 
-- [ ] **Step 5: Update rate limiter and session overrides**
+- [x] **Step 5: Update rate limiter and session overrides**
 
 In `packages/better_auth/lib/better_auth/rate_limiter.rb`, replace `client_ip` body with:
 
@@ -864,7 +864,7 @@ In `packages/better_auth/lib/better_auth/routes/sign_up.rb`, replace `session_ov
 
 Use the same helper anywhere `create_session` is called with direct header parsing in `sign_in.rb` and `social.rb`.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run:
 
@@ -878,7 +878,7 @@ rbenv exec bundle exec rake test TEST=test/better_auth/router_test.rb
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/better_auth/lib/better_auth/request_ip.rb packages/better_auth/lib/better_auth/core.rb packages/better_auth/lib/better_auth/rate_limiter.rb packages/better_auth/lib/better_auth/routes/sign_up.rb packages/better_auth/lib/better_auth/routes/sign_in.rb packages/better_auth/lib/better_auth/routes/social.rb packages/better_auth/test/better_auth/request_ip_test.rb packages/better_auth/test/better_auth/routes/sign_up_test.rb packages/better_auth/test/better_auth/routes/sign_in_test.rb

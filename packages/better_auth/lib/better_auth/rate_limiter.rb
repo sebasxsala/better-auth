@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "ipaddr"
 require "json"
 
 module BetterAuth
@@ -194,40 +193,7 @@ module BetterAuth
     end
 
     def client_ip(request, options)
-      ip_options = options.advanced[:ip_address] || {}
-      return if ip_options[:disable_ip_tracking]
-
-      Array(ip_options[:ip_address_headers] || ["x-forwarded-for"]).each do |header|
-        value = request.get_header(rack_header_name(header))
-        next unless value.is_a?(String)
-
-        ip = value.split(",").first.to_s.strip
-        return normalize_ip(ip, ipv6_subnet: ip_options[:ipv6_subnet]) if valid_ip?(ip)
-      end
-
-      ip = request.ip.to_s
-      normalize_ip(ip, ipv6_subnet: ip_options[:ipv6_subnet]) if valid_ip?(ip)
-    end
-
-    def rack_header_name(header)
-      "HTTP_#{header.to_s.upcase.tr("-", "_")}"
-    end
-
-    def valid_ip?(ip)
-      return false if ip.empty? || ip.match?(/\s/)
-
-      IPAddr.new(ip)
-      true
-    rescue ArgumentError
-      false
-    end
-
-    def normalize_ip(ip, ipv6_subnet: nil)
-      address = IPAddr.new(ip)
-      return address.native.to_s if address.respond_to?(:ipv4_mapped?) && address.ipv4_mapped?
-      return address.to_s if address.ipv4?
-
-      address.mask((ipv6_subnet || 64).to_i).to_s
+      RequestIP.client_ip(request, options)
     end
 
     def matching_plugin_rule(context, path)

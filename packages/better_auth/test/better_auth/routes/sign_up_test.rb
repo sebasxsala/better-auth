@@ -42,6 +42,27 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
     assert_equal "SignUpTest", session[:session]["userAgent"]
   end
 
+  def test_sign_up_session_uses_advanced_ip_address_headers
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      advanced: {
+        ip_address: {
+          ip_address_headers: ["x-client-ip", "x-forwarded-for"]
+        }
+      }
+    )
+
+    _status, headers, _body = auth.api.sign_up_email(
+      body: {email: "ip-header@example.com", password: "password123", name: "IP Header"},
+      headers: {"x-client-ip" => "203.0.113.10", "x-forwarded-for" => "198.51.100.20", "user-agent" => "SignUpTest"},
+      as_response: true
+    )
+    session = auth.api.get_session(headers: {"cookie" => cookie_header(headers.fetch("set-cookie"))})
+
+    assert_equal "203.0.113.10", session[:session]["ipAddress"]
+  end
+
   def test_sign_up_email_sets_session_cookie_for_rack_requests
     auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
 
@@ -208,5 +229,9 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
       "HTTP_ORIGIN" => "http://localhost:3000"
     }
     base.merge(extra_headers)
+  end
+
+  def cookie_header(set_cookie)
+    set_cookie.lines.map { |line| line.split(";").first }.join("; ")
   end
 end

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "request_ip"
+
 module BetterAuth
   module Core
     def self.base_endpoints
