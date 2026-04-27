@@ -1,25 +1,25 @@
 # frozen_string_literal: true
 
 # Workspace Gemfile - Better Auth Ruby Monorepo
-# Este Gemfile permite desarrollar todos los packages localmente
+# This Gemfile supports local development across all packages.
 
 source "https://rubygems.org"
 
 ruby file: "packages/better_auth/.ruby-version"
 
-# Referencia local a los packages para desarrollo
-# Esto permite trabajar en todos los packages simultáneamente
+# Local package references for development.
+# This allows working on all packages simultaneously.
 gem "better_auth", path: "packages/better_auth"
 gem "better_auth-rails", path: "packages/better_auth-rails"
 gem "better_auth-sinatra", path: "packages/better_auth-sinatra"
 gem "better_auth-hanami", path: "packages/better_auth-hanami"
 
-# Dependencias de desarrollo del workspace
+# Workspace development dependencies.
 group :development, :test do
   # Linting
   gem "standardrb", "~> 1.0"
 
-  # Testing (usados por los packages)
+  # Testing dependencies used by the packages.
   gem "minitest", "~> 5.25"
   gem "rspec", "~> 3.13"
   gem "pg", "~> 1.5"
@@ -35,6 +35,6 @@ group :development, :test do
   # Build tasks
   gem "rake", "~> 13.2"
 
-  # Cobertura
+  # Coverage
   gem "simplecov", "~> 0.22", require: false
 end

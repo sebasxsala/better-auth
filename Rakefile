@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-# Rakefile del Workspace - Better Auth Ruby
-# Permite ejecutar tareas en todos los packages
+# Workspace Rakefile - Better Auth Ruby
+# Runs tasks across all packages.
 
 require "rake"
 
@@ -21,16 +21,16 @@ STANDARD_PATHS = [
   "packages/better_auth-hanami/spec"
 ].freeze
 
-# Tarea por defecto: ejecutar CI en todos los packages
+# Default task: run CI across all packages.
 desc "Run CI in all packages"
 task :ci do
   puts "🔧 Running CI in workspace..."
 
-  # Linting global
+  # Global linting
   puts "\n📋 Running linter..."
   sh "bundle exec standardrb #{STANDARD_PATHS.join(" ")}"
 
-  # Tests de cada package
+  # Per-package tests
   puts "\n🧪 Running tests in packages/better_auth..."
   cd "packages/better_auth" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec rake ci"
