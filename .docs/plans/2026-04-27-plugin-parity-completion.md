@@ -57,6 +57,7 @@ These rows can be marked `[x] Supported` for the Ruby server surface:
 | SIWE | Supported | Ruby covers nonce lifecycle, callback verification, anonymous/email modes, ENS lookup callback, account/session creation, nonce consumption, duplicate wallet reuse, EIP-55 checksum casing, custom schema merging, and multiple chain IDs. |
 | SSO | Supported | Ruby covers provider CRUD/access/sanitization, OIDC discovery hydration and trusted-origin validation, OIDC callback, SAML callback/ACS/SP metadata, RelayState safety, replay protection, XML assertion count validation, SAML algorithm policy decisions, domain verification, and organization assignment. SAML cryptographic signature verification/decryption is intentionally delegated to `validate_response`. |
 | SCIM | Supported | Ruby covers upstream token envelopes, plain/hashed/encrypted/custom token storage, Bearer middleware, SCIM metadata, user CRUD, provider/org scoping, existing-user account linking, filters, PATCH path/value mappings, and organization enforcement. |
+| Stripe | Supported | Ruby server parity was confirmed against `upstream/packages/stripe/src` and `upstream/packages/stripe/test/*.test.ts`. Ruby covers the billing event matrix, plan/seat/trial abuse cases, trial-start callbacks, lookup-key failure handling, webhook ordering, organization mode edge cases, customer metadata/callback customization, checkout params/options, subscription state transitions, injected Stripe-compatible clients, and v18/v19 webhook construction. |
 | Two-factor | Supported | Ruby covers TOTP enable/verify/disable, OTP send/verify with plain/hashed/encrypted/custom hash storage, backup code generation/use/view/regeneration, trusted devices with server-side records, custom/default cookie max-age options, post-login 2FA redirect, invalid/missing cookie errors, attempt limits, and `rememberMe: false` preservation after second-factor verification. |
 | Username | Supported | Ruby covers sign-up/sign-in, availability, normalization, display username mirroring/preservation/validation, validation-order behavior, duplicate sign-up/update semantics, same-user update allowance, custom validators, email-verification no-leak checks, and schema uniqueness metadata for SQL adapters. |
 
@@ -68,7 +69,6 @@ These rows should stay `Partial` until the tasks below pass:
 | --- | --- |
 | OIDC provider | Supported. Ruby server parity covers consent page and HTML consent behavior, prompt/max-age matrix, JWT plugin algorithm negotiation, plain/hashed/encrypted client-secret variants, dynamic registration auth/validation/RFC7591 metadata, token exchange, refresh, userinfo, and RP logout. |
 | OpenAPI | Needs snapshot-style schema parity with upstream Zod-derived output or a documented Ruby schema contract with tests. |
-| Stripe | Supported. Ruby server parity covers the billing event matrix, plan/seat/trial abuse cases, trial-start callbacks, lookup-key failure handling, webhook ordering, organization mode edge cases, customer metadata/callback customization, checkout params/options, and subscription state transitions with an injected Stripe-compatible client. |
 | Expo server integration | Supported. README/docs are narrowed to the Ruby server surface; authorization proxy cookies, optional OAuth state cookie, origin override/preservation, disabled override, trusted `exp://`, trusted deep-link cookie injection, wildcard trusted origins, and native client scope decisions are covered. React Native secure storage, cookie cache, focus/online managers, browser-opening flow, and React Native behavior tests are client-only and intentionally out of Ruby scope. |
 
 ## Files To Modify
@@ -542,6 +542,8 @@ Cover token generation, Bearer middleware, metadata, create/list/get/update/patc
 - [x] **Step 3: Add Stripe tests.**
 
 Cover checkout, billing portal, list/cancel/restore/success, webhook signature handling, event ordering, missing local subscription creation from metadata, plan/seat/trial abuse cases, trial-start callbacks, lookup-key failure handling, customer metadata/customization, organization customer/subscription mode, cancellation callbacks, and state transitions.
+
+2026-04-27 verification: inspected `upstream/packages/stripe/src` plus `upstream/packages/stripe/test/stripe.test.ts` and `upstream/packages/stripe/test/stripe-organization.test.ts`; Ruby server parity is complete for the documented server surface. Focused Ruby Stripe tests pass with 12 runs/104 assertions for user subscriptions and 16 runs/137 assertions for organization subscriptions.
 
 - [x] **Step 4: Add Expo tests.**
 

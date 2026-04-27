@@ -332,12 +332,11 @@ Local Ruby counterparts exist but still have upstream parity gaps:
 - `sso`
 - `scim`
 - `oauth-provider`
-- `stripe`
 - `two-factor`
 - `username`
 - `expo`
 
-These account for the active plugin parity queue. Stripe and SCIM remain listed here for status accuracy, even when an implementation pass intentionally avoids touching them.
+These account for the active plugin parity queue. Stripe was removed from this queue on 2026-04-27 after direct confirmation against `upstream/packages/stripe/src` and `upstream/packages/stripe/test/*.test.ts`; Ruby server parity is covered by `stripe_test.rb` and `stripe_organization_test.rb`.
 
 ### Upstream suites that are not directly applicable yet
 
