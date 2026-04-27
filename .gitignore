@@ -13,6 +13,7 @@ Thumbs.db
 
 # Ignore coverage
 coverage/
+.rspec_status
 
 # Ignore temp files
 tmp/

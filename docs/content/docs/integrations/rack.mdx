@@ -49,25 +49,11 @@ curl http://localhost:3000/api/auth/ok
 { "ok": true }
 ```
 
-## Sinatra Example
+## Sinatra
 
-```ruby title="app.rb"
-require "sinatra/base"
-require_relative "config/auth"
-
-class App < Sinatra::Base
-  use Rack::Session::Cookie, secret: ENV.fetch("RACK_SESSION_SECRET")
-
-  get "/" do
-    "Hello"
-  end
-end
-
-run Rack::URLMap.new(
-  "/" => App,
-  "/api/auth" => AUTH
-)
-```
+Sinatra apps should use the `better_auth-sinatra` adapter for helpers and
+Better Auth-specific Rake tasks. See the Sinatra integration guide for the full
+setup.
 
 ## Server-Side API Calls
 

@@ -16,6 +16,7 @@ Do not create separate folders for supported Rails lines. Keep compatibility in 
 2. Bump the relevant gem version file or files:
    - `packages/better_auth/lib/better_auth/version.rb`
    - `packages/better_auth-rails/lib/better_auth/rails/version.rb`
+   - `packages/better_auth-sinatra/lib/better_auth/sinatra/version.rb`
 3. Let CI pass on `main`.
 4. Push a tag matching the version, for example:
 
@@ -24,7 +25,7 @@ Do not create separate folders for supported Rails lines. Keep compatibility in 
    git push origin v0.1.2
    ```
 
-The release workflow publishes any gem whose version equals the tag version. If both gems have `0.1.2`, both publish. If only `better_auth-rails` has `0.1.2`, only the Rails gem and its `better_auth_rails` compatibility alias publish.
+The release workflow publishes any gem whose version equals the tag version. If all package gems have `0.1.2`, all publish. If only `better_auth-rails` has `0.1.2`, only the Rails gem and its `better_auth_rails` compatibility alias publish. If only `better_auth-sinatra` has `0.1.2`, only the Sinatra gem publishes.
 
 Stable tags must be contained in `main` or a `vX.Y.x` maintenance branch. The workflow rejects stable tags from `canary`.
 

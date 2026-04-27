@@ -128,3 +128,24 @@ jobs:
       - name: Run tests
         working-directory: packages/better_auth-rails
         run: bundle exec rspec
+
+  test-sinatra:
+    name: Test better_auth-sinatra (Sinatra Adapter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-sinatra
+
+      - name: Run linter
+        working-directory: packages/better_auth-sinatra
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-sinatra
+        run: bundle exec rspec

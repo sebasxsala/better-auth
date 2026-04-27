@@ -539,6 +539,31 @@ Completion criteria:
 
 - [x] Rails adapter passes specs and no Rails dependency is introduced into `packages/better_auth`.
 
+## Phase 13.5: Sinatra Adapter
+
+**Purpose:** Add first-class Sinatra ergonomics while keeping auth behavior in the Rack/core layer.
+
+**Files:**
+
+- Create under `/Users/sebastiansala/projects/better-auth/packages/better_auth-sinatra/`
+- Create Sinatra specs under `/Users/sebastiansala/projects/better-auth/packages/better_auth-sinatra/spec/`
+- Update docs under `/Users/sebastiansala/projects/better-auth/docs/content/docs/integrations/`
+
+Steps:
+
+- [x] Create `better_auth-sinatra` package with gemspec, Gemfile, Rakefile, README, changelog, license, and package instructions.
+- [x] Implement `BetterAuth::Sinatra.configure`, `.auth`, `.reset!`, and a Sinatra extension API with `register BetterAuth::Sinatra` and `better_auth at: "/api/auth"`.
+- [x] Mount the core Rack auth app without reimplementing auth routes in Sinatra handlers.
+- [x] Add helpers for `current_session`, `current_user`, `authenticated?`, and `require_authentication`.
+- [x] Add SQL migration rendering and Rake tasks for core SQL adapters: `better_auth:install`, `better_auth:generate:migration`, `better_auth:migrate`, and `better_auth:routes`.
+- [x] Document the Ruby-specific adaptation: Sinatra has no built-in SQL adapter or Rails-style migration command; ActiveRecord-backed Sinatra migrations are future optional support.
+- [x] Add RSpec coverage for mounting, plugin endpoints, origin checks, real session-cookie helper lookup, unauthenticated route protection, migration rendering, task generation, unsupported adapters, and idempotent migration execution.
+- [x] Update `docs/content/docs/integrations/sinatra.mdx`, `.docs/features/sinatra-adapter.md`, root README, CI, release metadata, and workspace tasks.
+
+Completion criteria:
+
+- [x] Sinatra adapter passes specs and no Sinatra dependency is introduced into `packages/better_auth`.
+
 ## Phase 14: Documentation, Examples, Release Readiness
 
 **Purpose:** Make the port usable and maintainable.

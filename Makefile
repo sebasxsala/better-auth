@@ -18,6 +18,8 @@ install:
 	cd packages/better_auth && bundle install
 	@echo "$(BLUE)📦 Instalando better_auth-rails...$(NC)"
 	cd packages/better_auth-rails && bundle install
+	@echo "$(BLUE)📦 Instalando better_auth-sinatra...$(NC)"
+	cd packages/better_auth-sinatra && bundle install
 	@echo "$(GREEN)✓ Todas las dependencias instaladas$(NC)"
 
 .PHONY: setup
@@ -31,7 +33,7 @@ setup: install
 .PHONY: console
 console:
 	@echo "$(BLUE)💻 Abriendo consola del workspace...$(NC)"
-	bundle exec irb -r bundler/setup -r better_auth -r better_auth/rails
+	bundle exec irb -r bundler/setup -r better_auth -r better_auth/rails -r better_auth/sinatra
 
 # =============================================
 # LINTING
@@ -45,6 +47,8 @@ lint:
 	cd packages/better_auth && bundle exec standardrb
 	@echo "$(BLUE)🔍 Revisando better_auth-rails...$(NC)"
 	cd packages/better_auth-rails && bundle exec standardrb
+	@echo "$(BLUE)🔍 Revisando better_auth-sinatra...$(NC)"
+	cd packages/better_auth-sinatra && bundle exec standardrb
 	@echo "$(GREEN)✓ Linting completado$(NC)"
 
 .PHONY: lint-fix
@@ -53,6 +57,7 @@ lint-fix:
 	bundle exec standardrb --fix
 	cd packages/better_auth && bundle exec standardrb --fix
 	cd packages/better_auth-rails && bundle exec standardrb --fix
+	cd packages/better_auth-sinatra && bundle exec standardrb --fix
 	@echo "$(GREEN)✓ Código corregido$(NC)"
 
 # =============================================
@@ -74,6 +79,11 @@ test-rails:
 	@echo "$(BLUE)🧪 Ejecutando tests de better_auth-rails...$(NC)"
 	cd packages/better_auth-rails && bundle exec rspec
 
+.PHONY: test-sinatra
+test-sinatra:
+	@echo "$(BLUE)🧪 Ejecutando tests de better_auth-sinatra...$(NC)"
+	cd packages/better_auth-sinatra && bundle exec rspec
+
 .PHONY: ci
 ci:
 	@echo "$(BLUE)🔧 Ejecutando CI completo...$(NC)"
@@ -88,6 +98,7 @@ release-check:
 	@echo "$(BLUE)📦 Validando build de gemas (sin publicar)...$(NC)"
 	cd packages/better_auth && rm -f better_auth-*.gem && bundle install && gem build better_auth.gemspec
 	cd packages/better_auth-rails && rm -f better_auth-rails-*.gem better_auth_rails-*.gem && bundle install && gem build better_auth-rails.gemspec && gem build better_auth_rails.gemspec
+	cd packages/better_auth-sinatra && rm -f better_auth-sinatra-*.gem && bundle install && gem build better_auth-sinatra.gemspec
 	@echo "$(GREEN)✓ Build OK en todas las gemas (dry-run local)$(NC)"
 
 # =============================================
@@ -116,6 +127,7 @@ clean:
 	rm -rf Gemfile.lock
 	cd packages/better_auth && rm -rf Gemfile.lock *.gem coverage/
 	cd packages/better_auth-rails && rm -rf Gemfile.lock *.gem coverage/
+	cd packages/better_auth-sinatra && rm -rf Gemfile.lock *.gem coverage/
 	@echo "$(GREEN)✓ Limpieza completada$(NC)"
 
 # =============================================
@@ -139,6 +151,7 @@ help:
 	@echo "  make test          - Tests de todo el workspace"
 	@echo "  make test-core     - Solo better_auth (core)"
 	@echo "  make test-rails    - Solo better_auth-rails"
+	@echo "  make test-sinatra  - Solo better_auth-sinatra"
 	@echo "  make ci            - CI completo (lint + test)"
 	@echo ""
 	@echo "$(YELLOW)Release:$(NC)"

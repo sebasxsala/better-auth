@@ -34,6 +34,7 @@ Update the version constant in the relevant package(s):
 
 - Core: `packages/better_auth/lib/better_auth/version.rb`
 - Rails: `packages/better_auth-rails/lib/better_auth/rails/version.rb`
+- Sinatra: `packages/better_auth-sinatra/lib/better_auth/sinatra/version.rb`
 
 ### 3. Update Changelog
 
@@ -77,6 +78,10 @@ gem push better_auth-0.2.0.gem
 cd ../better_auth-rails
 gem build better_auth-rails.gemspec
 gem push better_auth-rails-0.2.0.gem
+
+cd ../better_auth-sinatra
+gem build better_auth-sinatra.gemspec
+gem push better_auth-sinatra-0.2.0.gem
 ```
 
 ### 8. Post-Release
@@ -105,5 +110,6 @@ Each gem has independent versioning:
 |-----|-------------|
 | `better_auth` | `packages/better_auth/lib/better_auth/version.rb` |
 | `better_auth-rails` | `packages/better_auth-rails/lib/better_auth/rails/version.rb` |
+| `better_auth-sinatra` | `packages/better_auth-sinatra/lib/better_auth/sinatra/version.rb` |
 
-The Rails adapter depends on `better_auth ~> 0.1` (pessimistic constraint). Update this when bumping major/minor versions of the core gem.
+The Rails and Sinatra adapters depend on `better_auth ~> 0.1` (pessimistic constraint). Update this when bumping major/minor versions of the core gem.

@@ -11,6 +11,7 @@ ruby file: "packages/better_auth/.ruby-version"
 # Esto permite trabajar en todos los packages simultáneamente
 gem "better_auth", path: "packages/better_auth"
 gem "better_auth-rails", path: "packages/better_auth-rails"
+gem "better_auth-sinatra", path: "packages/better_auth-sinatra"
 
 # Dependencias de desarrollo del workspace
 group :development, :test do

@@ -9,9 +9,7 @@
     <a href="https://better-auth.com"><strong>Learn more about upstream Better Auth</strong></a>
     <br />
     <br />
-    <a href="https://discord.gg/better-auth">Discord</a>
-    ·
-    <a href="https://better-auth.com">Website</a>
+    <a href="https://better-auth-ruby.vercel.app/">Website</a>
     ·
     <a href="https://github.com/sebasxsala/better-auth/issues">Issues</a>
   </p>
@@ -26,7 +24,7 @@ Better Auth Ruby is a Ruby port of [Better Auth](https://github.com/better-auth/
 
 The goal is upstream-compatible HTTP behavior with idiomatic Ruby internals: Rack first, Rails friendly, and tested against the upstream Better Auth source and test suite as the source of truth. This repository keeps the upstream project as a submodule under `upstream/` and tracks port status in `.docs/features/` and `.docs/plans/`.
 
-This port is active work. Many server-side flows are implemented, but not every upstream edge case, browser client helper, adapter dialect, or TypeScript-only API has full parity yet.
+This port is active work. Many server-side flows are implemented, but not every upstream edge case, adapter dialect, or TypeScript-only API has full parity yet.
 
 ## Packages
 
@@ -34,6 +32,7 @@ This port is active work. Many server-side flows are implemented, but not every 
 | --- | --- | --- |
 | [`better_auth`](packages/better_auth/) | Framework-agnostic Rack core. Auth routes, sessions, cookies, adapters, and plugins live here. | `gem "better_auth"` |
 | [`better_auth-rails`](packages/better_auth-rails/) | Rails adapter with mounting helpers, ActiveRecord adapter, controller helpers, and generators. | `gem "better_auth-rails"` |
+| [`better_auth-sinatra`](packages/better_auth-sinatra/) | Sinatra adapter with Rack mounting, request helpers, and SQL migration Rake tasks. | `gem "better_auth-sinatra"` |
 
 ## Quick Start
 
@@ -75,17 +74,28 @@ auth = BetterAuth.auth(
 run auth
 ```
 
-### JavaScript Client
+### Sinatra
 
-Ruby Better Auth exposes the upstream-style HTTP route surface. Frontend apps can use the upstream Better Auth JavaScript client and point it at the Ruby server:
+```ruby
+# Gemfile
+gem "better_auth-sinatra"
+```
 
-```ts
-import { createAuthClient } from "better-auth/client";
+```ruby
+require "sinatra/base"
+require "better_auth/sinatra"
 
-export const authClient = createAuthClient({
-  baseURL: "http://localhost:3000",
-  basePath: "/api/auth",
-});
+class App < Sinatra::Base
+  register BetterAuth::Sinatra
+
+  better_auth at: "/api/auth" do |config|
+    config.secret = ENV.fetch("BETTER_AUTH_SECRET")
+    config.base_url = ENV.fetch("BETTER_AUTH_URL")
+    config.database = ->(options) {
+      BetterAuth::Adapters::Postgres.new(options, url: ENV.fetch("DATABASE_URL"))
+    }
+  end
+end
 ```
 
 ## Compatibility Status
@@ -115,10 +125,10 @@ Legend:
 | PostgreSQL adapter | Partial | Direct SQL adapter and DDL generation exist; full upstream adapter contract coverage is still expanding. |
 | MySQL adapter | Partial | Direct SQL adapter and DDL generation exist; full upstream adapter contract coverage is still expanding. |
 | Rails ActiveRecord adapter | Partial | ActiveRecord persistence, migrations, mounting, helpers, and generators exist; full adapter contract parity is still expanding. |
+| Sinatra adapter | Partial | Rack mounting, helpers, SQL migration Rake tasks, and docs exist. ActiveRecord-backed Sinatra migrations are not supported yet. |
 | Secondary storage | Partial | Session and verification-style storage behavior exists; full edge-case parity remains future work. |
 | Experimental joins | Partial | `experimental: { joins: true }` is accepted with adapter fallback behavior; the exhaustive join matrix is not complete. |
 | OpenAPI generation | Partial | Practical OpenAPI 3.1 route/model generation exists; upstream Zod snapshot parity is future work. |
-| Ruby browser/client package | [ ] Not supported | Use the upstream Better Auth JavaScript client for browser apps. TypeScript inference is not applicable to Ruby. |
 
 ### Social Providers
 
@@ -182,22 +192,6 @@ make install
 make ci
 ```
 
-### Workspace Commands
-
-```bash
-make help            # All Makefile targets
-make console         # IRB with packages loaded
-make lint            # StandardRB across packages
-make lint-fix        # Auto-fix
-make test            # Same as make ci (lint + tests)
-make test-core       # better_auth only (Minitest)
-make test-rails      # better_auth-rails only (RSpec)
-make ci              # Full CI
-make db-up           # PostgreSQL, MySQL, Redis
-make db-down
-make release-check   # Build gems locally without publishing
-```
-
 ### One Package
 
 ```bash
@@ -210,7 +204,7 @@ bundle exec rake test
 
 The upstream docs app has been copied into [`docs/`](/Users/sebastiansala/projects/better-auth/docs/README.md) and is being adapted for Ruby/Rack/Rails. Pages that still contain upstream TypeScript examples include a warning callout at the top.
 
-Ruby-first starter pages are available under `docs/content/docs/introduction.mdx`, `docs/content/docs/installation.mdx`, `docs/content/docs/basic-usage.mdx`, `docs/content/docs/concepts/database.mdx`, `docs/content/docs/integrations/rack.mdx`, and `docs/content/docs/integrations/rails.mdx`.
+Ruby-first starter pages are available under `docs/content/docs/introduction.mdx`, `docs/content/docs/installation.mdx`, `docs/content/docs/basic-usage.mdx`, `docs/content/docs/concepts/database.mdx`, `docs/content/docs/integrations/rack.mdx`, `docs/content/docs/integrations/rails.mdx`, and `docs/content/docs/integrations/sinatra.mdx`.
 
 ## Monorepo Layout
 
@@ -220,7 +214,8 @@ better-auth/
 ├── docs/                       # Adapted upstream docs app
 ├── packages/
 │   ├── better_auth/            # Core gem, Minitest
-│   └── better_auth-rails/      # Rails adapter, RSpec
+│   ├── better_auth-rails/      # Rails adapter, RSpec
+│   └── better_auth-sinatra/    # Sinatra adapter, RSpec
 ├── .docs/
 │   ├── features/               # Feature parity notes
 │   └── plans/                  # Port implementation plans
@@ -246,7 +241,7 @@ git push -u origin feat/my-change
 
 ## Release
 
-Releases are automated with GitHub Actions on push to `main` when `version.rb` changes. The Rails adapter is published as both `better_auth-rails` and `better_auth_rails` as a compatibility alias.
+Releases are automated with GitHub Actions on push to `main` when `version.rb` changes. The Rails adapter is published as both `better_auth-rails` and `better_auth_rails` as a compatibility alias; the Sinatra adapter publishes as `better_auth-sinatra`.
 
 Details: [RELEASING.md](RELEASING.md).
 

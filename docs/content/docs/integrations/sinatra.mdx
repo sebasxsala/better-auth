@@ -1,0 +1,103 @@
+---
+title: Sinatra Integration
+description: Use Better Auth Ruby in Sinatra.
+---
+
+The Sinatra adapter mounts the core Rack auth object and provides request
+helpers plus Better Auth-specific SQL migration Rake tasks.
+
+## Install
+
+```ruby title="Gemfile"
+gem "better_auth-sinatra"
+gem "pg"
+```
+
+```bash title="Terminal"
+bundle install
+```
+
+## Configure And Mount
+
+```ruby title="app.rb"
+require "sinatra/base"
+require "better_auth/sinatra"
+
+class App < Sinatra::Base
+  register BetterAuth::Sinatra
+
+  better_auth at: "/api/auth" do |config|
+    config.secret = ENV.fetch("BETTER_AUTH_SECRET")
+    config.base_url = ENV.fetch("BETTER_AUTH_URL", "http://localhost:9292")
+    config.database = ->(options) {
+      BetterAuth::Adapters::Postgres.new(
+        options,
+        url: ENV.fetch("DATABASE_URL")
+      )
+    }
+    config.email_and_password = {
+      enabled: true
+    }
+    config.plugins = []
+  end
+
+  get "/dashboard" do
+    require_authentication
+    "Signed in as #{current_user.fetch("email")}"
+  end
+end
+```
+
+By default this mounts Better Auth at `/api/auth`. The core Better Auth router
+handles internal routes such as `/ok`, `/sign-up/email`, and plugin endpoints.
+
+## Helpers
+
+Available helpers:
+
+- `current_session`
+- `current_user`
+- `authenticated?`
+- `require_authentication`
+
+`require_authentication` halts the Sinatra request with `401` when no Better
+Auth user is present.
+
+## Rake Tasks
+
+Sinatra does not have a Rails-style generator or built-in migration command.
+Load the Better Auth tasks from your app Rakefile:
+
+```ruby title="Rakefile"
+require "better_auth/sinatra/tasks"
+```
+
+Create the default config and migration directory:
+
+```bash title="Terminal"
+rake better_auth:install
+```
+
+Generate SQL for the configured Better Auth schema:
+
+```bash title="Terminal"
+BETTER_AUTH_DIALECT=postgres rake better_auth:generate:migration
+```
+
+Run pending Better Auth SQL migrations:
+
+```bash title="Terminal"
+rake better_auth:migrate
+```
+
+Generated SQL files live in `db/better_auth/migrate`.
+
+## Limitations
+
+- ActiveRecord-backed Sinatra migrations are not supported yet.
+- The Rake migration runner supports Better Auth core SQL adapters that expose a
+  SQL connection and dialect.
+- Memory, MongoDB, and arbitrary custom adapters cannot run SQL migrations.
+- Apps that already use `sinatra-activerecord` can still mount Better Auth, but
+  should manage ActiveRecord migrations themselves until optional support is
+  added.
