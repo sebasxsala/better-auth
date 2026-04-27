@@ -15,7 +15,10 @@ STANDARD_PATHS = [
   "packages/better_auth-rails/spec",
   "packages/better_auth-sinatra/Rakefile",
   "packages/better_auth-sinatra/lib",
-  "packages/better_auth-sinatra/spec"
+  "packages/better_auth-sinatra/spec",
+  "packages/better_auth-hanami/Rakefile",
+  "packages/better_auth-hanami/lib",
+  "packages/better_auth-hanami/spec"
 ].freeze
 
 # Tarea por defecto: ejecutar CI en todos los packages
@@ -43,6 +46,11 @@ task :ci do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec rake ci"
   end
 
+  puts "\n🧪 Running tests in packages/better_auth-hanami..."
+  cd "packages/better_auth-hanami" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec rake ci"
+  end
+
   puts "\n✅ Workspace CI completed successfully!"
 end
 
@@ -65,6 +73,11 @@ task :install do
   cd "packages/better_auth-sinatra" do
     sh "BUNDLE_GEMFILE=Gemfile bundle install"
   end
+
+  puts "\n📦 Installing packages/better_auth-hanami dependencies..."
+  cd "packages/better_auth-hanami" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle install"
+  end
 end
 
 desc "Run linter across all packages"
@@ -82,6 +95,10 @@ task :lint do
   cd "packages/better_auth-sinatra" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
   end
+
+  cd "packages/better_auth-hanami" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
+  end
 end
 
 desc "Auto-fix linting issues across all packages"
@@ -97,6 +114,10 @@ task "lint:fix" do
   end
 
   cd "packages/better_auth-sinatra" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb --fix"
+  end
+
+  cd "packages/better_auth-hanami" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb --fix"
   end
 end
@@ -129,6 +150,10 @@ task :clean do
   end
 
   cd "packages/better_auth-sinatra" do
+    sh "rm -rf Gemfile.lock *.gem coverage/"
+  end
+
+  cd "packages/better_auth-hanami" do
     sh "rm -rf Gemfile.lock *.gem coverage/"
   end
 end
