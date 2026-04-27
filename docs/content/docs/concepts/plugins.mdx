@@ -4,7 +4,15 @@ description: Learn how to use plugins with Better Auth.
 ---
 
 <Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream TypeScript/JavaScript documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
+This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
+</Callout>
+
+{/*
+Hidden upstream content for Plugins.
+
+
+<Callout type="warn">
+Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
 </Callout>
 
 Plugins are a key part of Better Auth, they let you extend the base functionalities. You can use them to add new authentication methods, features, or customize behaviors.
@@ -132,7 +140,7 @@ Create Auth endpoints wraps around `createEndpoint` from Better Call. Inside the
 - `trustedOrigins`: This is the list of trusted origins that you specified via `options.trustedOrigins`.
 - `isTrustedOrigin`: This is a helper function that allows you to quickly check whether a given url or path is trusted based on the trusted origins configuration.
 
-For other properties, you can check the <Link href="https://github.com/bekacru/better-call">Better Call</Link> documentation and the <Link href="https://github.com/better-auth/better-auth/blob/canary/packages/better-auth/src/context/create-context.ts">source code </Link>.
+For other properties, you can check the <Link href="https://github.com/bekacru/better-call">Better Call</Link> documentation and the <Link href="https://github.com/sebasxala/better-off/blob/canary/packages/better-auth/src/context/create-context.ts">source code </Link>.
 
 
 **Rules for Endpoints**
@@ -581,3 +589,5 @@ If you need to use better fetch plugins, you can pass them to the `fetchPlugins`
 This is only useful if you want to provide `hooks` like `useSession` and you want to listen to atoms and re-evaluate them when they change.
 
 You can see how this is used in the built-in plugins.
+
+*/}

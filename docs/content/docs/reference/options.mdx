@@ -4,10 +4,18 @@ description: Better Auth configuration options reference.
 ---
 
 <Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream TypeScript/JavaScript documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
+This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
 </Callout>
 
-List of all the available options for configuring Better Auth. See [Better Auth Options](https://github.com/better-auth/better-auth/blob/main/packages/core/src/types/init-options.ts).
+{/*
+Hidden upstream content for Options.
+
+
+<Callout type="warn">
+Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
+</Callout>
+
+List of all the available options for configuring Better Auth. See [Better Auth Options](https://github.com/sebasxala/better-off/blob/main/packages/core/src/types/init-options.ts).
 
 ## `appName`
 
@@ -114,7 +122,7 @@ export const auth = betterAuth({
 | `http://*.example.com` | `http://api.example.com`<br/>`http://app.example.com`<br/>`http://api.app.example.com` | `https://api.example.com`<br/>`http://example.com` |
 | `https://**.example.com` | `https://api.example.com`<br/>`https://api.app.example.com` | `http://api.example.com` |
 | `https://example.com` | `https://example.com`<br/>`https://example.com/path` | `https://api.example.com`<br/>`http://example.com` |
-| `exp://192.168.*.*:*/**` | `exp://192.168.1.100:8081/path`<br/>`exp://192.168.50.200:19000/auth/callback` | `exp://10.0.0.29:8081/path` |
+| `exp://192.168.*.*:* /**` | `exp://192.168.1.100:8081/path`<br/>`exp://192.168.50.200:19000/auth/callback` | `exp://10.0.0.29:8081/path` |
 | `myapp://` | All URLs starting with `myapp://` | - |
 
 
@@ -788,3 +796,5 @@ export const auth = betterAuth({
   }
 })
 ```
+
+*/}

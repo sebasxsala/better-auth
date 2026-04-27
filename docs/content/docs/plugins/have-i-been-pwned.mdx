@@ -1,50 +1,50 @@
 ---
 title: Have I Been Pwned
-description: A plugin to check if a password has been compromised
+description: Reject compromised passwords.
 ---
 
-<Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream TypeScript/JavaScript documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
+Reject compromised passwords.
+
+<Callout type="info">
+This page documents the current Ruby port behavior. Ruby uses snake_case option names and `auth.api` method names; HTTP paths and JSON keys keep the upstream wire shape where implemented.
 </Callout>
 
-The Have I Been Pwned plugin helps protect user accounts by preventing the use of passwords that have been exposed in known data breaches. It uses the [Have I Been Pwned](https://haveibeenpwned.com/) API to check if a password has been compromised.
+## Configure
 
-## Installation
+```ruby title="config/auth.rb"
+require "better_auth"
 
-### Add the plugin to your **auth** config
-```ts title="auth.ts"
-import { betterAuth } from "better-auth"
-import { haveIBeenPwned } from "better-auth/plugins" // [!code highlight]
-
-export const auth = betterAuth({
-    plugins: [
-        haveIBeenPwned()
-    ]
-})
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
+  plugins: [
+    BetterAuth::Plugins.have_i_been_pwned
+  ]
+)
 ```
 
 ## Usage
 
-When a user attempts to create an account or update their password with a compromised password, they'll receive the following default error:
-
-```json
-{
-  "code": "PASSWORD_COMPROMISED",
-  "message": "Password is compromised"
-}
+```ruby title="server.rb"
+# This plugin hooks into existing auth flows and does not add public endpoints.
+# Use the normal sign-up, sign-in, or password routes after configuring it.
 ```
 
-## Config
+## Routes
 
-You can customize the error message:
+This plugin does not add public routes.
 
-```ts
-haveIBeenPwned({
-    customPasswordCompromisedMessage: "Please choose a more secure password."
-})
-```
-## Security Notes
+## Options
 
-- Only the first 5 characters of the password hash are sent to the API
-- The full password is never transmitted
-- Provides an additional layer of account security
+Current Ruby options accepted by `BetterAuth::Plugins.have_i_been_pwned`:
+
+- `paths`
+- `range_lookup`
+- `custom_password_compromised_message`
+
+## Support Notes
+
+- The examples above are based on Ruby plugin source and tests in `packages/better_auth`.
+- If an upstream section is not represented here, treat it as not yet documented or not yet supported by the Ruby port until the matching Ruby implementation exists.
+
+{/* Upstream guide is preserved in upstream/docs/content/docs/plugins/have-i-been-pwned.mdx. */}

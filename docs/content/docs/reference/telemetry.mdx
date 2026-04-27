@@ -4,7 +4,15 @@ description: Better Auth now collects anonymous telemetry data about general usa
 ---
 
 <Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream TypeScript/JavaScript documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
+This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
+</Callout>
+
+{/*
+Hidden upstream content for Telemetry.
+
+
+<Callout type="warn">
+Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
 </Callout>
 
 Better Auth collects anonymous usage data to help us improve the project. This is optional, transparent, and disabled by default.
@@ -53,7 +61,7 @@ All collected data is fully anonymous and only useful in aggregate. It cannot be
 
 - **No PII or secrets**: We do not collect emails, usernames, tokens, secrets, client IDs, client secrets, or database URLs.
 - **No full config**: We never send your full `betterAuth` configuration. Instead we send a reduced, redacted snapshot of non‑sensitive toggles and counts.
-- **Redaction by design**: See [detect-auth-config.ts](https://github.com/better-auth/better-auth/blob/canary/packages/telemetry/src/detectors/detect-auth-config.ts) in the Better Auth source for the exact shape of what is included. It purposely converts sensitive values to booleans, counts, or generic identifiers.
+- **Redaction by design**: See [detect-auth-config.ts](https://github.com/sebasxala/better-off/blob/canary/packages/telemetry/src/detectors/detect-auth-config.ts) in the Better Auth source for the exact shape of what is included. It purposely converts sensitive values to booleans, counts, or generic identifiers.
 
 ## How can I enable it?
 
@@ -87,3 +95,5 @@ You can enable telemetry collection in your auth config or by setting an environ
 - On CLI actions: `generate` and `migrate` as described above.
 
 Telemetry is disabled automatically in tests (`NODE_ENV=test`) unless explicitly overridden by internal tooling.
+
+*/}

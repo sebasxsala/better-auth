@@ -6,7 +6,7 @@ import Section from "@/components/landing/section";
 async function getGitHubStars() {
 	try {
 		const response = await fetch(
-			"https://api.github.com/repos/better-auth/better-auth",
+			"https://api.github.com/repos/sebasxala/better-off",
 			{
 				next: {
 					revalidate: 60,
@@ -34,24 +34,21 @@ export default async function HomePage() {
 						<div className="flex flex-col md:flex-row items-center justify-center h-12">
 							<span className="font-medium flex gap-2 text-sm text-zinc-700 dark:text-zinc-300">
 								<span className="text-zinc-900 dark:text-white/90 hover:text-zinc-950 text-xs md:text-sm dark:hover:text-zinc-100 transition-colors">
-									Introducing{" "}
-									<span className="font-semibold">
-										Better Auth Infrastructure
-									</span>
+									Better Auth Ruby is a Rack-first authentication framework.
 								</span>
 								<span className="text-zinc-400 hidden md:block">|</span>
 								<Link
-									href="https://better-auth.build"
+									href="https://github.com/sebasxala/better-off"
 									className="font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 hidden dark:hover:text-blue-300 transition-colors md:block"
 								>
-									Join the waitlist →
+									View on GitHub →
 								</Link>
 							</span>
 							<Link
-								href="https://better-auth.build"
+								href="https://github.com/sebasxala/better-off"
 								className="font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 text-xs dark:hover:text-blue-300 transition-colors md:hidden"
 							>
-								Join the waitlist →
+								View on GitHub →
 							</Link>
 						</div>
 					</div>

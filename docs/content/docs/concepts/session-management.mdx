@@ -4,7 +4,15 @@ description: Better Auth session management.
 ---
 
 <Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream TypeScript/JavaScript documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
+This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
+</Callout>
+
+{/*
+Hidden upstream content for Session Management.
+
+
+<Callout type="warn">
+Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
 </Callout>
 
 Better Auth manages session using a traditional cookie-based session management. The session is stored in a cookie and is sent to the server on every request. The server then verifies the session and returns the user data if the session is valid.
@@ -274,7 +282,7 @@ You can choose to store sessions in the database instead of secondary storage by
 
 ```ts title="auth.ts"
 export const auth = betterAuth({
-    secondaryStorage: { /** your secondary storage implementation here */ },
+    secondaryStorage: { /** your secondary storage implementation here * / },
     session: { // [!code highlight]
         storeSessionInDatabase: true, // [!code highlight]
     } // [!code highlight]
@@ -290,7 +298,7 @@ This is useful if you want to keep track of the sessions that have been revoked.
 
 ```ts title="auth.ts"
 export const auth = betterAuth({
-    secondaryStorage: { /** your secondary storage implementation here */ },
+    secondaryStorage: { /** your secondary storage implementation here * / },
     session: { // [!code highlight]
         preserveSessionInDatabase: true, // [!code highlight]
     } // [!code highlight]
@@ -511,3 +519,4 @@ export const auth = betterAuth({
     ],
 });
 ```
+*/}

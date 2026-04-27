@@ -8,12 +8,6 @@ route surface, cookie names, JSON keys, option concepts, and plugin model where
 that maps cleanly to Ruby, while exposing an idiomatic server API through
 `BetterAuth.auth(...)`.
 
-<Callout type="info">
-These docs are being adapted from the upstream TypeScript docs. Pages with a
-Ruby port notice at the top still contain upstream TypeScript examples for
-reference and should not be treated as final Ruby API documentation yet.
-</Callout>
-
 ## What This Port Provides
 
 - A framework-agnostic Rack core gem: `better_auth`
@@ -22,7 +16,6 @@ reference and should not be treated as final Ruby API documentation yet.
 - PostgreSQL, MySQL, memory, and Rails ActiveRecord persistence paths
 - The upstream-style plugin system with Ruby plugin modules
 - Server-side API calls through `auth.api`
-- Compatibility with the upstream Better Auth JavaScript client over HTTP
 
 ## Current Status
 
@@ -36,10 +29,8 @@ The short version:
 
 - Core Rack auth and Rails mounting are implemented.
 - Most server-side plugins have Ruby implementations with local tests.
-- Some protocol, adapter, SAML, Stripe, and browser-client edge-case matrices
+- Some protocol, adapter, SAML, and Stripe edge-case matrices
   remain future polish.
-- TypeScript inference and browser-only helpers are outside the Ruby server
-  scope. Use the upstream JavaScript client for frontend apps.
 
 ## Packages
 
@@ -66,25 +57,10 @@ BetterAuth.auth(options)
 Rails integration wraps the same core Rack auth object. It does not reimplement
 auth in controllers.
 
-## Frontend Clients
-
-Ruby Better Auth exposes the upstream-style `/api/auth/*` HTTP API. Frontend
-apps can use the upstream Better Auth JavaScript client and point it at the Ruby
-server.
-
-```ts title="auth-client.ts"
-import { createAuthClient } from "better-auth/client";
-
-export const authClient = createAuthClient({
-  baseURL: "http://localhost:3000",
-  basePath: "/api/auth",
-});
-```
-
 ## Next Steps
 
 Start with [Installation](/docs/installation), then pick either the
 [Rack integration](/docs/integrations/rack) or the
 [Rails integration](/docs/integrations/rails).
 
-{/* Upstream TypeScript introduction is preserved in upstream/docs/content/docs/introduction.mdx. */}
+{/* Upstream introduction is preserved in upstream/docs/content/docs/introduction.mdx. */}

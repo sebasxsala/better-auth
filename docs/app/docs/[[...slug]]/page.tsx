@@ -47,8 +47,8 @@ export default async function Page({
 			toc={page.data.toc}
 			full={page.data.full}
 			editOnGithub={{
-				owner: "better-auth",
-				repo: "better-auth",
+				owner: "sebasxala",
+				repo: "better-off",
 				branch: "canary",
 				path: `/docs/content/docs/${page.path}`,
 			}}
@@ -65,7 +65,7 @@ export default async function Page({
 					<LLMCopyButton />
 					<ViewOptions
 						markdownUrl={`${page.url}.mdx`}
-						githubUrl={`https://github.com/better-auth/better-auth/blob/main/docs/content/docs/${page.path}`}
+						githubUrl={`https://github.com/sebasxala/better-off/blob/canary/docs/content/docs/${page.path}`}
 					/>
 				</div>
 			)}

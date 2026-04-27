@@ -2,6 +2,39 @@ import type { SVGProps } from "react";
 import { cn } from "@/lib/utils";
 
 export const Icons = {
+	rack: (props?: SVGProps<any>) => (
+		<span
+			className={cn(
+				"inline-flex h-[1.2em] min-w-[1.2em] items-center justify-center rounded-[2px] border border-current px-0.5 font-mono text-[0.52em] font-bold leading-none",
+				props?.className,
+			)}
+		>
+			Rack
+		</span>
+	),
+	rails: (props?: SVGProps<any>) => (
+		<svg
+			className={props?.className}
+			xmlns="http://www.w3.org/2000/svg"
+			width="1.2em"
+			height="1.2em"
+			viewBox="0 0 64 64"
+			aria-hidden="true"
+		>
+			<path
+				fill="currentColor"
+				d="M58.6 43.2c-3.1-15.3-13.7-26.4-26.4-26.4c-10.9 0-20.2 8.1-24.6 20H4.7C9.4 22.7 20 12.4 32.2 12.4c14.8 0 27.1 12.6 30.7 30.8z"
+			/>
+			<path
+				fill="currentColor"
+				d="M12.7 36.8c4-9.5 11.3-15.7 19.5-15.7c9.4 0 17.7 8.2 21.4 20.6H48c-3-8.9-9.1-14.6-15.8-14.6c-5.5 0-10.7 3.8-14 9.7z"
+			/>
+			<path
+				fill="currentColor"
+				d="M23.4 36.8c2.4-3.2 5.4-5 8.8-5c4.7 0 9 3.7 11.4 9.9h-7.1c-1.3-2.3-2.8-3.4-4.3-3.4c-1 0-2 .6-2.9 1.7z"
+			/>
+		</svg>
+	),
 	nextJS: (props?: SVGProps<any>) => (
 		<svg
 			className={props?.className}

@@ -9,7 +9,6 @@ import { Highlight, themes } from "prism-react-renderer";
 import { useEffect, useId, useState } from "react";
 import useMeasure from "react-use-measure";
 import { Button } from "@/components/ui/button";
-import { Builder } from "../builder";
 import { GradientBG } from "./gradient-bg";
 import { Spotlight } from "./spotlight";
 
@@ -54,8 +53,7 @@ export default function Hero() {
 								</div>
 
 								<h1 className="text-zinc-800 dark:text-zinc-300 tracking-tight text-2xl md:text-3xl text-pretty">
-									The most comprehensive authentication framework for
-									TypeScript.
+									The most comprehensive authentication framework for Ruby.
 								</h1>
 							</div>
 
@@ -70,42 +68,27 @@ export default function Hero() {
 											<span className="italic text-amber-600">x</span>
 										</p>
 										<p className="relative inline tracking-tight opacity-90 md:text-sm text-xs dark:text-white font-mono text-black">
-											npm i{" "}
+											bundle add{" "}
 											<span className="relative dark:text-fuchsia-300 text-fuchsia-800">
-												better-auth
+												better_auth
 												<span className="absolute h-2 bg-gradient-to-tr from-white via-stone-200 to-stone-300 blur-3xl w-full top-0 left-2"></span>
 											</span>
 										</p>
 									</div>
 									<div className="flex gap-2 items-center">
 										<Link
-											href="https://www.npmjs.com/package/better-auth"
+											href="https://rubygems.org/gems/better_auth"
 											target="_blank"
 											rel="noopener noreferrer"
-											aria-label="View better-auth package on npm"
+											aria-label="View better_auth gem on RubyGems"
 										>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												width="1em"
-												height="1em"
-												viewBox="0 0 128 128"
-												aria-hidden="true"
-											>
-												<path
-													fill="#cb3837"
-													d="M0 7.062C0 3.225 3.225 0 7.062 0h113.88c3.838 0 7.063 3.225 7.063 7.062v113.88c0 3.838-3.225 7.063-7.063 7.063H7.062c-3.837 0-7.062-3.225-7.062-7.063zm23.69 97.518h40.395l.05-58.532h19.494l-.05 58.581h19.543l.05-78.075l-78.075-.1l-.1 78.126z"
-												></path>
-												<path
-													fill="#fff"
-													d="M25.105 65.52V26.512H40.96c8.72 0 26.274.034 39.008.075l23.153.075v77.866H83.645v-58.54H64.057v58.54H25.105z"
-												></path>
-											</svg>
+											<span className="font-mono text-xs font-semibold">gem</span>
 										</Link>
 										<Link
-											href="https://github.com/better-auth/better-auth"
+											href="https://github.com/sebasxala/better-off"
 											target="_blank"
 											rel="noopener noreferrer"
-											aria-label="View better-auth repository on GitHub"
+											aria-label="View better-off repository on GitHub"
 										>
 											<svg
 												xmlns="http://www.w3.org/2000/svg"
@@ -139,7 +122,6 @@ export default function Hero() {
 								>
 									Get Started
 								</Link>
-								<Builder />
 							</div>
 						</div>
 					</div>
@@ -157,30 +139,33 @@ export default function Hero() {
 	);
 }
 
-const tabs: { name: "auth.ts" | "client.ts"; code: string }[] = [
+const tabs: { name: "config/auth.rb" | "config.ru"; code: string }[] = [
 	{
-		name: "auth.ts",
-		code: `export const auth = betterAuth({
-	database: new Pool({
-		connectionString: DATABASE_URL,
-	}),
-    emailAndPassword: {
-        enabled: true,
-    },
-	plugins: [
-		organization(),
-    	twoFactor(),
-	]
-})`,
+		name: "config/auth.rb",
+		code: `require "better_auth"
+
+AUTH = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL"),
+  database: BetterAuth::Adapters::Postgres.new(
+    url: ENV.fetch("DATABASE_URL")
+  ),
+  email_and_password: {
+    enabled: true
+  },
+  plugins: [
+    BetterAuth::Plugins.organization,
+    BetterAuth::Plugins.two_factor
+  ]
+)`,
 	},
 	{
-		name: "client.ts",
-		code: `const client = createAuthClient({
-    plugins: [
-		organizationClient(),
-		twoFactorClient(),
-	]
-});`,
+		name: "config.ru",
+		code: `require_relative "config/auth"
+
+map "/api/auth" do
+  run AUTH
+end`,
 	},
 ];
 
@@ -199,8 +184,8 @@ function CodePreview() {
 	const [ref, { height }] = useMeasure();
 	const [copyState, setCopyState] = useState(false);
 	const [codeTheme, setCodeTheme] = useState(themes.synthwave84);
-	const [currentTab, setCurrentTab] = useState<"auth.ts" | "client.ts">(
-		"auth.ts",
+	const [currentTab, setCurrentTab] = useState<"config/auth.rb" | "config.ru">(
+		"config/auth.rb",
 	);
 
 	useEffect(() => {
@@ -296,7 +281,7 @@ function CodePreview() {
 										<Highlight
 											key={resolvedTheme}
 											code={code}
-											language={"javascript"}
+											language={"ruby"}
 											theme={{
 												...codeTheme,
 												plain: {
@@ -331,7 +316,7 @@ function CodePreview() {
 								</div>
 								<motion.div layout className="self-end mt-3">
 									<Link
-										href="https://demo.better-auth.com"
+										href="/docs/installation"
 										target="_blank"
 										rel="noopener noreferrer"
 										className="shadow-primary-foreground mb-4 ml-auto mr-4 mt-auto flex cursor-pointer items-center gap-2 px-3 py-1 transition-all ease-in-out hover:opacity-70"
@@ -349,7 +334,7 @@ function CodePreview() {
 												d="M10 20H8V4h2v2h2v3h2v2h2v2h-2v2h-2v3h-2z"
 											></path>
 										</svg>
-										<p className="text-sm">Demo</p>
+										<p className="text-sm">Install</p>
 									</Link>
 								</motion.div>
 							</div>

@@ -4,7 +4,15 @@ description: User and account management.
 ---
 
 <Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream TypeScript/JavaScript documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
+This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
+</Callout>
+
+{/*
+Hidden upstream content for User & Accounts.
+
+
+<Callout type="warn">
+Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
 </Callout>
 
 Beyond authenticating users, Better Auth also provides a set of methods to manage users. This includes, updating user information, changing passwords, and more.
@@ -118,15 +126,15 @@ A user's password isn't stored in the user table. Instead, it's stored in the ac
 type changePassword = {
     /**
      * The new password to set 
-     */
+     * /
     newPassword: string = "newpassword1234"
     /**
      * The current user password 
-     */
+     * /
     currentPassword: string = "oldpassword1234"
     /**
      * When set to true, all other active sessions for this user will be invalidated
-     */
+     * /
     revokeOtherSessions?: boolean = true
 }
 ```
@@ -511,3 +519,5 @@ export const auth = betterAuth({
 });
 ```
 
+
+*/}

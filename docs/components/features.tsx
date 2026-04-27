@@ -10,7 +10,6 @@ import {
 	Webhook,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { TechStackDisplay } from "./display-techstack";
 import { GithubStat } from "./github-stat";
 import { Testimonial } from "./landing/testimonials";
 import { Ripple } from "./ripple";
@@ -18,10 +17,10 @@ import { Ripple } from "./ripple";
 const features = [
 	{
 		id: 1,
-		label: "Framework Agnostic",
-		title: "Support for popular <strong>frameworks</strong>.",
+		label: "Rack First",
+		title: "Run auth in any <strong>Rack</strong> app.",
 		description:
-			"Supports popular frameworks, including React, Vue, Svelte, Astro, Solid, Next.js, Nuxt, Tanstack Start, Hono, and more.",
+			"Mount Better Auth in Rack, Sinatra, Rails, or any Ruby server that speaks Rack.",
 		icon: PlugZap2Icon,
 	},
 	{
@@ -37,7 +36,7 @@ const features = [
 		label: "Social Sign-on",
 		title: "Support multiple <strong>OAuth providers</strong>.",
 		description:
-			"Allow users to sign in with their accounts, including GitHub, Google, Discord, Twitter, and more.",
+			"Allow users to sign in with supported providers including GitHub, Google, GitLab, Discord, Apple, and Microsoft.",
 		icon: Webhook,
 	},
 	{
@@ -63,7 +62,7 @@ const features = [
 		label: "Plugin Ecosystem",
 		title: "A lot more features with <strong>plugins</strong>.",
 		description:
-			"Improve your application experience with our official plugins and those created by the community.",
+			"Add organizations, admin, passkeys, two-factor auth, API keys, SSO, SCIM, Stripe, and more through Ruby plugins.",
 		icon: PlugIcon,
 	},
 ];
@@ -126,23 +125,8 @@ export default function Features({ stars }: { stars: string | null }) {
 					<div className="w-full h-full p-16 pt-10 md:px-10 2xl:px-16">
 						<div className="flex flex-col items-center justify-center w-full h-full gap-3">
 							<h2 className="max-w-md mx-auto mt-4 text-4xl font-bold tracking-tighter text-center md:text-4xl">
-								Roll your own auth with confidence in minutes!
+								Ship Ruby auth with confidence in minutes.
 							</h2>
-							<div className="flex mt-[10px] z-20 justify-center items-start">
-								<TechStackDisplay
-									skills={[
-										"nextJs",
-										"nuxt",
-										"svelteKit",
-										"astro",
-										"solidStart",
-										"react",
-										"hono",
-										"expo",
-										"tanstack",
-									]}
-								/>
-							</div>
 							<div className="flex items-center gap-2">
 								<GithubStat stars={stars} />
 							</div>

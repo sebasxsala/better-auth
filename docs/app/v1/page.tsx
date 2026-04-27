@@ -135,13 +135,13 @@ function ReleaseRelated() {
 						<h3 className="text-xl font-semibold mb-4">Install Latest</h3>
 						<div className="dark:bg-white/5 bg-black/10 rounded-lg p-4 mb-2">
 							<code className="text-sm font-mono">
-								npm i better-auth@latest
+								bundle add better_auth
 							</code>
 						</div>
 						<p className="text-sm text-gray-400">
 							Get the latest{" "}
 							<a href="#" className="underline">
-								Node.js and npm
+								Ruby gem
 							</a>
 							.
 						</p>
@@ -184,7 +184,7 @@ function ReleaseRelated() {
 						</p>
 						<Link
 							className="w-full"
-							href="https://github.com/better-auth/better-auth"
+							href="https://github.com/sebasxala/better-off"
 						>
 							<Button variant="outline" className="w-full justify-between">
 								<div className="flex items-center gap-2">

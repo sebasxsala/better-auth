@@ -37,7 +37,7 @@ export async function BlogPage() {
 							Documentation
 						</IconLink>
 						<IconLink
-							href="https://github.com/better-auth/better-auth"
+							href="https://github.com/sebasxala/better-off"
 							icon={GitHubIcon}
 							className="flex-none text-gray-600 dark:text-gray-300"
 						>

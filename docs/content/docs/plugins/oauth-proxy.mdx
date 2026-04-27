@@ -1,79 +1,57 @@
 ---
 title: OAuth Proxy
-description: OAuth Proxy plugin for Better Auth
+description: Proxy OAuth callbacks through a stable URL.
 ---
 
-<Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream TypeScript/JavaScript documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
+Proxy OAuth callbacks through a stable URL.
+
+<Callout type="info">
+This page documents the current Ruby port behavior. Ruby uses snake_case option names and `auth.api` method names; HTTP paths and JSON keys keep the upstream wire shape where implemented.
 </Callout>
 
-A proxy plugin, that allows you to proxy OAuth requests. Useful for development and preview deployments where the redirect URL can't be known in advance to add to the OAuth provider. 
+## Configure
 
-## Installation
+```ruby title="config/auth.rb"
+require "better_auth"
 
-<Steps>
-    <Step>
-    ### Add the plugin to your **auth** config
-    ```ts title="auth.ts"
-    import { betterAuth } from "better-auth"
-    import { oAuthProxy } from "better-auth/plugins"
-
-    export const auth = betterAuth({
-        plugins: [ // [!code highlight]
-            oAuthProxy({ // [!code highlight]
-                productionURL: "https://my-main-app.com", // Optional - if the URL isn't inferred correctly // [!code highlight]
-                currentURL: "http://localhost:3000", // Optional - if the URL isn't inferred correctly // [!code highlight] 
-            }), // [!code highlight]
-        ] // [!code highlight]
-    })
-    ```
-    </Step>
-    <Step>
-    ### Add redirect URL to your OAuth provider
-
-   For the proxy server to work properly, you’ll need to pass the redirect URL of your main production app registered with the OAuth provider in your social provider config. This needs to be done for each social provider you want to proxy requests for.
-
-    ```ts
-    export const auth = betterAuth({
-       plugins: [
-           oAuthProxy(),
-       ], 
-       socialProviders: {
-            github: {
-                clientId: "your-client-id",
-                clientSecret: "your-client-secret",
-                redirectURI: "https://my-main-app.com/api/auth/callback/github" // [!code highlight]
-            }
-       }
-    })
-    ```
-    </Step>
-</Steps>    
-
-
-## How it works
-
-The plugin adds an endpoint to your server that proxies OAuth requests. When you initiate a social sign-in, it sets the redirect URL to this proxy endpoint. After the OAuth provider redirects back to your server, the plugin then forwards the user to the original callback URL.
-
-```ts
-await authClient.signIn.social({
-    provider: "github",
-    callbackURL: "/dashboard" // the plugin will override this to something like "http://localhost:3000/api/auth/oauth-proxy?callbackURL=/dashboard"
-})
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
+  plugins: [
+    BetterAuth::Plugins.oauth_proxy(current_url: ENV.fetch("BETTER_AUTH_URL"), production_url: ENV.fetch("BETTER_AUTH_PRODUCTION_URL"))
+  ]
+)
 ```
 
-When the OAuth provider returns the user to your server, the plugin automatically redirects them to the intended callback URL.
+## Usage
 
-To share cookies between the proxy server and your main server it uses URL query parameters to pass the cookies encrypted in the URL. This is secure as the cookies are encrypted and can only be decrypted by the server.
+```ruby title="server.rb"
+status, headers, body = auth.api.o_auth_proxy(
+  query: {
+    callbackURL: "/dashboard",
+    cookies: params[:cookies]
+  },
+  as_response: true
+)
+```
 
-<Callout type="warn">
-This plugin requires skipping the state cookie check. This has security implications and should only be used in dev or staging environments. If `baseURL` and `productionURL` are the same, the plugin will not proxy the request.
-</Callout>
+## Routes
+
+| Method | Path | Ruby API method |
+| --- | --- | --- |
+| `GET` | `/oauth-proxy-callback` | `auth.api.o_auth_proxy` |
 
 ## Options
 
-**currentURL**: The application's current URL is automatically determined by the plugin. It first checks for the request URL if invoked by a client, then it checks the base URL from popular hosting providers, and finally falls back to the `baseURL` in your auth config. If the URL isn't inferred correctly, you can specify it manually here.
+Current Ruby options accepted by `BetterAuth::Plugins.oauth_proxy`:
 
-**productionURL**: If this value matches the `baseURL` in your auth config, requests will not be proxied. Defaults to the `BETTER_AUTH_URL` environment variable.
+- `max_age`
+- `current_url`
+- `production_url`
 
-**maxAge**: Maximum age in seconds for encrypted cookie payloads. Payloads older than this will be rejected to prevent replay attacks. Keep this value short (e.g., 30-60 seconds) to minimize the window for potential replay attacks while still allowing normal OAuth flows. Defaults to `60` seconds.
+## Support Notes
+
+- The examples above are based on Ruby plugin source and tests in `packages/better_auth`.
+- If an upstream section is not represented here, treat it as not yet documented or not yet supported by the Ruby port until the matching Ruby implementation exists.
+
+{/* Upstream guide is preserved in upstream/docs/content/docs/plugins/oauth-proxy.mdx. */}

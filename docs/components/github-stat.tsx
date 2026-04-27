@@ -10,7 +10,7 @@ export function GithubStat({ stars }: { stars: string | null }) {
 
 	return (
 		<a
-			href="https://github.com/better-auth/better-auth"
+			href="https://github.com/sebasxala/better-off"
 			target="_blank"
 			rel="noopener noreferrer"
 			aria-label={`Star Better Auth on GitHub - ${kFormatter(result)} stars`}

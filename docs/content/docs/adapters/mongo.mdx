@@ -1,55 +1,77 @@
 ---
-title: MongoDB Adapter
-description: Integrate Better Auth with MongoDB.
+title: MongoDB
+description: Use Better Auth Ruby with MongoDB.
 ---
 
-<Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream TypeScript/JavaScript documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
+Better Auth Ruby includes a standalone MongoDB adapter for applications that
+want document storage instead of SQL.
+
+<Callout type="info">
+MongoDB support maps Better Auth's logical `id` field to Mongo `_id` and stores
+default collections with upstream-compatible singular names such as `user`,
+`session`, `account`, and `verification`.
 </Callout>
 
-MongoDB is a popular NoSQL database that is widely used for building scalable and flexible applications. It provides a flexible schema that allows for easy data modeling and querying.
+## Install Dependencies
 
-Before getting started, make sure you have MongoDB installed and configured. For more information, see [MongoDB Documentation](https://www.mongodb.com/docs/)
-
-## Example Usage
-
-You can use the MongoDB adapter to connect to your database as follows.
-
-```ts title="auth.ts"
-import { betterAuth } from "better-auth";
-import { MongoClient } from "mongodb";
-import { mongodbAdapter } from "better-auth/adapters/mongodb";
-
-const client = new MongoClient("mongodb://localhost:27017/database");
-const db = client.db();
-
-export const auth = betterAuth({
-  database: mongodbAdapter(db, {
-    // Optional: if you don't provide a client, database transactions won't be enabled.
-    client
-  }),
-});
+```ruby title="Gemfile"
+gem "better_auth"
+gem "mongo"
 ```
 
-## Schema generation & migration
-
-For MongoDB, we don't need to generate or migrate the schema.
-
-
-## Joins (Experimental)
-
-Database joins is useful when Better-Auth needs to fetch related data from multiple tables in a single query.
-Endpoints like `/get-session`, `/get-full-organization` and many others benefit greatly from this feature,
-seeing upwards of 2x to 3x performance improvements depending on database latency.
-
-The MongoDB adapter supports joins out of the box since version `1.4.0`.
-To enable this feature, you need to set the `experimental.joins` option to `true` in your auth configuration.
-
-```ts title="auth.ts"
-export const auth = betterAuth({
-  experimental: { joins: true }
-});
+```bash title="Terminal"
+bundle install
 ```
-## Additional Information
 
-- If you're looking for performance improvements or tips, take a look at our guide to <Link href="/docs/guides/optimizing-for-performance">performance optimizations</Link>.
+## Configure The Adapter
+
+```ruby title="config/auth.rb"
+require "better_auth"
+require "mongo"
+
+client = Mongo::Client.new(
+  ENV.fetch("MONGODB_URL", "mongodb://127.0.0.1:27017/better_auth")
+)
+
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL"),
+  database: BetterAuth::Adapters::MongoDB.new(
+    database: client.database,
+    client: client
+  )
+)
+```
+
+Transactions are enabled when a client is provided. If your MongoDB deployment
+does not support transactions, disable them explicitly.
+
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  database: BetterAuth::Adapters::MongoDB.new(
+    database: client.database,
+    client: client,
+    transaction: false
+  )
+)
+```
+
+## Schema
+
+MongoDB does not need SQL schema generation or migrations. The adapter writes
+documents using Better Auth storage field names.
+
+| Better Auth field | MongoDB field |
+| --- | --- |
+| `id` | `_id` |
+| `emailVerified` | `email_verified` |
+| `userId` | `user_id` |
+| `createdAt` | `created_at` |
+| `expiresAt` | `expires_at` |
+
+The adapter supports the same core CRUD contract as the SQL adapters, including
+where operators, sorting, pagination, counts, and core joins used by sessions
+and accounts.
+
+{/* Upstream MongoDB guide is preserved in upstream/docs/content/docs/adapters/mongo.mdx. */}

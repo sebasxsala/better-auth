@@ -13,11 +13,10 @@ import "./global.css";
 
 export const metadata = createMetadata({
 	title: {
-		template: "%s | Better Auth",
-		default: "Better Auth",
+		template: "%s | Better Auth Ruby",
+		default: "Better Auth Ruby",
 	},
-	description:
-		"The most comprehensive authentication framework for TypeScript.",
+	description: "The most comprehensive authentication framework for Ruby.",
 	metadataBase: baseUrl,
 });
 

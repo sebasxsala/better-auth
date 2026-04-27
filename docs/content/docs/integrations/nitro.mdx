@@ -4,7 +4,15 @@ description: Integrate Better Auth with Nitro.
 ---
 
 <Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream TypeScript/JavaScript documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
+This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
+</Callout>
+
+{/*
+Hidden upstream content for Nitro Integration.
+
+
+<Callout type="warn">
+Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
 </Callout>
 
 Better Auth can be integrated with your [Nitro Application](https://nitro.build/) (an open source framework to build web servers).
@@ -165,7 +173,7 @@ import { fromNodeHeaders } from "better-auth/node";
  * Middleware used to require authentication for a route.
  *
  * Can be extended to check for specific roles or permissions.
- */
+ * /
 export const requireAuth: EventHandler = async (event: H3Event) => {
   const headers = event.headers;
 
@@ -199,3 +207,5 @@ export default defineEventHandler({
 ### Example
 
 You can find an example of a Nitro application integrated with Better Auth & Prisma [here](https://github.com/BayBreezy/nitrojs-better-auth-prisma).
+
+*/}

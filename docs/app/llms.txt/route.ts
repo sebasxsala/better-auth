@@ -45,9 +45,9 @@ export async function GET() {
 	const pages = source.getPages();
 	const groupedPages = groupPagesByCategory(pages);
 
-	let content = `# Better Auth
+let content = `# Better Auth Ruby
 
-> The most comprehensive authentication framework for TypeScript
+> The most comprehensive authentication framework for Ruby
 
 ## Table of Contents
 

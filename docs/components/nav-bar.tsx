@@ -111,7 +111,7 @@ export const Navbar = () => {
 							enterprise
 						</NavLink>
 						<NavLink
-							href="https://github.com/better-auth/better-auth"
+							href="https://github.com/sebasxala/better-off"
 							className="bg-muted/20"
 							external
 							aria-label="View Better Auth repository on GitHub"

@@ -4,7 +4,15 @@ description: A step-by-step guide to transitioning from WorkOS to Better Auth.
 ---
 
 <Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream TypeScript/JavaScript documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
+This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
+</Callout>
+
+{/*
+Hidden upstream content for Migrating from WorkOS to Better Auth.
+
+
+<Callout type="warn">
+Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
 </Callout>
 
 In this guide, we’ll walk through how to migrate a project from WorkOS to Better Auth, covering how to move a basic WorkOS setup integrated with a Next.js app and the key considerations to keep in mind.
@@ -127,7 +135,7 @@ export const auth = betterAuth({
 
 ### Additional Fields
 
-{/* cspell:disable-next-line */}
+{/* cspell:disable-next-line * /}
 You probably used metadata in WorkOS. To preserve that metadata and the user id from WorkOS (e.g., user_01KBT4BMFF7ASGRDD0WZ6W63FF), extend the `user` schema as shown below. Better Auth provides a more flexible way to store user data. For more information, see [here](/docs/concepts/database#extending-core-schema).
 
 ```ts title="auth.ts"
@@ -215,7 +223,7 @@ import { WorkOS } from "@workos-inc/node";
   Default setting: Use 80% of limit to avoid edge cases
 
   Reference: https://workos.com/docs/reference/rate-limits
-*/
+* /
 const TIME_WINDOW_MS = 10 * 1000; // Time window in ms (10 seconds)
 const MAX_REQUESTS_PER_WINDOW = 800; // Maximum API calls per time window
 const USERS_PER_REQUEST = 100; // How many users to fetch per API call
@@ -231,7 +239,7 @@ const workos = new WorkOS(process.env.WORKOS_API_KEY);
 
 /**
  * Create a rate limiter to track and control request rate
- */
+ * /
 const createRateLimiter = (maxRequests: number, windowMs: number) => {
   let requestTimestamps: number[] = [];
 
@@ -287,7 +295,7 @@ const createRateLimiter = (maxRequests: number, windowMs: number) => {
 /**
  * Safely converts various date formats to Date object.
  * Returns current date if conversion fails (safe for createdAt/updatedAt).
- */
+ * /
 const safeDateConversion = (date?: string | number | Date | null): Date => {
   if (date == null) return new Date();
 
@@ -312,7 +320,7 @@ const safeDateConversion = (date?: string | number | Date | null): Date => {
 /**
  * Safely converts firstName and lastName to a full name string.
  * Returns "Username" if both names are empty.
- */
+ * /
 const safeNameConversion = (
   firstName?: string | null,
   lastName?: string | null,
@@ -715,3 +723,4 @@ Existing active sessions will not be migrated. After the migration, users will n
 Congratulations! You've successfully migrated from WorkOS to Better Auth. Better Auth offers greater flexibility and more features, so be sure to explore the [documentation](/docs) to unlock its full potential.
 
 If you need help with migration, join our [community](/community) or reach out for Enterprise support [here](/enterprise).
+*/}

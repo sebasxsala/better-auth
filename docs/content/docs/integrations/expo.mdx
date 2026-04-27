@@ -4,7 +4,15 @@ description: Integrate Better Auth with Expo.
 ---
 
 <Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream TypeScript/JavaScript documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
+This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
+</Callout>
+
+{/*
+Hidden upstream content for Expo Integration.
+
+
+<Callout type="warn">
+Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
 </Callout>
 
 Expo is a popular framework for building cross-platform apps with React Native. Better Auth supports both Expo native and web apps.
@@ -174,7 +182,7 @@ Expo is a popular framework for building cross-platform apps with React Native. 
                 ...(process.env.NODE_ENV === "development" ? [
                     "exp://",                      // Trust all Expo URLs (prefix matching)
                     "exp://**",                    // Trust all Expo URLs (wildcard matching)
-                    "exp://192.168.*.*:*/**",      // Trust 192.168.x.x IP range with any port and path
+                    "exp://192.168.*.*:* /**",      // Trust 192.168.x.x IP range with any port and path
                 ] : [])
             ]
         })
@@ -592,3 +600,5 @@ const authClient = createAuthClient({
 Server plugin options:
 
 **disableOriginOverride**: Override the origin for Expo API routes (default: false). Enable this if you're facing cors origin issues with Expo API routes.
+
+*/}
