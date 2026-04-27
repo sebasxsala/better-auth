@@ -66,6 +66,35 @@ auth = BetterAuth.auth(
 )
 ```
 
+### Database Adapters
+
+The core gem ships framework-agnostic adapters for memory, PostgreSQL, MySQL, SQLite, MongoDB, and MSSQL. Driver gems are loaded only when their adapter is instantiated.
+
+```ruby
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  database: BetterAuth::Adapters::SQLite.new(path: "storage/auth.sqlite3")
+)
+```
+
+```ruby
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  database: BetterAuth::Adapters::MongoDB.new(
+    database: mongo_client.database,
+    client: mongo_client,
+    transaction: false
+  )
+)
+```
+
+```ruby
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  database: BetterAuth::Adapters::MSSQL.new(url: ENV.fetch("DATABASE_URL"))
+)
+```
+
 ### Social Providers
 
 ```ruby
@@ -166,7 +195,7 @@ make test-coverage   # Tests with coverage
 make ci              # Full CI (lint + test)
 
 # Databases for testing
-make db-up           # Start PostgreSQL, MySQL, Redis
+make db-up           # Start PostgreSQL, MySQL, MongoDB, MSSQL, Redis
 make db-down         # Stop containers
 ```
 

@@ -140,6 +140,56 @@ class BetterAuthSQLAdapterTest < Minitest::Test
     refute_includes connection.sql.first, "LIMIT"
   end
 
+  def test_sql_adapter_honors_or_connectors_in_where_clauses
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+    connection = RecordingConnection.new([])
+    adapter = BetterAuth::Adapters::SQL.new(config, connection: connection, dialect: :postgres)
+
+    adapter.find_many(
+      model: "user",
+      where: [
+        {field: "email", value: "ada@example.com"},
+        {field: "name", connector: "OR", value: "Ada"}
+      ]
+    )
+
+    assert_includes connection.sql.first, 'WHERE "users"."email" = $1 OR "users"."name" = $2'
+    assert_equal [["ada@example.com", "Ada"]], connection.params
+  end
+
+  def test_sql_adapter_rejects_input_false_fields_without_force_allow_id
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+    connection = RecordingConnection.new([])
+    adapter = BetterAuth::Adapters::SQL.new(config, connection: connection, dialect: :postgres)
+
+    error = assert_raises(BetterAuth::APIError) do
+      adapter.create(
+        model: "user",
+        data: {name: "Ada", email: "ada@example.com", emailVerified: true}
+      )
+    end
+
+    assert_equal "emailVerified is not allowed to be set", error.message
+  end
+
+  def test_sql_adapter_update_returns_logical_record_for_non_returning_dialects
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+    connection = RecordingConnection.new(
+      [{"id" => "user-1"}],
+      [],
+      [{"id" => "user-1", "name" => "Grace", "email" => "ada@example.com", "email_verified" => false, "created_at" => Time.at(1), "updated_at" => Time.at(2)}]
+    )
+    adapter = BetterAuth::Adapters::SQL.new(config, connection: connection, dialect: :sqlite)
+
+    updated = adapter.update(model: "user", where: [{field: "id", value: "user-1"}], update: {name: "Grace"})
+
+    assert_equal "Grace", updated["name"]
+    assert_equal false, updated["emailVerified"]
+    assert_includes connection.sql[0], 'SELECT "users"."id" AS "id"'
+    assert_includes connection.sql[1], 'UPDATE "users" SET "name" = ?'
+    assert_includes connection.sql[2], 'WHERE "users"."id" = ?'
+  end
+
   RecordingConnection = Struct.new(:responses, :sql, :params) do
     def initialize(*responses)
       super(responses, [], [])

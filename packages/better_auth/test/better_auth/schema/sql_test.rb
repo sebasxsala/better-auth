@@ -32,4 +32,32 @@ class BetterAuthSchemaSQLTest < Minitest::Test
     assert_includes sql, "CONSTRAINT `fk_sessions_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE"
     assert_includes sql, "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
   end
+
+  def test_sqlite_ddl_uses_sqlite_types_constraints_and_indexes
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+
+    sql = BetterAuth::Schema::SQL.create_statements(config, dialect: :sqlite).join("\n")
+
+    assert_includes sql, 'CREATE TABLE IF NOT EXISTS "users"'
+    assert_includes sql, '"id" text PRIMARY KEY'
+    assert_includes sql, '"email_verified" integer NOT NULL DEFAULT 0'
+    assert_includes sql, '"created_at" date NOT NULL DEFAULT CURRENT_TIMESTAMP'
+    assert_includes sql, 'UNIQUE ("email")'
+    assert_includes sql, 'FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE'
+    assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_sessions_on_user_id" ON "sessions" ("user_id")'
+  end
+
+  def test_mssql_ddl_uses_mssql_types_constraints_and_indexes
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+
+    sql = BetterAuth::Schema::SQL.create_statements(config, dialect: :mssql).join("\n")
+
+    assert_includes sql, "IF OBJECT_ID(N'[users]', N'U') IS NULL"
+    assert_includes sql, "[id] varchar(255) PRIMARY KEY"
+    assert_includes sql, "[email_verified] smallint NOT NULL DEFAULT 0"
+    assert_includes sql, "[created_at] datetime2(3) NOT NULL DEFAULT CURRENT_TIMESTAMP"
+    assert_includes sql, "CONSTRAINT [uniq_users_email] UNIQUE ([email])"
+    assert_includes sql, "CONSTRAINT [fk_sessions_user_id] FOREIGN KEY ([user_id]) REFERENCES [users] ([id]) ON DELETE CASCADE"
+    assert_includes sql, "CREATE INDEX [index_sessions_on_user_id] ON [sessions] ([user_id])"
+  end
 end

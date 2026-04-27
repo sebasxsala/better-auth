@@ -23,10 +23,12 @@ module BetterAuth
         body = (columns + constraints).join(",\n  ")
 
         case dialect
-        when :postgres
+        when :postgres, :sqlite
           %(CREATE TABLE IF NOT EXISTS #{quote(table_name, dialect)} (\n  #{body}\n);)
         when :mysql
           %(CREATE TABLE IF NOT EXISTS #{quote(table_name, dialect)} (\n  #{body}\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;)
+        when :mssql
+          %(IF OBJECT_ID(N'#{quote(table_name, dialect)}', N'U') IS NULL\nCREATE TABLE #{quote(table_name, dialect)} (\n  #{body}\n);)
         else
           raise ArgumentError, "Unsupported SQL dialect: #{dialect}"
         end
@@ -66,10 +68,12 @@ module BetterAuth
           column = attributes[:field_name] || Schema.physical_name(logical_field)
           name = "index_#{table_name}_on_#{column}"
           case dialect
-          when :postgres
+          when :postgres, :sqlite
             %(CREATE INDEX IF NOT EXISTS #{quote(name, dialect)} ON #{quote(table_name, dialect)} (#{quote(column, dialect)});)
           when :mysql
             %(CREATE INDEX #{quote(name, dialect)} ON #{quote(table_name, dialect)} (#{quote(column, dialect)});)
+          when :mssql
+            %(IF NOT EXISTS (SELECT name FROM sys.indexes WHERE name = '#{name.gsub("'", "''")}' AND object_id = OBJECT_ID(N'#{quote(table_name, dialect)}')) CREATE INDEX #{quote(name, dialect)} ON #{quote(table_name, dialect)} (#{quote(column, dialect)});)
           end
         end
       end
@@ -77,15 +81,36 @@ module BetterAuth
       def sql_type(logical_field, attributes, dialect)
         case attributes[:type]
         when "boolean"
-          (dialect == :mysql) ? "tinyint(1)" : "boolean"
+          case dialect
+          when :mysql
+            "tinyint(1)"
+          when :sqlite
+            "integer"
+          when :mssql
+            "smallint"
+          else
+            "boolean"
+          end
         when "date"
-          (dialect == :mysql) ? "datetime(6)" : "timestamptz"
+          case dialect
+          when :mysql
+            "datetime(6)"
+          when :sqlite
+            "date"
+          when :mssql
+            "datetime2(3)"
+          else
+            "timestamptz"
+          end
         when "number"
           attributes[:bigint] ? "bigint" : "integer"
         else
           if dialect == :mysql
             indexed = logical_field == "id" || attributes[:unique] || attributes[:index] || attributes[:references]
             indexed ? "varchar(191)" : "text"
+          elsif dialect == :mssql
+            indexed = logical_field == "id" || attributes[:unique] || attributes[:index] || attributes[:references] || attributes[:sortable]
+            indexed ? "varchar(255)" : "varchar(8000)"
           else
             "text"
           end
@@ -102,9 +127,9 @@ module BetterAuth
 
         case default
         when true
-          (dialect == :mysql) ? "1" : "true"
+          (dialect == :mysql || dialect == :sqlite || dialect == :mssql) ? "1" : "true"
         when false
-          (dialect == :mysql) ? "0" : "false"
+          (dialect == :mysql || dialect == :sqlite || dialect == :mssql) ? "0" : "false"
         when Numeric
           default.to_s
         when String
@@ -114,10 +139,12 @@ module BetterAuth
 
       def unique_constraint(table_name, column, dialect)
         case dialect
-        when :postgres
+        when :postgres, :sqlite
           %(UNIQUE (#{quote(column, dialect)}))
         when :mysql
           %(UNIQUE KEY #{quote("uniq_#{table_name}_#{column}", dialect)} (#{quote(column, dialect)}))
+        when :mssql
+          %(CONSTRAINT #{quote("uniq_#{table_name}_#{column}", dialect)} UNIQUE (#{quote(column, dialect)}))
         end
       end
 
@@ -127,19 +154,23 @@ module BetterAuth
         on_delete = reference[:on_delete] ? " ON DELETE #{reference[:on_delete].to_s.upcase}" : ""
 
         case dialect
-        when :postgres
+        when :postgres, :sqlite
           %(FOREIGN KEY (#{quote(column, dialect)}) REFERENCES #{quote(target_model, dialect)} (#{quote(target_field, dialect)})#{on_delete})
         when :mysql
+          %(CONSTRAINT #{quote("fk_#{table_name}_#{column}", dialect)} FOREIGN KEY (#{quote(column, dialect)}) REFERENCES #{quote(target_model, dialect)} (#{quote(target_field, dialect)})#{on_delete})
+        when :mssql
           %(CONSTRAINT #{quote("fk_#{table_name}_#{column}", dialect)} FOREIGN KEY (#{quote(column, dialect)}) REFERENCES #{quote(target_model, dialect)} (#{quote(target_field, dialect)})#{on_delete})
         end
       end
 
       def quote(identifier, dialect)
         case dialect
-        when :postgres
+        when :postgres, :sqlite
           %("#{identifier.to_s.gsub("\"", "\"\"")}")
         when :mysql
           "`#{identifier.to_s.gsub("`", "``")}`"
+        when :mssql
+          "[#{identifier.to_s.gsub("]", "]]")}]"
         else
           raise ArgumentError, "Unsupported SQL dialect: #{dialect}"
         end

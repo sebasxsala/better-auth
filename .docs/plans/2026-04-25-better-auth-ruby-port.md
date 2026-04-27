@@ -209,15 +209,23 @@ Steps:
 
 **Architecture decision:** Core SQL support is framework-agnostic and adapter-based. PostgreSQL and MySQL adapters satisfy the same `BetterAuth::Adapters::Base` contract used by the memory adapter. They translate Better Auth logical model/field names into physical SQL table/column names from `BetterAuth::Schema`, use parameterized SQL only, and expose migration SQL generation. ActiveRecord remains a later Rails-layer adapter after Phase 5.
 
+**Ruby adaptation update:** SQLite and MSSQL are implemented as additional direct SQL dialects. MongoDB is implemented as a standalone document adapter that maps logical Better Auth fields to Mongo storage keys and maps logical `id` to `_id`. MSSQL uses Sequel internally for safer parameter binding; this is not a public Sequel adapter.
+
 **Files:**
 
 - Create: `/Users/sebastiansala/projects/better-auth/packages/better_auth/lib/better_auth/adapters/sql.rb`
 - Create: `/Users/sebastiansala/projects/better-auth/packages/better_auth/lib/better_auth/adapters/postgres.rb`
 - Create: `/Users/sebastiansala/projects/better-auth/packages/better_auth/lib/better_auth/adapters/mysql.rb`
+- Create: `/Users/sebastiansala/projects/better-auth/packages/better_auth/lib/better_auth/adapters/sqlite.rb`
+- Create: `/Users/sebastiansala/projects/better-auth/packages/better_auth/lib/better_auth/adapters/mssql.rb`
+- Create: `/Users/sebastiansala/projects/better-auth/packages/better_auth/lib/better_auth/adapters/mongodb.rb`
 - Create: `/Users/sebastiansala/projects/better-auth/packages/better_auth/lib/better_auth/schema/sql.rb`
 - Test: `/Users/sebastiansala/projects/better-auth/packages/better_auth/test/better_auth/adapters/sql_test.rb`
 - Test: `/Users/sebastiansala/projects/better-auth/packages/better_auth/test/better_auth/adapters/postgres_test.rb`
 - Test: `/Users/sebastiansala/projects/better-auth/packages/better_auth/test/better_auth/adapters/mysql_test.rb`
+- Test: `/Users/sebastiansala/projects/better-auth/packages/better_auth/test/better_auth/adapters/sqlite_test.rb`
+- Test: `/Users/sebastiansala/projects/better-auth/packages/better_auth/test/better_auth/adapters/mssql_test.rb`
+- Test: `/Users/sebastiansala/projects/better-auth/packages/better_auth/test/better_auth/adapters/mongodb_test.rb`
 
 Steps:
 
@@ -225,11 +233,18 @@ Steps:
 - [x] Keep SQL driver gems out of Rails: `pg` and `mysql2` are adapter dependencies/dev-test dependencies for `better_auth`, not ActiveRecord dependencies. Current wrappers require those gems only when instantiated without an injected connection.
 - [x] Generate PostgreSQL DDL from schema using plural `snake_case` table names, `text`, `boolean`, `timestamptz`, `bigint`, `not null`, unique constraints, FK constraints, and explicit FK indexes.
 - [x] Generate MySQL DDL from schema using InnoDB, `utf8mb4`, `varchar/text`, `tinyint(1)`, `datetime(6)`, `bigint`, unique constraints, FK constraints, and explicit FK indexes.
+- [x] Generate SQLite and MSSQL DDL from schema using the same logical metadata and dialect-appropriate types, quoting, unique constraints, FK constraints, and explicit FK indexes.
 - [x] Implement SQL adapter CRUD: `create`, `find_one`, `find_many`, `update`, `update_many`, `delete`, `delete_many`, `count`, and `transaction`.
 - [x] Implement SQL where operators already supported by memory adapter: `eq`, `in`, `not_in`, `contains`, `starts_with`, `ends_with`, `ne`, `gt`, `gte`, `lt`, `lte`.
+- [x] Harden SQL adapter parity for `OR` connectors, `input: false` field rejection, and logical `update` return values on dialects without native `RETURNING`.
 - [x] Implement SQL joins needed by current internal adapter: `session -> user`, `account -> user`, and `user -> account`.
 - [x] Return logical Better Auth field names from SQL adapters (`emailVerified`, `createdAt`, `userId`) even though stored columns are `snake_case`.
+- [x] Add `BetterAuth::Adapters::SQLite`, `BetterAuth::Adapters::MSSQL`, and `BetterAuth::Adapters::MongoDB` with lazy driver loading and injected-connection support.
+- [x] Implement MongoDB document storage with logical `id` to `_id`, storage field-name mapping, supported where operators/connectors, sorting, pagination, core joins, and optional client-session transactions.
 - [x] Add integration tests that use root `docker-compose.yml` Postgres/MySQL services when drivers are available and skip with a clear message when drivers or services are unavailable.
+- [x] Add optional integration tests for SQLite, MongoDB, and MSSQL that skip with a clear message when drivers or services are unavailable.
+- [x] Add CI MySQL service and `mysql2` test dependency so core adapter tests exercise MySQL instead of skipping in GitHub Actions.
+- [x] Add SQL-backed auth route integration tests for PostgreSQL and MySQL that sign up through BetterAuth, verify `users`/`accounts`/`sessions` with direct SQL, then confirm `/get-session` reads an authoritative DB row after a direct SQL user update.
 - [x] Run SQL adapter unit tests and available integration tests.
 - [x] Update `.docs/features/database-adapters.md` and `.docs/features/upstream-parity-matrix.md` with SQL adapter status and dependency decisions.
 - [x] Added public `experimental: { joins: true }` option as an adapter optimization with fallback behavior.
@@ -536,6 +551,9 @@ Steps:
 - [x] Copy upstream docs source into root `docs/` excluding generated `.next`, `node_modules`, and `.env`.
 - [x] Add Ruby-first starter docs for introduction, installation, basic usage, database, Rack, Rails, PostgreSQL, and MySQL.
 - [x] Preserve upstream docs pages with top-of-page Ruby port warnings when not adapted yet.
+- [x] Prune visible docs navigation to Ruby-supported examples, integrations, and adapters, keeping upstream framework pages hidden for reference.
+- [x] Replace the placeholder Username plugin page with Ruby API examples for sign up, sign in, update, availability checks, options, schema, and errors.
+- [x] Replace implemented plugin placeholder pages with Ruby configuration, API examples, route tables, option lists, and explicit support notes; hide unsupported upstream billing/integration plugin pages.
 - [ ] Add a Rack/Sinatra example app if the repo structure allows examples.
 - [ ] Add a Rails example app or dummy app for specs if needed.
 - [ ] Maintain `.docs/features/upstream-parity-matrix.md` until every feature has a status.

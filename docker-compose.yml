@@ -16,6 +16,14 @@ x-mysql-healthcheck: &mysql-healthcheck
     retries: 10
     start_period: 30s
 
+x-mongodb-healthcheck: &mongodb-healthcheck
+  healthcheck:
+    test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+    interval: 2s
+    timeout: 5s
+    retries: 20
+    start_period: 10s
+
 services:
   redis:
     image: redis:latest
@@ -57,7 +65,30 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
 
+  mongodb:
+    <<: *mongodb-healthcheck
+    image: mongo:latest
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: Password123!
+      MSSQL_PID: Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql_data:/var/opt/mssql
+
 volumes:
   redis_data:
   postgres_data:
   mysql_data:
+  mongodb_data:
+  mssql_data:

@@ -57,8 +57,17 @@ module BetterAuth
       end
 
       def update(model:, where:, update:)
-        records = update_many(model: model, where: where, update: update, returning: true)
-        records.is_a?(Array) ? records.first : records
+        model = model.to_s
+        if dialect == :postgres
+          records = update_many(model: model, where: where, update: update, returning: true)
+          return records.is_a?(Array) ? records.first : records
+        end
+
+        existing = find_one(model: model, where: where, select: ["id"])
+        return nil unless existing
+
+        update_many(model: model, where: where, update: update)
+        find_one(model: model, where: [{field: "id", value: existing.fetch("id")}])
       end
 
       def update_many(model:, where:, update:, returning: false)
@@ -95,7 +104,7 @@ module BetterAuth
         sql << quote(table_for(model))
         sql << " WHERE #{where_sql}" unless where_sql.empty?
         result = execute(sql, params)
-        result.respond_to?(:cmd_tuples) ? result.cmd_tuples : result.to_i
+        affected_rows(result)
       end
 
       def count(model:, where: nil)
@@ -131,6 +140,10 @@ module BetterAuth
 
           value_provided = input.key?(field)
           value = input[field]
+          if value_provided && attributes[:input] == false && value && !force_allow_id
+            raise APIError.new("BAD_REQUEST", message: "#{field} is not allowed to be set")
+          end
+
           if !value_provided && action == "create" && attributes.key?(:default_value)
             value = resolve_default(attributes[:default_value])
             value_provided = true
@@ -185,13 +198,13 @@ module BetterAuth
       end
 
       def build_where(model, where, params)
-        Array(where).map do |clause|
+        Array(where).each_with_index.map do |clause, index|
           field = storage_key(fetch_key(clause, :field))
           column = "#{quote(table_for(model))}.#{quote(storage_field(model, field))}"
           operator = (fetch_key(clause, :operator) || "eq").to_s
           value = fetch_key(clause, :value)
 
-          case operator
+          expression = case operator
           when "in", "not_in"
             values = Array(value)
             placeholders = values.map do |entry|
@@ -212,7 +225,10 @@ module BetterAuth
             params << value
             "#{column} #{sql_operator(operator)} #{placeholder(params.length)}"
           end
-        end.join(" AND ")
+
+          connector = (index.positive? && fetch_key(clause, :connector).to_s.upcase == "OR") ? "OR" : "AND"
+          index.zero? ? expression : "#{connector} #{expression}"
+        end.join(" ")
       end
 
       def order_sql(model, sort_by)
@@ -241,9 +257,21 @@ module BetterAuth
           statement = connection.prepare(sql)
           result = statement.execute(*params)
           result.respond_to?(:to_a) ? result.to_a : result
+        elsif connection.respond_to?(:execute)
+          result = connection.execute(sql, params)
+          result.respond_to?(:to_a) ? result.to_a : result
         else
           raise Error, "SQL connection must respond to exec_params or prepare"
         end
+      end
+
+      def affected_rows(result)
+        return result.cmd_tuples if result.respond_to?(:cmd_tuples)
+        return result.affected_rows if result.respond_to?(:affected_rows)
+        return connection.changes if connection.respond_to?(:changes)
+        return result.to_i if result.respond_to?(:to_i)
+
+        0
       end
 
       def normalize_record(model, row, join: nil)

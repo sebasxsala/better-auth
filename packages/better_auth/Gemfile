@@ -5,8 +5,13 @@ ruby file: ".ruby-version"
 gemspec
 
 group :development, :test do
+  gem "mongo", "~> 2.21"
+  gem "mysql2", "~> 0.5"
   gem "pg", "~> 1.5"
+  gem "sequel", "~> 5.83"
+  gem "sqlite3", "~> 2.0"
   gem "standardrb", "~> 1.0"
+  gem "tiny_tds", "~> 2.1"
   gem "minitest", "~> 5.25"
   gem "rake", "~> 13.2"
   gem "simplecov", "~> 0.22", require: false
