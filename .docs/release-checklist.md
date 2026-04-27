@@ -12,6 +12,8 @@ Use this checklist before cutting a Ruby gem release.
 - [ ] Run `cd packages/better_auth-rails && bundle exec standardrb`.
 - [ ] Run `cd packages/better_auth-sinatra && bundle exec rspec`.
 - [ ] Run `cd packages/better_auth-sinatra && bundle exec standardrb`.
+- [ ] Run `cd packages/better_auth-hanami && bundle exec rspec`.
+- [ ] Run `cd packages/better_auth-hanami && bundle exec standardrb`.
 - [ ] Smoke test `/api/auth/ok`.
 - [ ] Smoke test email/password sign-up, sign-in, get-session, and sign-out.
 - [ ] Smoke test Rails mount with generated initializer and migration.
@@ -34,6 +36,9 @@ Use this checklist before cutting a Ruby gem release.
 - [ ] Update changelog or release notes.
 - [ ] Confirm `better_auth-rails` and defensive alias `better_auth_rails` publish metadata.
 - [ ] Confirm `better_auth-sinatra` publish metadata.
+- [ ] Confirm `better_auth-hanami` publish metadata.
+- [ ] Confirm each released RubyGems package trusts `.github/workflows/release.yml` for Trusted Publishing.
+- [ ] Confirm the release tag uses the package prefix, for example `better_auth-v0.1.2`, `better_auth-rails-v0.1.2`, `better_auth-sinatra-v0.1.2`, or `better_auth-hanami-v0.1.2`.
 - [ ] Confirm gemspec files include the intended files and exclude generated caches.
 - [ ] Confirm no `.env`, `.next`, `node_modules`, coverage, or local database files are staged.
 
@@ -42,6 +47,7 @@ Use this checklist before cutting a Ruby gem release.
 - [ ] Rack app can mount `BetterAuth.auth(...)` at `/api/auth`.
 - [ ] Rails app can run `bin/rails generate better_auth:install`.
 - [ ] Sinatra app can register `BetterAuth::Sinatra` and run `rake better_auth:generate:migration`.
+- [ ] Hanami app can mount Better Auth routes and run `rake better_auth:generate:migration`.
 - [ ] PostgreSQL migration creates tables, indexes, and foreign keys.
 - [ ] MySQL migration or direct adapter flow runs against a local service when available.
 - [ ] JavaScript client can call the Ruby server with credentials enabled.

@@ -246,10 +246,10 @@ git push origin feat/new-feature
 
 **Automatic Release (GitHub Actions):**
 
-Release is triggered on `push` to `main` when `lib/better_auth/version.rb` changes.
+Release is triggered by package-prefixed tags so each gem can ship independently.
 
 ```bash
-# STEP 1: Update version in lib/better_auth/version.rb
+# STEP 1: Update the target package version file
 # Example: VERSION = "0.1.1"
 
 # STEP 2: Commit and push to main
@@ -257,19 +257,24 @@ git add lib/better_auth/version.rb
 git commit -m "chore: bump version to 0.1.1"
 git push origin main
 
-# STEP 3: GitHub Actions automatically:
+# STEP 3: Create the tag for the gem you want to publish
+git tag better_auth-v0.1.1
+git push origin better_auth-v0.1.1
+
+# STEP 4: GitHub Actions automatically:
 # - Runs tests
 # - Builds the gem
 # - Publishes to RubyGems (if version is new)
-# - Creates and pushes git tag (v0.1.1)
 # - Creates GitHub Release
 ```
 
+Use `better_auth-vX.Y.Z` for the core gem, `better_auth-rails-vX.Y.Z` for Rails, `better_auth-sinatra-vX.Y.Z` for Sinatra, and `better_auth-hanami-vX.Y.Z` for Hanami.
+
 **Required GitHub Configuration:**
 
-1. Go to Settings → Secrets and variables → Actions
-2. Add `RUBYGEMS_API_KEY` with your RubyGems API key
-3. The workflow `.github/workflows/release.yml` does the rest
+1. In RubyGems, configure Trusted Publishing for each gem that should publish from CI.
+2. Use this repository and workflow file: `.github/workflows/release.yml`.
+3. The workflow exchanges GitHub's OIDC token for short-lived RubyGems credentials when the matching package tag is pushed.
 
 **Dry-run options:**
 
@@ -294,8 +299,8 @@ gem build better_auth.gemspec
 gem push better_auth-*.gem
 
 # 4. Create and push the tag
-git tag -a v0.1.1 -m "Release v0.1.1"
-git push origin --tags
+git tag -a better_auth-v0.1.1 -m "Release better_auth v0.1.1"
+git push origin better_auth-v0.1.1
 ```
 
 ### Project Structure
@@ -325,6 +330,6 @@ The gem is available as open source under the terms of the [MIT License](https:/
 
 ## Security
 
-If you discover a security vulnerability within Better Auth Ruby, please send an e-mail to [security@better-auth.com](mailto:security@better-auth.com).
+If you discover a security vulnerability within Better Auth Ruby, please send an e-mail to [security@openparcel.dev](mailto:security@openparcel.dev).
 
 All reports will be promptly addressed, and you'll be credited accordingly.

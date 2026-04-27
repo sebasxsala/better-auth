@@ -74,10 +74,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install MySQL client headers
+      - name: Install database client headers
         run: |
           sudo apt-get update
-          sudo apt-get install -y default-libmysqlclient-dev
+          sudo apt-get install -y default-libmysqlclient-dev freetds-dev
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
