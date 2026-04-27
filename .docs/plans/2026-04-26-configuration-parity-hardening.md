@@ -1662,7 +1662,7 @@ git commit -m "docs: update configuration parity status"
 
 - No source changes beyond previous tasks.
 
-- [ ] **Step 1: Run focused core suites**
+- [x] **Step 1: Run focused core suites**
 
 Run:
 
@@ -1680,7 +1680,7 @@ rbenv exec bundle exec rake test TEST=test/better_auth/social_providers_test.rb
 
 Expected: PASS.
 
-- [ ] **Step 2: Run Rails focused suites**
+- [x] **Step 2: Run Rails focused suites**
 
 Run:
 
@@ -1691,7 +1691,7 @@ rbenv exec bundle exec rspec spec/better_auth/rails_spec.rb spec/generators/bett
 
 Expected: PASS.
 
-- [ ] **Step 3: Run package lint**
+- [x] **Step 3: Run package lint**
 
 Run:
 
@@ -1704,7 +1704,7 @@ rbenv exec bundle exec standardrb
 
 Expected: PASS.
 
-- [ ] **Step 4: Run broader suites if database services are available**
+- [x] **Step 4: Run broader suites if database services are available**
 
 Run:
 
@@ -1717,7 +1717,7 @@ rbenv exec bundle exec rspec
 
 Expected: PASS when local PostgreSQL access is available. If PostgreSQL TCP access is sandbox-blocked, record the exact connection error and the focused suite results in the implementation summary.
 
-- [ ] **Step 5: Commit final verification docs if needed**
+- [x] **Step 5: Commit final verification docs if needed**
 
 If verification notes changed docs or plans:
 

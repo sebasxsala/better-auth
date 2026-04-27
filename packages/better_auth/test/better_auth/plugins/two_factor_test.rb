@@ -67,6 +67,7 @@ class BetterAuthPluginsTwoFactorTest < Minitest::Test
   def test_backup_code_use_consumes_code_and_trusting_device_skips_next_challenge
     auth = build_auth(plugins: [BetterAuth::Plugins.two_factor(skip_verification_on_enable: true)])
     cookie = sign_up_cookie(auth, email: "backup@example.com")
+    existing_user_id = user_id(auth, cookie)
     enabled = auth.api.enable_two_factor(headers: {"cookie" => cookie}, body: {password: "password123"})
     code = enabled[:backupCodes].first
 
@@ -78,7 +79,7 @@ class BetterAuthPluginsTwoFactorTest < Minitest::Test
       return_headers: true
     )
     trusted_cookie = cookie_header(verified.fetch(:headers).fetch("set-cookie"))
-    refute_includes auth.api.view_backup_codes(body: {userId: user_id(auth, cookie)})[:backupCodes], code
+    refute_includes auth.api.view_backup_codes(body: {userId: existing_user_id})[:backupCodes], code
 
     trusted = auth.api.sign_in_email(
       headers: {"cookie" => trusted_cookie},
