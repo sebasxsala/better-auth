@@ -253,6 +253,9 @@ module BetterAuth
           return result.to_a if result.respond_to?(:to_a)
 
           result
+        elsif connection.respond_to?(:query) && params.empty?
+          result = connection.query(sql)
+          result.respond_to?(:to_a) ? result.to_a : result
         elsif connection.respond_to?(:prepare)
           statement = connection.prepare(sql)
           result = statement.execute(*params)

@@ -298,7 +298,7 @@ module BetterAuth
         return value if value.is_a?(BSON::ObjectId)
 
         BSON::ObjectId.from_string(value.to_s)
-      rescue BSON::ObjectId::Invalid
+      rescue StandardError
         value
       end
 
