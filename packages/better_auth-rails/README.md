@@ -85,6 +85,32 @@ BetterAuth::Rails.configure do |config|
     ENV["BETTER_AUTH_URL"]
   ].compact
 
+  config.session = {
+    cookie_cache: {
+      enabled: true,
+      max_age: 5 * 60,
+      strategy: "jwe"
+    }
+  }
+
+  config.advanced = {
+    ip_address: {
+      ip_address_headers: ["x-forwarded-for"],
+      disable_ip_tracking: false
+    }
+  }
+
+  config.experimental = {
+    joins: false
+  }
+
+  config.social_providers = {
+    # github: BetterAuth::SocialProviders.github(
+    #   client_id: ENV.fetch("GITHUB_CLIENT_ID"),
+    #   client_secret: ENV.fetch("GITHUB_CLIENT_SECRET")
+    # )
+  }
+
   config.plugins = []
   config.hooks = {
     before: [],
@@ -92,6 +118,8 @@ BetterAuth::Rails.configure do |config|
   }
 end
 ```
+
+Rails configuration is a thin option builder for the core Rack auth object. The same option concepts are available in core Ruby through `BetterAuth.auth(...)`; Rails places them in `config/initializers/better_auth.rb` so applications can rely on credentials, ActiveRecord, and Rails environment configuration.
 
 The ActiveRecord adapter uses whichever database adapter the Rails app is already configured with, including PostgreSQL and MySQL.
 

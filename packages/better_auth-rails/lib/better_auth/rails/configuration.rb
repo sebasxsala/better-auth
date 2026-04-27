@@ -20,6 +20,7 @@ module BetterAuth
         email_and_password
         email_verification
         social_providers
+        experimental
         secondary_storage
         database_hooks
         hooks

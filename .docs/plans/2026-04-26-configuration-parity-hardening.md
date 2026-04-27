@@ -1046,7 +1046,7 @@ git commit -m "feat: add experimental joins option"
 - Modify: `packages/better_auth-rails/spec/generators/better_auth/install_generator_spec.rb`
 - Modify: `packages/better_auth-rails/README.md`
 
-- [ ] **Step 1: Write failing Rails config pass-through test**
+- [x] **Step 1: Write failing Rails config pass-through test**
 
 Add to `packages/better_auth-rails/spec/better_auth/rails_spec.rb`:
 
@@ -1070,7 +1070,7 @@ it "passes session advanced experimental and social provider options to core aut
 end
 ```
 
-- [ ] **Step 2: Run Rails spec to verify it fails**
+- [x] **Step 2: Run Rails spec to verify it fails**
 
 Run:
 
@@ -1081,7 +1081,7 @@ rbenv exec bundle exec rspec spec/better_auth/rails_spec.rb
 
 Expected: FAIL because `experimental` is not in `AUTH_OPTION_NAMES`.
 
-- [ ] **Step 3: Add Rails config pass-through**
+- [x] **Step 3: Add Rails config pass-through**
 
 Modify `packages/better_auth-rails/lib/better_auth/rails/configuration.rb`:
 
@@ -1091,7 +1091,7 @@ Modify `packages/better_auth-rails/lib/better_auth/rails/configuration.rb`:
 
 inside `AUTH_OPTION_NAMES`.
 
-- [ ] **Step 4: Expand generated initializer**
+- [x] **Step 4: Expand generated initializer**
 
 Modify `packages/better_auth-rails/lib/generators/better_auth/install/templates/initializer.rb.tt` so the generated file contains:
 
@@ -1123,7 +1123,7 @@ Modify `packages/better_auth-rails/lib/generators/better_auth/install/templates/
   }
 ```
 
-- [ ] **Step 5: Update generator spec expectations**
+- [x] **Step 5: Update generator spec expectations**
 
 Modify `packages/better_auth-rails/spec/generators/better_auth/install_generator_spec.rb`:
 
@@ -1135,7 +1135,7 @@ expect(File.read(initializer)).to include("config.experimental")
 expect(File.read(initializer)).to include("config.social_providers")
 ```
 
-- [ ] **Step 6: Run Rails focused specs**
+- [x] **Step 6: Run Rails focused specs**
 
 Run:
 
@@ -1146,7 +1146,7 @@ rbenv exec bundle exec rspec spec/better_auth/rails_spec.rb spec/generators/bett
 
 Expected: PASS.
 
-- [ ] **Step 7: Update Rails README**
+- [x] **Step 7: Update Rails README**
 
 Replace the initializer example in `packages/better_auth-rails/README.md` with the expanded configuration from Step 4 plus this note:
 
@@ -1154,7 +1154,7 @@ Replace the initializer example in `packages/better_auth-rails/README.md` with t
 Rails configuration is a thin option builder for the core Rack auth object. The same option concepts are available in core Ruby through `BetterAuth.auth(...)`; Rails places them in `config/initializers/better_auth.rb` so applications can rely on credentials, ActiveRecord, and Rails environment configuration.
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/better_auth-rails/lib/better_auth/rails/configuration.rb packages/better_auth-rails/lib/generators/better_auth/install/templates/initializer.rb.tt packages/better_auth-rails/spec/better_auth/rails_spec.rb packages/better_auth-rails/spec/generators/better_auth/install_generator_spec.rb packages/better_auth-rails/README.md

@@ -35,6 +35,24 @@ RSpec.describe BetterAuth::Rails do
     expect(auth.options.hooks).to eq(after: [after_hook])
   end
 
+  it "passes session advanced experimental and social provider options to core auth" do
+    described_class.configure do |config|
+      config.secret = "test-secret-that-is-long-enough-for-validation"
+      config.database = :memory
+      config.session = {cookie_cache: {enabled: true, max_age: 300, strategy: "jwe"}}
+      config.advanced = {ip_address: {ip_address_headers: ["x-client-ip"]}}
+      config.experimental = {joins: true}
+      config.social_providers = {github: {client_id: "id", client_secret: "secret"}}
+    end
+
+    auth = described_class.auth
+
+    expect(auth.options.session[:cookie_cache]).to include(enabled: true, max_age: 300, strategy: "jwe")
+    expect(auth.options.advanced[:ip_address][:ip_address_headers]).to eq(["x-client-ip"])
+    expect(auth.options.experimental).to eq(joins: true)
+    expect(auth.options.social_providers[:github]).to include(client_id: "id")
+  end
+
   it "builds override auth instances without replacing the cached default auth" do
     described_class.configure do |config|
       config.secret = "test-secret-that-is-long-enough-for-validation"

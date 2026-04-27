@@ -13,6 +13,32 @@ BetterAuth::Rails.configure do |config|
     ENV["BETTER_AUTH_URL"]
   ].compact
 
+  config.session = {
+    cookie_cache: {
+      enabled: true,
+      max_age: 5 * 60,
+      strategy: "jwe"
+    }
+  }
+
+  config.advanced = {
+    ip_address: {
+      ip_address_headers: ["x-forwarded-for"],
+      disable_ip_tracking: false
+    }
+  }
+
+  config.experimental = {
+    joins: false
+  }
+
+  config.social_providers = {
+    # github: BetterAuth::SocialProviders.github(
+    #   client_id: ENV.fetch("GITHUB_CLIENT_ID"),
+    #   client_secret: ENV.fetch("GITHUB_CLIENT_SECRET")
+    # )
+  }
+
   # Add Better Auth plugins here.
   config.plugins = []
 
