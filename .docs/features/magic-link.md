@@ -1,5 +1,7 @@
 # Feature: Magic Link Plugin
 
+Status: Complete for Ruby server parity.
+
 **Upstream Reference:** `upstream/packages/better-auth/src/plugins/magic-link/index.ts`, `upstream/packages/better-auth/src/plugins/magic-link/magic-link.test.ts`, `upstream/packages/better-auth/src/plugins/magic-link/utils.ts`
 
 ## Summary
@@ -14,6 +16,8 @@ The demo-level Rack flow is covered end to end through `/sign-in/magic-link` and
 - Stores magic-link tokens through the core verification table.
 - Supports `expires_in`, `send_magic_link`, `disable_sign_up`, `generate_token`, `store_token: "plain"`, `store_token: "hashed"`, and custom hasher storage.
 - Uses core origin/trusted-origin checks for verify callback URLs.
+- Supports verifying the latest issued token when multiple magic links exist for the same user.
+- Sets session cookies for both redirect and JSON verification responses.
 
 ## Key Differences
 

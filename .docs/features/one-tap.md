@@ -1,5 +1,7 @@
 # Feature: One Tap Plugin
 
+Status: Complete for Ruby server parity.
+
 **Upstream Reference:** `upstream/packages/better-auth/src/plugins/one-tap/index.ts`, `upstream/packages/better-auth/src/plugins/one-tap/client.ts`
 
 ## Summary
@@ -13,6 +15,7 @@ Adds Google One Tap sign-in through `POST /one-tap/callback`.
 - Verifies the Google ID token, creates a Google OAuth account for new users, reuses existing Google accounts, links existing users when Google is trusted or the token email is verified, creates a session, and sets the session cookie.
 - Supports upstream `disableSignup` and `clientId` as Ruby `disable_signup` and `client_id`.
 - Supports a Ruby-specific `verify_id_token` callable for tests and applications that need custom Google token verification.
+- Rejects missing-email, invalid-token, disabled-signup, disabled account-linking, and untrusted unverified linking cases with upstream-compatible responses.
 
 ## Key Differences
 

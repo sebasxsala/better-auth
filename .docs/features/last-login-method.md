@@ -6,12 +6,17 @@
 
 Tracks the most recent successful login method through a readable cookie and optional user-table field.
 
+Status: Complete for Ruby server parity.
+
 ## Ruby Adaptation
 
 - Exposed as `BetterAuth::Plugins.last_login_method`.
 - Supports `cookie_name`, `max_age`, `custom_resolve_method`, and `store_in_database`.
 - Stores `lastLoginMethod` in the user schema when database storage is enabled.
 - Resolves email, social callback, OAuth2 callback, SIWE, and passkey route patterns.
+- Updates the cookie and database value on subsequent successful logins.
+- Suppresses cookie/database updates for failed email and OAuth callbacks.
+- Preserves exact custom cookie names even when `advanced.cookie_prefix` is configured, and inherits cross-subdomain/cross-origin/default cookie attributes from the core cookie configuration.
 
 ## Testing
 

@@ -98,7 +98,7 @@ The most important issue is not just "missing tests"; in several areas the curre
 
 Ruby hashes passwords with BCrypt in `packages/better_auth/lib/better_auth/password.rb`. Upstream uses scrypt over normalized input and has tests for very long passwords. BCrypt only considers the first 72 bytes, so two long passwords that differ after that boundary can verify as the same password.
 
-Recommended action: add upstream-equivalent long password tests first, then switch strategy or pre-hash safely before BCrypt if BCrypt remains the storage format.
+Resolved 2026-04-27: `BetterAuth::Password` now pre-hashes password input with SHA-256 before BCrypt for new hashes, keeps legacy raw BCrypt verification, and covers upstream-equivalent long-password, unique-salt, case-sensitive, and Unicode tests.
 
 ### P1 - Session cookie cache stores unfiltered fields
 
@@ -218,7 +218,7 @@ Covered locally:
 
 Missing or thin versus upstream:
 
-- Long-password, Unicode, case-sensitive, different-salt, and callback password tests.
+- Callback password tests.
 - Production secure-cookie behavior and missing-secret behavior.
 - Cookie cache strategies across compact/JWT/JWE.
 - Invalid/tampered cache behavior through route/session lookup.
@@ -228,7 +228,7 @@ Missing or thin versus upstream:
 
 Important logic mismatches:
 
-- BCrypt truncation.
+- Password hashing now avoids BCrypt truncation for new hashes by pre-hashing input before BCrypt.
 - Unfiltered cache fields.
 - Dont-remember refresh behavior.
 - Tampered cache can fall back to database while upstream invalidates/returns null in several paths.
@@ -284,45 +284,60 @@ Missing or thin versus upstream:
 
 Stronger implemented coverage:
 
+- `access`: runtime role/statement/resource/action checks and connector behavior.
+- `additional-fields`: schema merge plus sign-up, update-user, and get-session integration.
+- `admin`: user CRUD, list/search/filter/sort/count, role validation, bans, social banned callbacks, impersonation restoration, sessions, password edges, and permission checks.
 - `username`: sign-up/sign-in/update/availability, duplicate/invalid, custom normalization, leak prevention.
-- `anonymous`: anonymous sign-in/delete/link cleanup basics.
+- `anonymous`: anonymous sign-in/delete/link cleanup, generator fallbacks, and social callback cleanup.
 - `magic-link`: send/verify, new-user signup, existing unverified verify, invalid/expired redirects, token storage modes.
+- `bearer`: bearer session resolution, signed-token exposure, unsigned fallback, signature requirement, list-session auth, and valid-cookie fallback.
+- `captcha`: protected endpoints, provider payloads, score checks, service errors, and injected verifier behavior.
+- `device-authorization`: option validation, client validation, OAuth error codes/descriptions, device/user code flow, polling/slow-down, approval/denial authorization, token exchange hook integration, and verification URI behavior.
+- `haveibeenpwned`: default password routes, custom paths/messages, and SHA-1 k-anonymity lookup.
 - `email-otp`: send/verify/sign-in/signup/password reset/attempt tracking/storage helpers.
+- `mcp`: OAuth/protected-resource metadata, registration, token, refresh, userinfo, JWKS, login-prompt cookie restoration, and helper headers.
+- `multi-session`: device sessions, active switching, same-user replacement, active-session authorization, revocation fallback, sign-out cleanup, and forged-cookie safety.
 - `phone-number`: OTP, signup/session, update user phone, password sign-in, require verification, reset, attempts, custom validation.
-- `one-time-token`: generation/verification, single-use, expiration, cookie behavior, storage modes.
+- `one-time-token`: generation/verification, single-use, expiration, expired-session rejection, cookie behavior, storage modes, server-only generation, and `set-ott` headers.
+- `jwt`: EdDSA default signing, RS256/PS256/ES256/ES512, JWKS publication/custom path, API-only sign/verify, `set-auth-jwt`, key rotation/grace windows, `kid` selection, expiry, current/previous key verification, and remote JWKS verification.
+- `last-login-method`: email, SIWE, social OAuth, generic OAuth, failed callback suppression, subsequent database updates, custom cookie names/prefixes, cross-subdomain/cross-origin attributes, and optional user persistence.
+- `oauth-proxy`: callback rewriting, same-origin unwrap, encrypted cross-origin cookie forwarding, timestamp/trusted-callback validation, malformed payload handling, stateless state-cookie package restoration, and DB-less provider callback flow.
 - `passkey`: real WebAuthn registration/authentication and management authorization.
 
 High-priority plugin gaps:
 
-- `multi-session`: max-session replacement can drop the new multi-session cookie; `set-active` and `revoke` do not require an active session like upstream.
 - `phone-number`: reset consumes OTP before password/user validation completes.
-- `custom-session`: cookie/header preservation is under-tested.
-- `jwt`: rotation missing.
 - `open-api`: snapshot parity missing.
-- `generic-oauth`: large gaps in state-cookie behavior, provider helper matrix, custom token flows, RFC 9207 issuer validation.
 - `siwe`: Ruby lowercases wallet addresses, diverging from upstream checksum casing; duplicate wallet/custom schema/message-shape cases missing.
-- `bearer`: `requireSignature`, invalid Authorization plus valid cookie, and list-session paths are thin.
-- `last-login-method`: cross-plugin method coverage is thin.
 - `passkey`: option shape, challenge expiration, not-found delete, and allow/exclude transport details are thin.
 
-Plugins implemented in Ruby but partial versus upstream should stay marked `Partial`, not `Ported`, unless the project explicitly accepts the documented gaps.
+Plugins implemented in Ruby but partial versus upstream should stay marked `Partial`, not `Ported`, unless the project explicitly accepts the documented gaps. The current partial plugin list is maintained in `.docs/features/plugin-priority-computation.md`.
 
-### Unimplemented upstream plugin suites
+### Implemented upstream plugin suites still partial
 
-No local Ruby counterpart because the plugins are not implemented yet:
+Local Ruby counterparts exist but still have upstream parity gaps:
 
-- `access`
-- `admin`
 - `api-key`
-- `captcha`
-- `device-authorization`
-- `haveibeenpwned`
+- `email-otp`
 - `mcp`
+- `multi-session`
 - `oidc-provider`
+- `one-tap`
+- `one-time-token`
+- `open-api`
 - `organization`
+- `passkey`
+- `phone-number`
+- `siwe`
+- `sso`
+- `scim`
+- `oauth-provider`
+- `stripe`
 - `two-factor`
+- `username`
+- `expo`
 
-These account for about 17 upstream test files under `upstream/packages/better-auth/src/plugins`.
+These account for the active plugin parity queue. Stripe and SCIM remain listed here for status accuracy, even when an implementation pass intentionally avoids touching them.
 
 ### Upstream suites that are not directly applicable yet
 
@@ -357,9 +372,9 @@ Highest-risk gaps:
 
 ### Docs and plan inconsistencies
 
-The docs are useful but currently overstate parity in places:
+The docs are useful but need continuous status synchronization:
 
-- `upstream-parity-matrix.md` marks `anonymous`, `magic-link`, and `username` as `Ported`; audit suggests `Partial` or "server core ported with remaining upstream edge cases".
+- `upstream-parity-matrix.md` now uses `Complete` for completed server-parity plugin rows and `Partial` for rows with remaining upstream gaps.
 - OAuth2/social-provider rows are marked `Not started`, but route-level social/account behavior exists and should be `Partial`.
 - Rails integration is marked `Not started` in the matrix, but Rails adapter/specs exist and should be `Partial`.
 - Some matrix test paths reference files that do not exist, such as standalone `context_test.rb`, `database_hooks_test.rb`, and `secondary_storage_test.rb`.
@@ -368,7 +383,7 @@ The docs are useful but currently overstate parity in places:
 ## Recommended Next Work Order
 
 1. Fix security-sensitive session/cookie/password gaps:
-   - Long-password hashing.
+   - Long-password hashing. (Resolved 2026-04-27.)
    - Filter `returned: false` fields from cookie cache.
    - Preserve `rememberMe: false` semantics through refresh.
    - Validate GET callback URLs.
@@ -392,9 +407,7 @@ The docs are useful but currently overstate parity in places:
 
 5. Add high-value plugin parity tests:
    - JWT rotation.
-   - Multi-session max replacement and auth requirement.
    - Phone-number reset OTP preservation.
-   - Generic OAuth state/cookie/provider matrix.
    - OpenAPI snapshot decision.
 
 6. Update docs/matrix:

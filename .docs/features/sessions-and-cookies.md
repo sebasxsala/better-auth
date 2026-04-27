@@ -4,7 +4,7 @@
 
 ## Summary
 
-Phase 4 adds the security-sensitive primitives that later auth routes build on: random IDs, HMAC signatures, symmetric encryption helpers, JWT helpers, BCrypt password hashing, Better Auth cookie definitions, signed session-token cookies, session-data cookie cache, chunked cookies, and adapter-backed session lookup/refresh.
+Phase 4 adds the security-sensitive primitives that later auth routes build on: random IDs, HMAC signatures, symmetric encryption helpers, JWT helpers, pre-hashed BCrypt password storage, Better Auth cookie definitions, signed session-token cookies, session-data cookie cache, chunked cookies, and adapter-backed session lookup/refresh.
 
 ## Upstream Implementation
 
@@ -15,7 +15,7 @@ Upstream derives cookie names and attributes from auth options, signs the `sessi
 Ruby keeps the same cookie names, prefixes, default attributes, max-age behavior, chunking behavior, signed-cookie semantics, cache-version validation, and session refresh rules. Internals are idiomatic Ruby:
 
 - `BetterAuth::Crypto` uses `OpenSSL`, `JWT`, and `SecureRandom`.
-- `BetterAuth::Password` uses `BCrypt`, matching the allowed core runtime dependencies.
+- `BetterAuth::Password` pre-hashes password input with SHA-256 before BCrypt so long passwords are not truncated at BCrypt's 72-byte boundary, while legacy raw BCrypt hashes still verify.
 - `BetterAuth::Cookies` exposes Ruby `snake_case` option keys while preserving upstream cookie wire names.
 - `BetterAuth::Session.find_current` accepts `disable_cookie_cache`, `disable_refresh`, and `sensitive` flags for route-level behavior.
 
@@ -38,7 +38,7 @@ Ruby uses the `jwe` gem to encode `session.cookieCache.strategy = "jwe"` as RFC 
 ```bash
 cd packages/better_auth
 rbenv exec bundle exec rake test TEST=test/better_auth/crypto_test.rb
-rbenv exec bundle exec rake test TEST=test/better_auth/password_test.rb
+rbenv exec ruby -Itest test/better_auth/password_test.rb
 rbenv exec bundle exec rake test TEST=test/better_auth/cookies_test.rb
 rbenv exec bundle exec rake test TEST=test/better_auth/session_test.rb
 rbenv exec bundle exec rake test

@@ -1,5 +1,7 @@
 # Feature: Captcha Plugin
 
+Status: Complete for Ruby server parity.
+
 **Upstream Reference:** `upstream/packages/better-auth/src/plugins/captcha/index.ts`, `upstream/packages/better-auth/src/plugins/captcha/constants.ts`, `upstream/packages/better-auth/src/plugins/captcha/error-codes.ts`, `upstream/packages/better-auth/src/plugins/captcha/verify-handlers/*.ts`, `upstream/packages/better-auth/src/plugins/captcha/captcha.test.ts`
 
 ## Summary

@@ -1,5 +1,7 @@
 # Feature: Have I Been Pwned Plugin
 
+Status: Complete for Ruby server parity.
+
 **Upstream Reference:** `upstream/packages/better-auth/src/plugins/haveibeenpwned/index.ts`, `upstream/packages/better-auth/src/plugins/haveibeenpwned/haveibeenpwned.test.ts`
 
 ## Summary

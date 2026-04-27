@@ -6,12 +6,16 @@
 
 Overrides `/get-session` with caller-defined session shaping and can mutate multi-session device-list entries.
 
+**Status:** Complete for Ruby server parity.
+
 ## Ruby Adaptation
 
 - Exposed as `BetterAuth::Plugins.custom_session`.
 - The resolver receives `{ session:, user: }` and the endpoint context.
 - Session cookies are preserved when wrapping get-session.
 - `should_mutate_list_device_sessions_endpoint` maps to the upstream option.
+- Unauthenticated session lookup returns `nil` without invoking the resolver.
+- TypeScript inference and upstream memory-leak instrumentation are outside Ruby runtime scope.
 
 ## Testing
 

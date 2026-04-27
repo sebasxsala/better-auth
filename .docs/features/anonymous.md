@@ -1,5 +1,7 @@
 # Feature: Anonymous Plugin
 
+Status: Complete for Ruby server parity.
+
 **Upstream Reference:** `upstream/packages/better-auth/src/plugins/anonymous/index.ts`, `upstream/packages/better-auth/src/plugins/anonymous/schema.ts`, `upstream/packages/better-auth/src/plugins/anonymous/anon.test.ts`
 
 ## Summary
@@ -18,13 +20,14 @@ Adds anonymous sign-in, marks temporary users with `isAnonymous`, allows deletin
 
 - The Ruby implementation keeps this plugin dependency-free; email validation uses the core route email pattern.
 - Ruby options are idiomatic snake_case equivalents of upstream camelCase options.
-- Social linking cleanup is implemented through the shared session-cookie/new-session mechanism and is covered through email sign-in tests now; broader social-provider regression coverage remains with the base social route tests.
+- Social linking cleanup is implemented through the shared session-cookie/new-session mechanism and is covered by direct social callback route tests.
+- Async generator behavior maps to normal Ruby callables; blank callable results intentionally follow upstream fallback behavior.
 
 ## Testing
 
 ```bash
 cd packages/better_auth
-rbenv exec bundle exec rake test TEST=test/better_auth/plugins/anonymous_test.rb
+rbenv exec ruby -Ilib -Itest test/better_auth/plugins/anonymous_test.rb
 ```
 
 Key test file:

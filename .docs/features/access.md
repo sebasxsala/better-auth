@@ -1,6 +1,6 @@
 # Access Plugin
 
-Status: Partial port for Phase 10.
+Status: Complete for Ruby server parity.
 
 Upstream source:
 

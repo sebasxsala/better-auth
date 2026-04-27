@@ -148,38 +148,39 @@ Upstream Better Auth exposes many provider factories. The Ruby port currently sh
 
 | Plugin | Status | Notes |
 | --- | --- | --- |
-| Access control | Partial | Runtime roles, statements, permissions, and role inference behavior are implemented. |
+| Access control | [x] Supported | Runtime roles, statements, permissions, resource/action connectors, and upstream access checks are implemented; TypeScript inference is outside Ruby scope. |
 | Additional fields | [x] Supported | Schema extension and route integration exist. |
-| Admin | Partial | User management, roles, bans, impersonation, and session administration exist; broader upstream matrices remain future polish. |
-| Anonymous | Partial | Anonymous sign-in/delete and link cleanup exist; some upstream edge cases remain future polish. |
-| API key | Partial | Key creation, verification, hashing, expiration, usage limits, metadata, storage modes, and API-key sessions exist. |
-| Bearer | Partial | Bearer session resolution exists; some signature/header edge cases remain future polish. |
-| Captcha | Partial | reCAPTCHA, hCaptcha, Turnstile, and CaptchaFox provider hooks exist. |
-| Custom session | Partial | Custom session shaping exists; cookie/header preservation needs broader parity coverage. |
-| Device authorization | Partial | Device/user code, polling, approval, denial, expiry, slow-down, and verification URI behavior exist. |
-| Email OTP | Partial | Send/check/verify/sign-in/password-reset flows, attempts, and token storage modes exist. |
-| Generic OAuth | Partial | Custom OAuth sign-in/callback/link flows exist; exhaustive provider/server matrix remains future polish. |
-| Have I Been Pwned | Partial | SHA-1 k-anonymity range lookup with injectable tests exists. |
-| JWT/JWKS | Partial | RS256 JWT issuance and JWKS publication exist; rotation and broader JOSE matrix remain future work. |
-| Last login method | Partial | Cookie and optional user persistence exist. |
-| Magic link | Partial | Send/verify, redirects, new-user signup, existing-user verification, and token storage modes exist. |
-| MCP | Partial | OAuth metadata, protected resource metadata, registration, token, refresh, userinfo, and helper behavior exist. |
-| Multi-session | Partial | Device sessions, active switching, and revocation exist; some auth/max-session edge cases remain future polish. |
-| OAuth proxy | Partial | Callback rewriting, encrypted cookie forwarding, timestamp validation, and trusted callback validation exist. |
+| Admin | [x] Supported | Ruby server parity covers user management, list/search/filter/sort/count, role validation, bans including social callback rejection and expiry cleanup, impersonation/admin-session restoration, session administration, password setting, destructive endpoints, and permission checks. |
+| Anonymous | [x] Supported | Anonymous sign-in/delete, generator fallbacks, repeat-session rejection, and email/social link cleanup are implemented. |
+| API key | [x] Supported | Creation, verification, hashing, expiration bounds, usage/refill/rate limits, metadata migration, permissions, storage modes, deferred updates, and API-key sessions are implemented. |
+| Bearer | [x] Supported | Bearer session resolution, signed-token exposure, unsigned-token fallback, signature requirement, list-session auth, and valid-cookie fallback are implemented. |
+| Captcha | [x] Supported | reCAPTCHA, hCaptcha, Turnstile, CaptchaFox, protected endpoint checks, provider payloads, score checks, and failure responses are implemented. |
+| Custom session | [x] Supported | Custom `/get-session` shaping, unauthenticated nil responses, Set-Cookie preservation, and optional multi-session list mutation are implemented. |
+| Device authorization | [x] Supported | Device/user code issuance, option validation, client validation, OAuth error responses, polling/slow-down, approval/denial, token exchange hooks, expiry, and verification URI behavior are implemented. |
+| Email OTP | [x] Supported | Send/check/verify/sign-in/password-reset flows, attempts, latest OTP, no-enumeration sends, override hooks, token storage modes, and plugin rate limits are implemented. Client aliases are outside Ruby server scope. |
+| Generic OAuth | [x] Supported | Custom OAuth sign-in/callback/link flows, DB and cookie state strategies with mismatch cleanup, dynamic authorization params, response mode, issuer checks, sign-up controls, custom token/user-info callables, standard HTTP token/userinfo exchange, provider helper factories, account-info/refresh integration, encrypted OAuth tokens, account cookies, and account linking are implemented. |
+| Have I Been Pwned | [x] Supported | SHA-1 k-anonymity range lookup, default password-route protection, custom paths/messages, and injectable lookup tests are implemented. |
+| JWT/JWKS | [x] Supported | EdDSA default signing, RS256/PS256/ES256/ES512 key generation, JWKS publication/custom path, key rotation/grace periods, `kid` selection, token expiry, remote JWKS verification, API-only sign/verify helpers, and `set-auth-jwt` are implemented. Symmetric client-secret algorithms such as HS256 are intentionally outside the JWKS server surface. |
+| Last login method | [x] Supported | Successful email, SIWE, social OAuth, and generic OAuth logins update the readable cookie and optional `lastLoginMethod` user field; failed auth is suppressed and custom cookie names/prefixes/cross-origin attributes are covered. |
+| Magic link | [x] Supported | Send/verify, redirects/errors, new-user signup, existing-user verification, latest-token verification, callback origin validation, and token storage modes are implemented. |
+| MCP | [x] Supported | OAuth/protected-resource metadata, registration, authorization-code PKCE, token refresh, userinfo, JWKS publication, login-prompt cookie restoration, and helper challenge headers are implemented. |
+| Multi-session | [x] Supported | Device sessions, active switching, same-user replacement, active-session authorization, revocation, sign-out cleanup, and invalid-token errors are implemented. |
+| OAuth proxy | [x] Supported | Callback rewriting, same-origin unwrap, encrypted cross-origin cookie forwarding, timestamp/trusted-callback validation, malformed payload handling, stateless state-cookie package restoration, and DB-less provider callback flow are implemented. |
+| OAuth provider | Partial | OAuth/OIDC metadata, client registration, consent, authorization-code/client-credentials tokens, introspection, and revocation exist; organization, logout, encrypted client-secret, and rate-limit matrices remain. |
 | OIDC provider | Partial | Metadata, dynamic registration, consent-code flow, token, refresh token, userinfo, and logout exist. |
-| One tap | Partial | Google ID-token callback, account reuse/linking, disable signup, and session cookies exist; browser/FedCM helpers are outside core Ruby. |
-| One-time token | Partial | Generate/verify, single-use, expiration, cookie behavior, and storage modes exist. |
+| One tap | [x] Supported | Google ID-token callback, account reuse/linking, trusted/verified account linking, disabled signup, client ID handling, invalid-token handling, and session cookies are implemented. Browser/FedCM helpers are outside Ruby server scope. |
+| One-time token | [x] Supported | Generate/verify, single-use, expiration, expired-session rejection, cookie behavior, storage modes, server-only generation, and `set-ott` session headers are implemented. |
 | OpenAPI | Partial | See core status above. |
-| Organization | Partial | Organizations, members, invitations, teams, active org/team, dynamic roles, hooks, and permissions exist. |
-| Passkey | Partial | WebAuthn registration/authentication, challenge cookies, management routes, and session creation exist through the `webauthn` gem. |
-| Phone number | Partial | OTP, sign-in/sign-up, phone updates, password reset, attempt limits, and custom validation exist. |
+| Organization | [x] Supported | Organization/member CRUD, invitations including multi-team acceptance, team flows, active org/team session fields, dynamic role CRUD safeguards, hooks, additional fields, permissions, and SQL/Rails plugin schema migrations are implemented. Browser client hooks and TypeScript inference are outside Ruby server scope. |
+| Passkey | [x] Supported | WebAuthn registration/authentication, upstream option shapes, challenge expiration, allow/exclude credential transports, not-found delete behavior, management routes, session creation, and SQL/Rails schema output are implemented through the `webauthn` gem. Browser client package aliases are outside Ruby server scope. |
+| Phone number | [x] Supported | OTP send/verify, sign-in/sign-up, phone updates, password reset safety, attempt limits, uniqueness, additional fields, custom validation, and custom OTP verification are implemented. |
 | SIWE | Partial | Nonce, wallet sign-in, callback verification, ENS hook, and account/session creation exist; checksum casing remains a Ruby adaptation. |
 | SSO | Partial | OIDC/SAML provider flows, domain verification, ACS/metadata, replay protection, and organization assignment exist; full SAML XML signature/encryption matrix remains future work. |
 | SCIM | Partial | Tokens, metadata, user CRUD, common PATCH operations, filters, mappings, and Bearer middleware exist. |
-| Stripe | Partial | Injected-client checkout, billing portal, subscription persistence, webhooks, cancellation, restore, and organization mode exist. |
-| Two-factor | Partial | TOTP, OTP, backup codes, trusted devices, enable/disable, and post-login verification exist. |
-| Username | Partial | Username sign-up/sign-in, availability, normalization, display username, and leak-prevention behavior exist. |
-| Expo/mobile server integration | Partial | Origin override, deep-link redirect cookie transfer, and authorization proxy exist; native client storage/focus helpers are outside Ruby server scope. |
+| Stripe | [x] Supported | Injected-client checkout/portal flows, reference authorization, plan/seat/trial abuse protection, billing event webhooks, subscription state transitions, and organization subscriptions are covered. |
+| Two-factor | [x] Supported | TOTP, OTP, backup codes, trusted devices, cookie max-age options, disable/recovery flows, `rememberMe: false` preservation, and post-login verification are implemented. |
+| Username | [x] Supported | Username sign-up/sign-in, availability, normalization, display username, validation order, duplicate/update behavior, and leak-prevention behavior are implemented. |
+| Expo server integration | [x] Supported | Authorization proxy cookies, optional OAuth state cookie, `expo-origin` override/preservation, disabled override, trusted `exp://`, wildcard trusted origins, and trusted deep-link cookie transfer are covered. Native Expo client storage/focus helpers are outside Ruby server scope. |
 
 ## Development
 
@@ -261,7 +262,7 @@ make release-check
 
 ## Security
 
-Report vulnerabilities to security@better-auth.com. See [SECURITY.md](SECURITY.md).
+Report vulnerabilities to security@openparcel.dev. See [SECURITY.md](SECURITY.md).
 
 ## License
 

@@ -1,5 +1,7 @@
 # Feature: One-Time Token Plugin
 
+Status: Complete for Ruby server parity.
+
 **Upstream Reference:** `upstream/packages/better-auth/src/plugins/one-time-token/index.ts`, `upstream/packages/better-auth/src/plugins/one-time-token/utils.ts`, `upstream/packages/better-auth/src/plugins/one-time-token/one-time-token.test.ts`
 
 ## Summary
@@ -18,6 +20,7 @@ Adds one-time session tokens that can be generated from an existing session and 
 - Ruby options use snake_case equivalents of upstream camelCase options.
 - Hashed token storage uses `BetterAuth::Crypto.sha256(..., encoding: :base64url)`, matching upstream's SHA-256/base64url storage behavior.
 - Rack GET requests without bodies now safely parse as an empty body; the one-time-token Rack test covers this router behavior.
+- Ruby exposes server methods as snake_case (`generate_one_time_token`, `verify_one_time_token`) instead of the upstream client aliases; TypeScript client alias parity is outside the Ruby server surface.
 
 ## Testing
 

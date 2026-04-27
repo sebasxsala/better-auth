@@ -1,5 +1,7 @@
 # Feature: Additional Fields Plugin
 
+Status: Complete for Ruby server parity.
+
 **Upstream Reference:** `upstream/packages/better-auth/src/plugins/additional-fields/additional-fields.test.ts`, `upstream/packages/better-auth/src/plugins/additional-fields/client.ts`
 
 ## Summary
@@ -16,5 +18,5 @@ Adds plugin-style schema inference for extra `user` and `session` fields while r
 
 ```bash
 cd packages/better_auth
-rbenv exec bundle exec rake test TEST=test/better_auth/plugins/additional_fields_test.rb
+rbenv exec ruby -Ilib -Itest test/better_auth/plugins/additional_fields_test.rb
 ```

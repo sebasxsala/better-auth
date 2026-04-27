@@ -1,5 +1,7 @@
 # Feature: Multi Session Plugin
 
+Status: Complete for Ruby server parity.
+
 **Upstream Reference:** `upstream/packages/better-auth/src/plugins/multi-session/index.ts`, `upstream/packages/better-auth/src/plugins/multi-session/multi-session.test.ts`
 
 ## Summary
@@ -12,6 +14,7 @@ Stores signed per-session cookies so one browser can switch between multiple act
 - Implements `/multi-session/list-device-sessions`, `/multi-session/set-active`, and `/multi-session/revoke`.
 - Adds and clears `*_multi-<token>` cookies through after hooks.
 - Enforces the upstream `INVALID_SESSION_TOKEN` error code.
+- Requires an active session for set-active and revoke, replaces old same-user multi-session cookies before enforcing `maximum_sessions`, and moves the active session to the next valid device session when revoked.
 
 ## Testing
 
