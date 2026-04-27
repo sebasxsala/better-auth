@@ -25,7 +25,41 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
     account = auth.context.adapter.find_one(model: "account", where: [{field: "userId", value: result[:user]["id"]}])
     assert_equal "credential", account["providerId"]
     assert_equal result[:user]["id"], account["accountId"]
+    assert_match(/\A[0-9a-f]{32}:[0-9a-f]{128}\z/, account["password"])
     assert BetterAuth::Password.verify(password: "password123", hash: account["password"])
+  end
+
+  def test_sign_up_email_uses_configured_bcrypt_hasher
+    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET, password_hasher: :bcrypt)
+
+    result = auth.api.sign_up_email(body: {
+      email: "bcrypt@example.com",
+      password: "password123",
+      name: "BCrypt"
+    })
+
+    account = auth.context.adapter.find_one(model: "account", where: [{field: "userId", value: result[:user]["id"]}])
+    assert_match(/\Abcrypt_sha256\$/, account["password"])
+    assert BetterAuth::Password.verify(password: "password123", hash: account["password"])
+  end
+
+  def test_sign_up_and_sign_in_email_use_custom_password_callbacks
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      email_and_password: {
+        password: {
+          hash: ->(password) { "custom:#{password.reverse}" },
+          verify: ->(data) { data[:hash] == "custom:#{data[:password].reverse}" }
+        }
+      }
+    )
+
+    auth.api.sign_up_email(body: {email: "custom@example.com", password: "password123", name: "Custom"})
+    account = auth.context.adapter.find_one(model: "account", where: [{field: "providerId", value: "credential"}])
+
+    assert_equal "custom:321drowssap", account["password"]
+    assert auth.api.sign_in_email(body: {email: "custom@example.com", password: "password123"})[:token]
   end
 
   def test_sign_up_email_allows_empty_name_and_captures_session_headers

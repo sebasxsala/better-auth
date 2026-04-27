@@ -14,6 +14,7 @@ class BetterAuthConfigurationTest < Minitest::Test
     assert_equal 60 * 60 * 24, config.session[:fresh_age]
     assert_equal 8, config.email_and_password[:min_password_length]
     assert_equal 128, config.email_and_password[:max_password_length]
+    assert_equal :scrypt, config.password_hasher
     assert_equal "cookie", config.account[:store_state_strategy]
     assert_equal true, config.account[:store_account_cookie]
     assert_equal({enabled: true, strategy: "jwe", refresh_cache: true}, config.session[:cookie_cache])
@@ -34,7 +35,8 @@ class BetterAuthConfigurationTest < Minitest::Test
         enabled: true,
         min_password_length: 12,
         max_password_length: 256
-      }
+      },
+      password_hasher: :bcrypt
     )
 
     assert_equal "http://localhost:3000", config.base_url
@@ -46,6 +48,15 @@ class BetterAuthConfigurationTest < Minitest::Test
     assert_equal 0, config.session[:fresh_age]
     assert_equal 12, config.email_and_password[:min_password_length]
     assert_equal 256, config.email_and_password[:max_password_length]
+    assert_equal :bcrypt, config.password_hasher
+  end
+
+  def test_rejects_unknown_password_hasher
+    error = assert_raises(BetterAuth::Error) do
+      BetterAuth::Configuration.new(secret: SECRET, password_hasher: :argon2)
+    end
+
+    assert_includes error.message, "Unsupported password hasher"
   end
 
   def test_base_url_with_existing_path_keeps_that_path_and_extracts_origin_for_options

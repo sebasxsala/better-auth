@@ -18,6 +18,7 @@ module BetterAuth
         verification
         advanced
         email_and_password
+        password_hasher
         email_verification
         social_providers
         experimental

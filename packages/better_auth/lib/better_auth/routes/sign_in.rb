@@ -33,7 +33,7 @@ module BetterAuth
 
         found = ctx.context.internal_adapter.find_user_by_email(email, include_accounts: true)
         unless found
-          Password.hash(password)
+          hash_password(ctx, password)
           raise APIError.new("UNAUTHORIZED", message: BASE_ERROR_CODES["INVALID_EMAIL_OR_PASSWORD"])
         end
 
@@ -41,8 +41,8 @@ module BetterAuth
         accounts = found[:accounts] || found["accounts"] || []
         credential_account = accounts.find { |account| account["providerId"] == "credential" || account[:providerId] == "credential" }
         current_password = credential_account && (credential_account["password"] || credential_account[:password])
-        unless current_password && Password.verify(password: password, hash: current_password, verifier: email_config.dig(:password, :verify))
-          Password.hash(password) unless current_password
+        unless current_password && verify_password_value(ctx, password, current_password)
+          hash_password(ctx, password) unless current_password
           raise APIError.new("UNAUTHORIZED", message: BASE_ERROR_CODES["INVALID_EMAIL_OR_PASSWORD"])
         end
 

@@ -73,7 +73,7 @@ module BetterAuth
 
         found = ctx.context.adapter.find_one(model: "user", where: [{field: "phoneNumber", value: phone_number}])
         unless found
-          Password.hash(password)
+          Routes.hash_password(ctx, password)
           raise APIError.new("UNAUTHORIZED", message: PHONE_NUMBER_ERROR_CODES["INVALID_PHONE_NUMBER_OR_PASSWORD"])
         end
 
@@ -86,8 +86,8 @@ module BetterAuth
 
         credential = ctx.context.internal_adapter.find_accounts(found["id"]).find { |entry| entry["providerId"] == "credential" }
         current_password = credential && credential["password"]
-        unless current_password && Password.verify(password: password, hash: current_password, verifier: ctx.context.options.email_and_password.dig(:password, :verify))
-          Password.hash(password) unless current_password
+        unless current_password && Routes.verify_password_value(ctx, password, current_password)
+          Routes.hash_password(ctx, password) unless current_password
           raise APIError.new("UNAUTHORIZED", message: PHONE_NUMBER_ERROR_CODES["INVALID_PHONE_NUMBER_OR_PASSWORD"])
         end
 
@@ -190,7 +190,7 @@ module BetterAuth
         raise APIError.new("BAD_REQUEST", message: PHONE_NUMBER_ERROR_CODES["UNEXPECTED_ERROR"]) unless user
 
         Routes.validate_password_length!(new_password, ctx.context.options.email_and_password)
-        ctx.context.internal_adapter.update_password(user["id"], Password.hash(new_password, hasher: ctx.context.options.email_and_password.dig(:password, :hash)))
+        ctx.context.internal_adapter.update_password(user["id"], Routes.hash_password(ctx, new_password))
         ctx.context.internal_adapter.delete_verification_value(verification["id"])
         ctx.context.internal_adapter.delete_sessions(user["id"]) if ctx.context.options.email_and_password[:revoke_sessions_on_password_reset]
         ctx.json({status: true})

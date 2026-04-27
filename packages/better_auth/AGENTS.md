@@ -28,7 +28,7 @@ Key paths:
 
 - **No Rails dependencies.** This gem must work with any Rack-based app (Sinatra, Hanami, Roda, etc.)
 - **No RSpec.** This package uses Minitest exclusively.
-- Runtime deps are limited to: `rack`, `json`, `jwt`, `bcrypt`
+- Runtime deps are intentionally small and framework-agnostic. `bcrypt` is optional: default password hashing uses `OpenSSL::KDF.scrypt`, and apps that configure `password_hasher: :bcrypt` must add `gem "bcrypt"`.
 - If a dependency is needed for a feature, optimization, or simplification, ask for approval before adding it.
 
 ## Development

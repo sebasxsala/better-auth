@@ -4,7 +4,7 @@
 
 ## Summary
 
-Phase 4 adds the security-sensitive primitives that later auth routes build on: random IDs, HMAC signatures, symmetric encryption helpers, JWT helpers, pre-hashed BCrypt password storage, Better Auth cookie definitions, signed session-token cookies, session-data cookie cache, chunked cookies, and adapter-backed session lookup/refresh.
+Phase 4 adds the security-sensitive primitives that later auth routes build on: random IDs, HMAC signatures, symmetric encryption helpers, JWT helpers, upstream-compatible scrypt password storage, Better Auth cookie definitions, signed session-token cookies, session-data cookie cache, chunked cookies, and adapter-backed session lookup/refresh.
 
 ## Upstream Implementation
 
@@ -15,7 +15,7 @@ Upstream derives cookie names and attributes from auth options, signs the `sessi
 Ruby keeps the same cookie names, prefixes, default attributes, max-age behavior, chunking behavior, signed-cookie semantics, cache-version validation, and session refresh rules. Internals are idiomatic Ruby:
 
 - `BetterAuth::Crypto` uses `OpenSSL`, `JWT`, and `SecureRandom`.
-- `BetterAuth::Password` pre-hashes password input with SHA-256 before BCrypt so long passwords are not truncated at BCrypt's 72-byte boundary, while legacy raw BCrypt hashes still verify.
+- `BetterAuth::Password` uses OpenSSL scrypt by default with upstream parameters, supports optional BCrypt via `password_hasher: :bcrypt`, and still verifies legacy raw BCrypt and `bcrypt_sha256$` hashes when the optional `bcrypt` gem is installed.
 - `BetterAuth::Cookies` exposes Ruby `snake_case` option keys while preserving upstream cookie wire names.
 - `BetterAuth::Session.find_current` accepts `disable_cookie_cache`, `disable_refresh`, and `sensitive` flags for route-level behavior.
 

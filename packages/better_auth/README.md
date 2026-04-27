@@ -66,6 +66,28 @@ auth = BetterAuth.auth(
 )
 ```
 
+### Password Hashing
+
+Better Auth Ruby uses upstream-compatible `scrypt` password hashes by default through Ruby's `OpenSSL::KDF.scrypt`, so no extra password-hashing gem is required for the default setup.
+
+```ruby
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  password_hasher: :scrypt # default
+)
+```
+
+Applications that prefer Ruby's familiar BCrypt ecosystem can opt in by adding `gem "bcrypt"` and configuring:
+
+```ruby
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  password_hasher: :bcrypt
+)
+```
+
+Custom Better Auth-style password callbacks are still supported through `email_and_password[:password][:hash]` and `[:verify]`.
+
 ### Database Adapters
 
 The core gem ships framework-agnostic adapters for memory, PostgreSQL, MySQL, SQLite, MongoDB, and MSSQL. Driver gems are loaded only when their adapter is instantiated.

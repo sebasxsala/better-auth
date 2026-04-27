@@ -74,7 +74,7 @@ module BetterAuth
           where: [{field: "username", value: normalize_username(username, config)}]
         )
         unless user
-          Password.hash(password)
+          Routes.hash_password(ctx, password)
           raise APIError.new("UNAUTHORIZED", message: USERNAME_ERROR_CODES["INVALID_USERNAME_OR_PASSWORD"])
         end
 
@@ -87,8 +87,8 @@ module BetterAuth
         )
         current_password = account && account["password"]
         email_config = ctx.context.options.email_and_password
-        unless current_password && Password.verify(password: password, hash: current_password, verifier: email_config.dig(:password, :verify))
-          Password.hash(password) unless current_password
+        unless current_password && Routes.verify_password_value(ctx, password, current_password)
+          Routes.hash_password(ctx, password) unless current_password
           raise APIError.new("UNAUTHORIZED", message: USERNAME_ERROR_CODES["INVALID_USERNAME_OR_PASSWORD"])
         end
 
