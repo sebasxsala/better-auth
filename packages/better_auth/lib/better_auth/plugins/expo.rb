@@ -32,6 +32,8 @@ module BetterAuth
       Endpoint.new(path: "/expo-authorization-proxy", method: "GET") do |ctx|
         authorization_url = ctx.query[:authorizationURL] || ctx.query["authorizationURL"] || ctx.query[:authorization_url] || ctx.query["authorization_url"]
         oauth_state = ctx.query[:oauthState] || ctx.query["oauthState"] || ctx.query[:oauth_state] || ctx.query["oauth_state"]
+        raise APIError.new("BAD_REQUEST", message: "Unexpected error") if authorization_url.to_s.empty?
+
         if oauth_state
           cookie = ctx.context.create_auth_cookie("oauth_state", max_age: 600)
           ctx.set_cookie(cookie.name, oauth_state, cookie.attributes)
@@ -43,6 +45,8 @@ module BetterAuth
           ctx.set_signed_cookie(cookie.name, state, ctx.context.secret, cookie.attributes)
         end
         [302, ctx.response_headers.merge("location" => authorization_url), [""]]
+      rescue URI::InvalidURIError
+        raise APIError.new("BAD_REQUEST", message: "Unexpected error")
       end
     end
 

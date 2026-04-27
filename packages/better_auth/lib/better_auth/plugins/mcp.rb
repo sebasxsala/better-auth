@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "json"
+
 module BetterAuth
   module Plugins
     module MCP
@@ -11,7 +13,10 @@ module BetterAuth
           unless authorization.start_with?("Bearer ")
             return [
               401,
-              {"www-authenticate" => %(Bearer resource_metadata="#{resource_metadata_url}")},
+              {
+                "www-authenticate" => %(Bearer resource_metadata="#{resource_metadata_url}"),
+                "access-control-expose-headers" => "WWW-Authenticate"
+              },
               ["unauthorized"]
             ]
           end
@@ -35,6 +40,14 @@ module BetterAuth
       Plugin.new(
         id: "mcp",
         endpoints: mcp_endpoints(config),
+        hooks: {
+          after: [
+            {
+              matcher: ->(_ctx) { true },
+              handler: ->(ctx) { mcp_restore_login_prompt(ctx, config) }
+            }
+          ]
+        },
         schema: oidc_provider_schema,
         options: config
       )
@@ -48,7 +61,7 @@ module BetterAuth
         mcp_o_auth_token: mcp_token_endpoint(config),
         mcp_o_auth_user_info: mcp_userinfo_endpoint(config),
         mcp_register: mcp_register_endpoint(config),
-        mcp_jwks: mcp_jwks_endpoint
+        mcp_jwks: mcp_jwks_endpoint(config)
       }
     end
 
@@ -101,26 +114,61 @@ module BetterAuth
         query = OAuthProtocol.stringify_keys(ctx.query)
         session = Routes.current_session(ctx, allow_nil: true)
         unless session
+          ctx.set_signed_cookie("oidc_login_prompt", JSON.generate(query), ctx.context.secret, max_age: 600, path: "/", same_site: "lax")
           raise ctx.redirect(OAuthProtocol.redirect_uri_with_params(config[:login_page], query))
         end
 
-        client = OAuthProtocol.find_client(ctx, "oauthApplication", query["client_id"])
-        raise APIError.new("BAD_REQUEST", message: "invalid_client") unless client
-        OAuthProtocol.validate_redirect_uri!(client, query["redirect_uri"])
-
-        code = Crypto.random_string(32)
-        OAuthProtocol.store_code(
-          config[:store],
-          code: code,
-          client_id: query["client_id"],
-          redirect_uri: query["redirect_uri"],
-          session: session,
-          scopes: query["scope"] || "openid",
-          code_challenge: query["code_challenge"],
-          code_challenge_method: query["code_challenge_method"]
-        )
-        raise ctx.redirect(OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], code: code, state: query["state"]))
+        raise ctx.redirect(mcp_authorization_redirect(ctx, config, query, session))
       end
+    end
+
+    def mcp_restore_login_prompt(ctx, config)
+      cookie = ctx.get_signed_cookie("oidc_login_prompt", ctx.context.secret)
+      return unless cookie
+
+      session = ctx.context.new_session
+      return unless session && session[:session] && ctx.response_headers["set-cookie"].to_s.include?(ctx.context.auth_cookies[:session_token].name)
+
+      query = mcp_parse_login_prompt(cookie)
+      return unless query
+
+      ctx.set_cookie("oidc_login_prompt", "", path: "/", max_age: 0)
+      ctx.context.set_current_session(session) if ctx.context.respond_to?(:set_current_session)
+      [302, ctx.response_headers.merge("location" => mcp_authorization_redirect(ctx, config, query, session)), [""]]
+    end
+
+    def mcp_authorization_redirect(ctx, config, query, session)
+      query = OAuthProtocol.stringify_keys(query)
+      query["prompt"] = mcp_prompt_without_login(query["prompt"]) if query.key?("prompt")
+      client = OAuthProtocol.find_client(ctx, "oauthApplication", query["client_id"])
+      raise APIError.new("BAD_REQUEST", message: "invalid_client") unless client
+      OAuthProtocol.validate_redirect_uri!(client, query["redirect_uri"])
+
+      code = Crypto.random_string(32)
+      OAuthProtocol.store_code(
+        config[:store],
+        code: code,
+        client_id: query["client_id"],
+        redirect_uri: query["redirect_uri"],
+        session: session,
+        scopes: query["scope"] || "openid",
+        code_challenge: query["code_challenge"],
+        code_challenge_method: query["code_challenge_method"]
+      )
+      OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], code: code, state: query["state"])
+    end
+
+    def mcp_prompt_without_login(value)
+      prompts = value.to_s.split(/\s+/).reject(&:empty?)
+      prompts.delete("login")
+      prompts.join(" ")
+    end
+
+    def mcp_parse_login_prompt(value)
+      parsed = JSON.parse(value.to_s)
+      parsed.is_a?(Hash) ? parsed : nil
+    rescue JSON::ParserError
+      nil
     end
 
     def mcp_token_endpoint(config)
@@ -170,9 +218,11 @@ module BetterAuth
       end
     end
 
-    def mcp_jwks_endpoint
+    def mcp_jwks_endpoint(config)
       Endpoint.new(path: "/mcp/jwks", method: "GET") do |ctx|
-        ctx.json({keys: []})
+        jwt_config = config[:jwt] || {}
+        create_jwk(ctx, jwt_config) if all_jwks(ctx, jwt_config).empty?
+        ctx.json({keys: public_jwks(ctx, jwt_config).map { |key| public_jwk(key, jwt_config) }})
       end
     end
   end

@@ -7,11 +7,18 @@ module BetterAuth
     module_function
 
     DEVICE_AUTHORIZATION_ERROR_CODES = {
-      "INVALID_DEVICE_CODE" => "invalid_grant",
-      "AUTHORIZATION_PENDING" => "authorization_pending",
-      "SLOW_DOWN" => "slow_down",
-      "EXPIRED_TOKEN" => "expired_token",
-      "ACCESS_DENIED" => "access_denied"
+      "INVALID_DEVICE_CODE" => "Invalid device code",
+      "EXPIRED_DEVICE_CODE" => "Device code has expired",
+      "EXPIRED_USER_CODE" => "User code has expired",
+      "AUTHORIZATION_PENDING" => "Authorization pending",
+      "ACCESS_DENIED" => "Access denied",
+      "INVALID_USER_CODE" => "Invalid user code",
+      "DEVICE_CODE_ALREADY_PROCESSED" => "Device code already processed",
+      "POLLING_TOO_FREQUENTLY" => "Polling too frequently",
+      "USER_NOT_FOUND" => "User not found",
+      "FAILED_TO_CREATE_SESSION" => "Failed to create session",
+      "INVALID_DEVICE_CODE_STATUS" => "Invalid device code status",
+      "AUTHENTICATION_REQUIRED" => "Authentication required"
     }.freeze
 
     def device_authorization(options = {})
@@ -21,6 +28,7 @@ module BetterAuth
         device_code_length: 40,
         user_code_length: 8
       }.merge(normalize_hash(options))
+      validate_device_authorization_options!(config)
 
       Plugin.new(
         id: "device-authorization",
@@ -42,7 +50,7 @@ module BetterAuth
         body = OAuthProtocol.stringify_keys(ctx.body)
         client_id = body["client_id"]
         if config[:validate_client] && !config[:validate_client].call(client_id)
-          raise APIError.new("UNAUTHORIZED", message: "invalid_client")
+          raise device_authorization_error("BAD_REQUEST", "invalid_client", "Invalid client ID")
         end
 
         device_code = callable_or_random(config[:generate_device_code], config[:device_code_length])
@@ -72,50 +80,61 @@ module BetterAuth
           verification_uri_complete: complete,
           expires_in: expires_in,
           interval: interval
-        })
+        }, headers: {"Cache-Control" => "no-store"})
       end
     end
 
     def device_token_endpoint(config)
       Endpoint.new(path: "/device/token", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
         body = OAuthProtocol.stringify_keys(ctx.body)
-        raise APIError.new("BAD_REQUEST", message: "unsupported_grant_type") unless body["grant_type"] == OAuthProtocol::DEVICE_CODE_GRANT
+        raise device_authorization_error("BAD_REQUEST", "invalid_request", "Unsupported grant type") unless body["grant_type"] == OAuthProtocol::DEVICE_CODE_GRANT
         if config[:validate_client] && !config[:validate_client].call(body["client_id"])
-          raise APIError.new("UNAUTHORIZED", message: "invalid_client")
+          raise device_authorization_error("BAD_REQUEST", "invalid_grant", "Invalid client ID")
         end
 
         record = find_device_code(ctx, body["device_code"])
-        raise APIError.new("BAD_REQUEST", message: "invalid_grant") unless record
+        raise device_authorization_error("BAD_REQUEST", "invalid_grant", DEVICE_AUTHORIZATION_ERROR_CODES["INVALID_DEVICE_CODE"]) unless record
         record = OAuthProtocol.stringify_keys(record)
         if record["clientId"] && record["clientId"] != body["client_id"]
-          raise APIError.new("BAD_REQUEST", message: "invalid_client")
+          raise device_authorization_error("BAD_REQUEST", "invalid_grant", "Client ID mismatch")
         end
+
+        if record["lastPolledAt"] && record["pollingInterval"].to_i.positive?
+          elapsed = ((Time.now - device_authorization_time(record["lastPolledAt"])) * 1000).to_i
+          raise device_authorization_error("BAD_REQUEST", "slow_down", DEVICE_AUTHORIZATION_ERROR_CODES["POLLING_TOO_FREQUENTLY"]) if elapsed < record["pollingInterval"].to_i
+        end
+
+        ctx.context.adapter.update(model: "deviceCode", where: [{field: "id", value: record["id"]}], update: {"lastPolledAt" => Time.now})
+
         if device_authorization_time(record["expiresAt"]) <= Time.now
           ctx.context.adapter.delete(model: "deviceCode", where: [{field: "id", value: record["id"]}])
-          raise APIError.new("BAD_REQUEST", message: "expired_token")
+          raise device_authorization_error("BAD_REQUEST", "expired_token", DEVICE_AUTHORIZATION_ERROR_CODES["EXPIRED_DEVICE_CODE"])
         end
+
         case record["status"]
+        when "pending"
+          raise device_authorization_error("BAD_REQUEST", "authorization_pending", DEVICE_AUTHORIZATION_ERROR_CODES["AUTHORIZATION_PENDING"])
+        when "denied"
+          ctx.context.adapter.delete(model: "deviceCode", where: [{field: "id", value: record["id"]}])
+          raise device_authorization_error("BAD_REQUEST", "access_denied", DEVICE_AUTHORIZATION_ERROR_CODES["ACCESS_DENIED"])
         when "approved"
-          session = ctx.context.internal_adapter.create_session(record["userId"])
-          found = ctx.context.internal_adapter.find_session(session["token"])
+          user = ctx.context.internal_adapter.find_user_by_id(record["userId"])
+          raise device_authorization_error("INTERNAL_SERVER_ERROR", "server_error", DEVICE_AUTHORIZATION_ERROR_CODES["USER_NOT_FOUND"]) unless user
+
+          session = ctx.context.internal_adapter.create_session(user["id"])
+          raise device_authorization_error("INTERNAL_SERVER_ERROR", "server_error", DEVICE_AUTHORIZATION_ERROR_CODES["FAILED_TO_CREATE_SESSION"]) unless session
+
+          session_data = {session: session, user: user}
+          ctx.context.set_new_session(session_data) if ctx.context.respond_to?(:set_new_session)
           ctx.context.adapter.delete(model: "deviceCode", where: [{field: "id", value: record["id"]}])
           ctx.json({
             access_token: session["token"],
             token_type: "Bearer",
-            expires_in: ctx.context.session_config[:expires_in],
-            scope: record["scope"].to_s,
-            user: found[:user]
-          })
-        when "denied"
-          ctx.context.adapter.delete(model: "deviceCode", where: [{field: "id", value: record["id"]}])
-          raise APIError.new("BAD_REQUEST", message: "access_denied")
+            expires_in: [session["expiresAt"].to_i - Time.now.to_i, 0].max,
+            scope: record["scope"].to_s
+          }, headers: {"Cache-Control" => "no-store", "Pragma" => "no-cache"})
         else
-          if record["lastPolledAt"] && record["pollingInterval"].to_i.positive?
-            elapsed = ((Time.now - device_authorization_time(record["lastPolledAt"])) * 1000).to_i
-            raise APIError.new("BAD_REQUEST", message: "slow_down") if elapsed < record["pollingInterval"].to_i
-          end
-          ctx.context.adapter.update(model: "deviceCode", where: [{field: "id", value: record["id"]}], update: {"lastPolledAt" => Time.now})
-          raise APIError.new("BAD_REQUEST", message: "authorization_pending")
+          raise device_authorization_error("INTERNAL_SERVER_ERROR", "server_error", DEVICE_AUTHORIZATION_ERROR_CODES["INVALID_DEVICE_CODE_STATUS"])
         end
       end
     end
@@ -124,11 +143,11 @@ module BetterAuth
       Endpoint.new(path: "/device", method: "GET") do |ctx|
         code = normalize_user_code(OAuthProtocol.stringify_keys(ctx.query)["user_code"])
         record = find_device_user_code(ctx, code)
-        raise APIError.new("BAD_REQUEST", message: "invalid_grant") unless record
+        raise device_authorization_error("BAD_REQUEST", "invalid_request", DEVICE_AUTHORIZATION_ERROR_CODES["INVALID_USER_CODE"]) unless record
         record = OAuthProtocol.stringify_keys(record)
-        raise APIError.new("BAD_REQUEST", message: "expired_token") if device_authorization_time(record["expiresAt"]) <= Time.now
+        raise device_authorization_error("BAD_REQUEST", "expired_token", DEVICE_AUTHORIZATION_ERROR_CODES["EXPIRED_USER_CODE"]) if device_authorization_time(record["expiresAt"]) <= Time.now
 
-        ctx.json({status: record["status"], client_id: record["clientId"], scope: record["scope"]})
+        ctx.json({user_code: code, status: record["status"], client_id: record["clientId"], scope: record["scope"]})
       end
     end
 
@@ -147,19 +166,24 @@ module BetterAuth
     end
 
     def process_device_decision(ctx, session, status)
-      code = normalize_user_code(OAuthProtocol.stringify_keys(ctx.body)["user_code"])
+      body = OAuthProtocol.stringify_keys(ctx.body)
+      code = normalize_user_code(body["userCode"] || body["user_code"])
       record = find_device_user_code(ctx, code)
-      raise APIError.new("BAD_REQUEST", message: "invalid_grant") unless record
+      action = (status == "approved") ? "approve" : "deny"
+      raise device_authorization_error("BAD_REQUEST", "invalid_request", DEVICE_AUTHORIZATION_ERROR_CODES["INVALID_USER_CODE"]) unless record
       record = OAuthProtocol.stringify_keys(record)
-      raise APIError.new("BAD_REQUEST", message: "expired_token") if device_authorization_time(record["expiresAt"]) <= Time.now
-      raise APIError.new("BAD_REQUEST", message: "device_code_already_processed") unless record["status"] == "pending"
+      raise device_authorization_error("BAD_REQUEST", "expired_token", DEVICE_AUTHORIZATION_ERROR_CODES["EXPIRED_USER_CODE"]) if device_authorization_time(record["expiresAt"]) <= Time.now
+      raise device_authorization_error("BAD_REQUEST", "invalid_request", DEVICE_AUTHORIZATION_ERROR_CODES["DEVICE_CODE_ALREADY_PROCESSED"]) unless record["status"] == "pending"
+      if record["userId"] && record["userId"] != session[:user]["id"]
+        raise device_authorization_error("FORBIDDEN", "access_denied", "You are not authorized to #{action} this device authorization")
+      end
 
       ctx.context.adapter.update(
         model: "deviceCode",
         where: [{field: "id", value: record["id"]}],
         update: {"status" => status, "userId" => record["userId"] || session[:user]["id"]}
       )
-      ctx.json({status: true})
+      ctx.json({success: true})
     end
 
     def find_device_code(ctx, code)
@@ -167,13 +191,15 @@ module BetterAuth
     end
 
     def find_device_user_code(ctx, code)
-      ctx.context.adapter.find_one(model: "deviceCode", where: [{field: "userCode", value: code.to_s}])
+      device_authorization_user_code_candidates(code).each do |candidate|
+        record = ctx.context.adapter.find_one(model: "deviceCode", where: [{field: "userCode", value: candidate}])
+        return record if record
+      end
+      nil
     end
 
     def normalize_user_code(value)
-      value.to_s.upcase.delete("-").then do |code|
-        (code.length == 8) ? "#{code[0, 4]}-#{code[4, 4]}" : value.to_s.upcase
-      end
+      value.to_s.upcase
     end
 
     def callable_or_random(callable, length)
@@ -190,17 +216,44 @@ module BetterAuth
     def duration_seconds(value)
       return value if value.is_a?(Integer)
 
-      match = value.to_s.match(/\A(\d+)(ms|s|m|h|d)?\z/)
+      match = value.to_s.match(/\A(\d+)(ms|s|m|min|h|d)?\z/)
       raise Error, "Invalid time string" unless match
 
       amount = match[1].to_i
       case match[2]
       when "ms" then (amount / 1000.0).ceil
-      when "m" then amount * 60
+      when "m", "min" then amount * 60
       when "h" then amount * 3600
       when "d" then amount * 86_400
       else amount
       end
+    end
+
+    def validate_device_authorization_options!(config)
+      duration_seconds(config[:expires_in])
+      duration_seconds(config[:interval])
+      raise Error, "device_code_length must be a positive integer" unless positive_integer?(config[:device_code_length])
+      raise Error, "user_code_length must be a positive integer" unless positive_integer?(config[:user_code_length])
+      raise Error, "generate_device_code must be callable" if config.key?(:generate_device_code) && !config[:generate_device_code].respond_to?(:call)
+      raise Error, "generate_user_code must be callable" if config.key?(:generate_user_code) && !config[:generate_user_code].respond_to?(:call)
+      raise Error, "validate_client must be callable" if config.key?(:validate_client) && !config[:validate_client].respond_to?(:call)
+      raise Error, "on_device_auth_request must be callable" if config.key?(:on_device_auth_request) && !config[:on_device_auth_request].respond_to?(:call)
+      raise Error, "verification_uri must be a string" if config.key?(:verification_uri) && !config[:verification_uri].is_a?(String)
+    end
+
+    def positive_integer?(value)
+      value.is_a?(Integer) && value.positive?
+    end
+
+    def device_authorization_user_code_candidates(value)
+      original = value.to_s.upcase
+      clean = original.delete("-")
+      dashed = (clean.length == 8) ? "#{clean[0, 4]}-#{clean[4, 4]}" : clean
+      [original, clean, dashed].uniq
+    end
+
+    def device_authorization_error(status, error, description)
+      APIError.new(status, code: error, message: description, body: {error: error, error_description: description})
     end
 
     def device_authorization_time(value)

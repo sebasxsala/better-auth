@@ -104,6 +104,55 @@ class BetterAuthPluginsOAuthProxyTest < Minitest::Test
     assert_equal "Invalid callbackURL", error.message
   end
 
+  def test_stateless_oauth_proxy_encrypts_state_cookie_package
+    auth = build_auth(
+      database: nil,
+      plugins: [
+        BetterAuth::Plugins.oauth_proxy(current_url: "http://preview.local"),
+        generic_oauth_plugin
+      ]
+    )
+
+    _status, headers, body = auth.api.sign_in_with_oauth2(
+      body: {providerId: "custom", callbackURL: "/dashboard"},
+      as_response: true
+    )
+    state = Rack::Utils.parse_query(URI.parse(JSON.parse(body.join).fetch("url")).query).fetch("state")
+    decrypted = BetterAuth::Crypto.symmetric_decrypt(key: auth.context.secret, data: state)
+    package = JSON.parse(decrypted)
+
+    assert_includes headers.fetch("set-cookie"), "better-auth.oauth_state="
+    assert package.fetch("state").length >= 20
+    assert package.fetch("stateCookie").length > 20
+    assert_equal true, package.fetch("isOAuthProxy")
+  end
+
+  def test_stateless_oauth_proxy_restores_state_cookie_for_dbless_callback_flow
+    auth = build_auth(
+      database: nil,
+      plugins: [
+        BetterAuth::Plugins.oauth_proxy(current_url: "http://preview.local"),
+        generic_oauth_plugin
+      ]
+    )
+    sign_in = auth.api.sign_in_with_oauth2(body: {providerId: "custom", callbackURL: "/dashboard"})
+    encrypted_state = Rack::Utils.parse_query(URI.parse(sign_in[:url]).query).fetch("state")
+
+    status, headers, _body = auth.api.o_auth2_callback(
+      params: {providerId: "custom"},
+      query: {code: "oauth-code", state: encrypted_state},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    location = headers.fetch("location")
+    assert_match(%r{\Ahttp://preview\.local/api/auth/oauth-proxy-callback\?}, location)
+    assert_includes location, "callbackURL=%2Fdashboard"
+    encrypted_cookies = Rack::Utils.parse_query(URI.parse(location).query).fetch("cookies")
+    payload = JSON.parse(BetterAuth::Crypto.symmetric_decrypt(key: auth.context.secret, data: encrypted_cookies))
+    assert_includes payload.fetch("cookies"), "better-auth.session_token="
+  end
+
   private
 
   def build_auth(options = {})
@@ -119,5 +168,21 @@ class BetterAuthPluginsOAuthProxyTest < Minitest::Test
         }
       }
     }.merge(options))
+  end
+
+  def generic_oauth_plugin
+    BetterAuth::Plugins.generic_oauth(
+      config: [
+        {
+          providerId: "custom",
+          clientId: "client-id",
+          clientSecret: "client-secret",
+          authorizationUrl: "https://provider.example.com/authorize",
+          tokenUrl: "https://provider.example.com/token",
+          getToken: ->(**) { {accessToken: "access-token"} },
+          getUserInfo: ->(_tokens) { {id: "custom-sub", email: "proxy-generic@example.com", name: "Proxy Generic", emailVerified: true} }
+        }
+      ]
+    )
   end
 end

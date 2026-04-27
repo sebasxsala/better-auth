@@ -68,11 +68,13 @@ module BetterAuth
       case ctx.path
       when "/sign-in/email", "/sign-up/email"
         "email"
-      when %r{\A/callback/([^/]+)\z}
-        Regexp.last_match(1)
-      when %r{\A/oauth2/callback/([^/]+)\z}
-        Regexp.last_match(1)
+      when "/callback/:providerId"
+        fetch_value(ctx.params, "providerId")
+      when "/oauth2/callback/:providerId"
+        fetch_value(ctx.params, "providerId")
       else
+        return Regexp.last_match(1) if ctx.path.to_s =~ %r{\A/callback/([^/]+)\z}
+        return Regexp.last_match(1) if ctx.path.to_s =~ %r{\A/oauth2/callback/([^/]+)\z}
         return "siwe" if ctx.path.to_s.include?("siwe")
         return "passkey" if ctx.path.to_s.include?("/passkey/verify-authentication")
 

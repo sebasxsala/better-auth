@@ -1,14 +1,39 @@
 # frozen_string_literal: true
 
 require "openssl"
+require "net/http"
+require "uri"
 
 module BetterAuth
   module Plugins
     module JWT
+      SUPPORTED_ALGORITHMS = %w[EdDSA RS256 PS256 ES256 ES512].freeze
+
       module_function
 
       def public_key(jwk)
-        OpenSSL::PKey::RSA.new(jwk[:pem] || jwk["pem"])
+        data = stringify_jwk(jwk)
+        return OpenSSL::PKey.read(data["pem"] || data["publicKey"]) if data["pem"] || data["publicKey"]
+
+        if data["kty"] == "RSA" && data["n"] && data["e"]
+          rsa_from_components(data["n"], data["e"])
+        elsif data["kty"] == "OKP" && data["crv"] == "Ed25519" && data["x"]
+          OpenSSL::PKey.new_raw_public_key("ED25519", Crypto.base64url_decode(data["x"]))
+        else
+          raise OpenSSL::PKey::PKeyError, "Unsupported JWK"
+        end
+      end
+
+      def rsa_from_components(n, e)
+        sequence = OpenSSL::ASN1::Sequence([
+          OpenSSL::ASN1::Integer(OpenSSL::BN.new(Crypto.base64url_decode(n).unpack1("H*"), 16)),
+          OpenSSL::ASN1::Integer(OpenSSL::BN.new(Crypto.base64url_decode(e).unpack1("H*"), 16))
+        ])
+        OpenSSL::PKey::RSA.new(sequence.to_der)
+      end
+
+      def stringify_jwk(value)
+        value.each_with_object({}) { |(key, object_value), result| result[key.to_s] = object_value } if value.is_a?(Hash)
       end
     end
 
@@ -43,6 +68,10 @@ module BetterAuth
               createdAt: {type: "date", required: true},
               expiresAt: {type: "date", required: false},
               alg: {type: "string", required: false},
+              kty: {type: "string", required: false},
+              crv: {type: "string", required: false},
+              x: {type: "string", required: false},
+              y: {type: "string", required: false},
               pem: {type: "string", required: false},
               n: {type: "string", required: false},
               e: {type: "string", required: false}
@@ -54,6 +83,11 @@ module BetterAuth
     end
 
     def validate_jwt_options!(config)
+      alg = config.dig(:jwks, :key_pair_config, :alg)
+      if alg && !JWT::SUPPORTED_ALGORITHMS.include?(alg.to_s)
+        raise Error, "JWT/JWKS algorithm #{alg} is not supported by the Ruby server. Supported algorithms: #{JWT::SUPPORTED_ALGORITHMS.join(", ")}"
+      end
+
       if config.dig(:jwt, :sign) && !config.dig(:jwks, :remote_url)
         raise Error, "options.jwks.remoteUrl must be set when using options.jwt.sign"
       end
@@ -72,8 +106,8 @@ module BetterAuth
       Endpoint.new(path: path, method: "GET") do |ctx|
         raise APIError.new("NOT_FOUND") if config.dig(:jwks, :remote_url)
 
-        key = latest_jwk(ctx, config) || create_jwk(ctx, config)
-        ctx.json({keys: [public_jwk(key, config)]})
+        create_jwk(ctx, config) if all_jwks(ctx, config).empty?
+        ctx.json({keys: public_jwks(ctx, config).map { |key| public_jwk(key, config) }})
       end
     end
 
@@ -143,15 +177,19 @@ module BetterAuth
 
       return jwt_config[:sign].call(payload) if jwt_config[:sign].respond_to?(:call)
 
-      key = latest_jwk(ctx, config) || create_jwk(ctx, config)
-      private_key = OpenSSL::PKey::RSA.new(key["privateKey"])
-      ::JWT.encode(payload, private_key, key["alg"] || "RS256", kid: key["id"])
+      key = signing_jwk(ctx, config)
+      private_key = OpenSSL::PKey.read(key["privateKey"])
+      alg = key["alg"] || "RS256"
+      return encode_eddsa_jwt(payload, private_key, key["id"]) if alg == "EdDSA"
+
+      ::JWT.encode(payload, private_key, alg, kid: key["id"])
     end
 
     def verify_jwt_token(ctx, token, config)
       header = ::JWT.decode(token.to_s, nil, false).last
-      key = all_jwks(ctx, config).find { |entry| entry["id"] == header["kid"] }
+      key = verification_jwks(ctx, config).find { |entry| entry["id"] == header["kid"] || entry["kid"] == header["kid"] }
       return nil unless key
+      return verify_eddsa_jwt(token.to_s, key, config) if (key["alg"] || header["alg"]) == "EdDSA"
 
       options = {algorithm: key["alg"] || "RS256"}
       if config.dig(:jwt, :issuer)
@@ -162,7 +200,7 @@ module BetterAuth
         options[:aud] = config.dig(:jwt, :audience)
         options[:verify_aud] = true
       end
-      decoded, = ::JWT.decode(token.to_s, OpenSSL::PKey::RSA.new(key["publicKey"]), true, options)
+      decoded, = ::JWT.decode(token.to_s, JWT.public_key(key), true, options)
       decoded
     rescue ::JWT::DecodeError, OpenSSL::PKey::PKeyError
       nil
@@ -170,6 +208,22 @@ module BetterAuth
 
     def latest_jwk(ctx, config)
       all_jwks(ctx, config).max_by { |entry| normalize_time(entry["createdAt"]) || Time.at(0) }
+    end
+
+    def signing_jwk(ctx, config)
+      key = latest_jwk(ctx, config)
+      return key if key && !jwk_expired?(key)
+
+      create_jwk(ctx, config)
+    end
+
+    def public_jwks(ctx, config)
+      now = Time.now
+      grace_period = config.dig(:jwks, :grace_period) || 60 * 60 * 24 * 30
+      all_jwks(ctx, config).select do |key|
+        expires_at = normalize_time(key["expiresAt"])
+        !expires_at || expires_at + grace_period.to_i > now
+      end
     end
 
     def all_jwks(ctx, config)
@@ -181,20 +235,51 @@ module BetterAuth
       ctx.context.adapter.find_many(model: "jwks")
     end
 
+    def verification_jwks(ctx, config)
+      local = all_jwks(ctx, config)
+      return local unless config.dig(:jwks, :remote_url)
+
+      local + remote_jwks(ctx, config)
+    end
+
+    def remote_jwks(ctx, config)
+      url = config.dig(:jwks, :remote_url)
+      fetcher = config.dig(:jwks, :fetch) || config.dig(:jwks, :fetcher)
+      payload = if fetcher.respond_to?(:call)
+        fetcher.call(url)
+      else
+        uri = URI.parse(url.to_s)
+        response = Net::HTTP.get_response(uri)
+        response.is_a?(Net::HTTPSuccess) ? JSON.parse(response.body) : nil
+      end
+      keys = fetch_value(payload, "keys")
+      Array(keys).map { |entry| normalize_remote_jwk(entry) }
+    rescue JSON::ParserError, URI::InvalidURIError, SocketError, SystemCallError
+      []
+    end
+
+    def normalize_remote_jwk(entry)
+      data = stringify_payload(entry || {})
+      data["id"] ||= data["kid"]
+      data["publicKey"] ||= data["pem"]
+      data
+    end
+
     def create_jwk(ctx, config)
       adapter = config[:adapter]
-      pair = OpenSSL::PKey::RSA.generate(2048)
-      public_key = pair.public_key
+      alg = (config.dig(:jwks, :key_pair_config, :alg) || "EdDSA").to_s
+      pair = generate_key_pair(alg)
+      public_key = public_key_for(pair)
+      public_pem = public_key_pem(public_key)
       data = {
         "id" => Crypto.uuid,
-        "publicKey" => public_key.to_pem,
-        "privateKey" => pair.to_pem,
+        "publicKey" => public_pem,
+        "privateKey" => private_key_pem(pair),
         "createdAt" => Time.now,
-        "alg" => "RS256",
-        "pem" => public_key.to_pem,
-        "n" => base64url_bn(public_key.n),
-        "e" => base64url_bn(public_key.e)
+        "alg" => alg,
+        "pem" => public_pem
       }
+      data.merge!(public_key_jwk_fields(public_key, alg))
       data["expiresAt"] = Time.now + config.dig(:jwks, :rotation_interval).to_i if config.dig(:jwks, :rotation_interval)
 
       if adapter && adapter[:create_jwk].respond_to?(:call)
@@ -205,15 +290,116 @@ module BetterAuth
     end
 
     def public_jwk(key, _config)
-      {
+      data = {
         kid: key["id"],
-        kty: "RSA",
-        alg: key["alg"] || "RS256",
+        kty: key["kty"] || key_type_for_alg(key["alg"] || "RS256"),
+        alg: key["alg"] || "EdDSA",
         use: "sig",
-        n: key["n"],
-        e: key["e"],
         pem: key["pem"] || key["publicKey"]
       }
+      data[:n] = key["n"] if key["n"]
+      data[:e] = key["e"] if key["e"]
+      data[:crv] = key["crv"] if key["crv"]
+      data[:x] = key["x"] if key["x"]
+      data[:y] = key["y"] if key["y"]
+      data
+    end
+
+    def generate_key_pair(alg)
+      case alg
+      when "EdDSA"
+        OpenSSL::PKey.generate_key("ED25519")
+      when "RS256", "PS256"
+        OpenSSL::PKey::RSA.generate(2048)
+      when "ES256"
+        OpenSSL::PKey::EC.generate("prime256v1")
+      when "ES512"
+        OpenSSL::PKey::EC.generate("secp521r1")
+      else
+        raise Error, "JWT/JWKS algorithm #{alg} is not supported by the Ruby server"
+      end
+    end
+
+    def public_key_for(pair)
+      OpenSSL::PKey.read(pair.public_to_pem)
+    end
+
+    def private_key_pem(pair)
+      pair.respond_to?(:private_to_pem) ? pair.private_to_pem : pair.to_pem
+    end
+
+    def public_key_pem(pair)
+      pair.respond_to?(:public_to_pem) ? pair.public_to_pem : pair.to_pem
+    end
+
+    def public_key_jwk_fields(public_key, alg)
+      if public_key.is_a?(OpenSSL::PKey::RSA)
+        {
+          "kty" => "RSA",
+          "n" => base64url_bn(public_key.n),
+          "e" => base64url_bn(public_key.e)
+        }
+      elsif alg == "EdDSA"
+        {
+          "kty" => "OKP",
+          "crv" => "Ed25519",
+          "x" => Crypto.base64url_encode(public_key.raw_public_key)
+        }
+      else
+        point = public_key.public_key.to_octet_string(:uncompressed).bytes
+        length = (point.length - 1) / 2
+        {
+          "kty" => "EC",
+          "crv" => ec_curve_for_alg(alg),
+          "x" => Crypto.base64url_encode(point[1, length].pack("C*")),
+          "y" => Crypto.base64url_encode(point[(1 + length), length].pack("C*"))
+        }
+      end
+    end
+
+    def key_type_for_alg(alg)
+      return "OKP" if alg == "EdDSA"
+
+      alg.to_s.start_with?("ES") ? "EC" : "RSA"
+    end
+
+    def ec_curve_for_alg(alg)
+      (alg == "ES512") ? "P-521" : "P-256"
+    end
+
+    def encode_eddsa_jwt(payload, private_key, kid)
+      header = {"alg" => "EdDSA", "kid" => kid}
+      signing_input = [
+        Crypto.base64url_encode(JSON.generate(header)),
+        Crypto.base64url_encode(JSON.generate(payload))
+      ].join(".")
+      signature = private_key.sign(nil, signing_input)
+      "#{signing_input}.#{Crypto.base64url_encode(signature)}"
+    end
+
+    def verify_eddsa_jwt(token, key, config)
+      header_segment, payload_segment, signature_segment = token.split(".", 3)
+      return nil unless header_segment && payload_segment && signature_segment
+
+      public_key = JWT.public_key(key)
+      signing_input = "#{header_segment}.#{payload_segment}"
+      signature = Crypto.base64url_decode(signature_segment)
+      return nil unless public_key.verify(nil, signature, signing_input)
+
+      payload = JSON.parse(Crypto.base64url_decode(payload_segment))
+      now = Time.now.to_i
+      return nil if payload["exp"] && payload["exp"].to_i <= now
+      return nil if config.dig(:jwt, :issuer) && payload["iss"] != config.dig(:jwt, :issuer)
+      return nil if config.dig(:jwt, :audience) && Array(payload["aud"]).map(&:to_s).none?(config.dig(:jwt, :audience).to_s)
+
+      payload
+    rescue JSON::ParserError, OpenSSL::PKey::PKeyError, ArgumentError
+      nil
+    end
+
+    def jwk_expired?(key)
+      expires_at = normalize_time(key["expiresAt"])
+      expires_at && expires_at < Time.now
     end
 
     def jwt_expiration(value, iat)

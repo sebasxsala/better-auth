@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "rack/utils"
 require "uri"
 
 module BetterAuth
@@ -20,9 +21,17 @@ module BetterAuth
             {
               matcher: ->(ctx) { oauth_proxy_sign_in_path?(ctx.path) },
               handler: ->(ctx) { oauth_proxy_before_sign_in(ctx, config) }
+            },
+            {
+              matcher: ->(ctx) { oauth_proxy_callback_path?(ctx.path) },
+              handler: ->(ctx) { oauth_proxy_restore_state_package(ctx, config) }
             }
           ],
           after: [
+            {
+              matcher: ->(ctx) { oauth_proxy_sign_in_path?(ctx.path) },
+              handler: ->(ctx) { oauth_proxy_after_sign_in(ctx, config) }
+            },
             {
               matcher: ->(ctx) { oauth_proxy_callback_path?(ctx.path) },
               handler: ->(ctx) { oauth_proxy_after_callback(ctx, config) }
@@ -74,6 +83,66 @@ module BetterAuth
       nil
     end
 
+    def oauth_proxy_restore_state_package(ctx, _config)
+      state = fetch_value(ctx.query, "state") || fetch_value(ctx.body, "state")
+      return if state.to_s.empty?
+
+      decrypted = Crypto.symmetric_decrypt(key: ctx.context.secret, data: state.to_s)
+      return unless decrypted
+
+      package = JSON.parse(decrypted)
+      return unless package["isOAuthProxy"] && package["state"] && package["stateCookie"]
+
+      cookie = ctx.context.create_auth_cookie("oauth_state")
+      current_cookie = ctx.headers["cookie"].to_s
+      restored_cookie = "#{cookie.name}=#{package["stateCookie"]}"
+      ctx.headers["cookie"] = current_cookie.empty? ? restored_cookie : "#{current_cookie}; #{restored_cookie}"
+      ctx.query = ctx.query.merge(:state => package["state"], "state" => package["state"])
+      ctx.body = ctx.body.merge(:state => package["state"], "state" => package["state"]) if ctx.body.is_a?(Hash)
+      nil
+    rescue JSON::ParserError
+      nil
+    end
+
+    def oauth_proxy_after_sign_in(ctx, config)
+      return if oauth_proxy_skip?(ctx, config)
+      return unless ctx.context.options.account[:store_state_strategy].to_s == "cookie"
+      return unless ctx.returned.is_a?(Hash)
+
+      provider_url = fetch_value(ctx.returned, "url").to_s
+      return if provider_url.empty?
+
+      uri = URI.parse(provider_url)
+      params = Rack::Utils.parse_query(uri.query)
+      original_state = params["state"]
+      return if original_state.to_s.empty?
+
+      state_cookie = oauth_proxy_state_cookie_value(ctx)
+      return if state_cookie.to_s.empty?
+
+      encrypted_package = Crypto.symmetric_encrypt(
+        key: ctx.context.secret,
+        data: JSON.generate({
+          state: original_state,
+          stateCookie: state_cookie,
+          isOAuthProxy: true
+        })
+      )
+      params["state"] = encrypted_package
+      uri.query = URI.encode_www_form(params)
+
+      response = ctx.returned.dup
+      if response.key?(:url)
+        response[:url] = uri.to_s
+      else
+        response["url"] = uri.to_s
+      end
+      ctx.returned = response
+      ctx.json(response)
+    rescue URI::InvalidURIError
+      nil
+    end
+
     def oauth_proxy_after_callback(ctx, config)
       location = ctx.response_headers["location"]
       return unless location.to_s.include?("/oauth-proxy-callback?callbackURL")
@@ -102,6 +171,13 @@ module BetterAuth
       nil
     rescue URI::InvalidURIError
       nil
+    end
+
+    def oauth_proxy_state_cookie_value(ctx)
+      cookie = ctx.context.create_auth_cookie("oauth_state")
+      parsed = oauth_proxy_parse_set_cookie(ctx.response_headers["set-cookie"])
+      exact = parsed.find { |entry| entry[:name] == cookie.name || entry[:name] == Cookies.strip_secure_cookie_prefix(cookie.name) }
+      exact && exact[:value]
     end
 
     def oauth_proxy_sign_in_path?(path)

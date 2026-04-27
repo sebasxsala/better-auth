@@ -84,6 +84,80 @@ class BetterAuthPluginsMCPTest < Minitest::Test
     assert_equal ["unauthorized"], body
     assert_includes headers.fetch("www-authenticate"), "Bearer"
     assert_includes headers.fetch("www-authenticate"), "resource_metadata=\"http://localhost:3000/.well-known/oauth-protected-resource\""
+    assert_equal "WWW-Authenticate", headers.fetch("access-control-expose-headers")
+  end
+
+  def test_mcp_jwks_publishes_jwt_plugin_signing_keys
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      plugins: [
+        BetterAuth::Plugins.mcp(login_page: "/login"),
+        BetterAuth::Plugins.jwt
+      ]
+    )
+
+    token = auth.api.sign_jwt(body: {payload: {sub: "mcp-user"}})[:token]
+    _payload, header = JWT.decode(token, nil, false)
+    jwks = auth.api.mcp_jwks
+
+    assert_equal [header.fetch("kid")], jwks.fetch(:keys).map { |key| key.fetch(:kid) }
+    assert_equal "RSA", jwks.fetch(:keys).first.fetch(:kty)
+    assert_equal "RS256", jwks.fetch(:keys).first.fetch(:alg)
+  end
+
+  def test_mcp_authorize_restores_login_prompt_cookie_after_email_sign_in
+    auth = build_auth
+    auth.api.sign_up_email(body: {email: "prompt@example.com", password: "password123", name: "Prompt User"})
+    auth.api.sign_out
+    client = auth.api.mcp_register(
+      body: {
+        redirect_uris: ["https://mcp.example/callback"],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        client_name: "Prompt Client"
+      }
+    )
+
+    request = Rack::MockRequest.new(auth)
+    authorize = request.get(
+      "/api/auth/mcp/authorize",
+      params: {
+        response_type: "code",
+        client_id: client[:client_id],
+        redirect_uri: "https://mcp.example/callback",
+        scope: "openid profile email",
+        state: "restore-state",
+        prompt: "login",
+        code_challenge: "plain-challenge",
+        code_challenge_method: "plain"
+      }
+    )
+
+    assert_equal 302, authorize.status
+    assert_includes authorize["location"], "/login"
+    oidc_cookie = cookie_header(authorize["set-cookie"])
+    assert_includes oidc_cookie, "oidc_login_prompt="
+
+    sign_in = request.post(
+      "/api/auth/sign-in/email",
+      "CONTENT_TYPE" => "application/json",
+      "HTTP_COOKIE" => oidc_cookie,
+      "HTTP_ORIGIN" => "http://localhost:3000",
+      :input => JSON.generate({email: "prompt@example.com", password: "password123"})
+    )
+
+    assert_equal 302, sign_in.status
+    redirect = URI.parse(sign_in["location"])
+    params = Rack::Utils.parse_query(redirect.query)
+    assert_equal "https", redirect.scheme
+    assert_equal "mcp.example", redirect.host
+    assert_equal "/callback", redirect.path
+    assert_equal "restore-state", params.fetch("state")
+    assert_match(/\A[A-Za-z0-9_-]{32}\z/, params.fetch("code"))
+    assert_includes sign_in["set-cookie"], "oidc_login_prompt=;"
   end
 
   private
@@ -103,5 +177,9 @@ class BetterAuthPluginsMCPTest < Minitest::Test
       as_response: true
     )
     headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def cookie_header(set_cookie)
+    set_cookie.to_s.lines.map { |line| line.split(";").first }.join("; ")
   end
 end

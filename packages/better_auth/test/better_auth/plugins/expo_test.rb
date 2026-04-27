@@ -90,6 +90,76 @@ class BetterAuthPluginsExpoTest < Minitest::Test
     assert_equal 200, status
   end
 
+  def test_origin_header_is_not_replaced_when_already_present
+    observed_origin = nil
+    observer = BetterAuth::Plugin.new(
+      id: "observer",
+      hooks: {
+        before: [
+          {
+            matcher: ->(_ctx) { true },
+            handler: ->(ctx) {
+              observed_origin = ctx.headers["origin"]
+              nil
+            }
+          }
+        ]
+      }
+    )
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      trusted_origins: ["http://client.example"],
+      plugins: [BetterAuth::Plugins.expo, observer]
+    )
+    app = auth.handler
+    env = Rack::MockRequest.env_for(
+      "http://localhost:3000/api/auth/sign-up/email",
+      :method => "POST",
+      "CONTENT_TYPE" => "application/json",
+      "HTTP_ORIGIN" => "http://client.example",
+      "HTTP_EXPO_ORIGIN" => "better-auth://",
+      :input => JSON.generate({email: "origin-present@example.com", password: "password123", name: "Expo"})
+    )
+
+    status, = app.call(env)
+
+    assert_equal 200, status
+    assert_equal "http://client.example", observed_origin
+  end
+
+  def test_authorization_proxy_rejects_missing_authorization_url
+    auth = build_auth
+
+    assert_raises(BetterAuth::APIError) do
+      auth.api.expo_authorization_proxy(query: {})
+    end
+
+    assert_raises(BetterAuth::APIError) do
+      auth.api.expo_authorization_proxy(query: {oauthState: "state"})
+    end
+  end
+
+  def test_deep_link_redirect_receives_cookie_for_wildcard_trusted_origin
+    auth = build_auth(trusted_origins: ["myapp://*"])
+    ctx = BetterAuth::Endpoint::Context.new(
+      path: "/magic-link/verify",
+      method: "GET",
+      query: {},
+      body: {},
+      params: {},
+      headers: {},
+      context: auth.context
+    )
+    ctx.set_header("location", "myapp:///dashboard")
+    ctx.set_header("set-cookie", "better-auth.session_token=abc; Path=/; HttpOnly")
+    hook = auth.context.options.plugins.first.hooks.fetch(:after).first
+    hook.fetch(:handler).call(ctx)
+
+    assert_includes ctx.response_headers.fetch("location"), "cookie=better-auth.session_token%3Dabc"
+  end
+
   private
 
   def build_auth(plugin_options = {})
