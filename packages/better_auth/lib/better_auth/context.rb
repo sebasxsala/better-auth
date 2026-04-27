@@ -54,6 +54,15 @@ module BetterAuth
       @current_session = session
     end
 
+    def run_in_background(task)
+      handler = options.advanced.dig(:background_tasks, :handler)
+      if handler.respond_to?(:call)
+        handler.call(task)
+      elsif task.respond_to?(:call)
+        task.call
+      end
+    end
+
     def create_auth_cookie(cookie_name, override_attributes = {})
       Cookies.create_cookie(options, cookie_name.to_s, override_attributes)
     end

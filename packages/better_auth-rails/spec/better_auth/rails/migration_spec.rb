@@ -50,4 +50,29 @@ RSpec.describe BetterAuth::Rails::Migration do
     expect(migration).to include("add_index :audit_logs, :action, unique: true")
     expect(migration).to include("add_foreign_key :audit_logs, :users, column: :user_id, on_delete: :cascade")
   end
+
+  it "renders organization and passkey plugin schema migrations" do
+    plugin_config = BetterAuth::Configuration.new(
+      secret: "test-secret-that-is-long-enough-for-validation",
+      database: :memory,
+      plugins: [
+        BetterAuth::Plugins.organization(teams: {enabled: true}, dynamic_access_control: {enabled: true}),
+        BetterAuth::Plugins.passkey
+      ]
+    )
+
+    migration = described_class.render(plugin_config)
+
+    expect(migration).to include("create_table :organizations, id: false")
+    expect(migration).to include("create_table :members, id: false")
+    expect(migration).to include("create_table :invitations, id: false")
+    expect(migration).to include("create_table :teams, id: false")
+    expect(migration).to include("create_table :team_members, id: false")
+    expect(migration).to include("create_table :organization_roles, id: false")
+    expect(migration).to include("create_table :passkeys, id: false")
+    expect(migration).to include("t.string :active_organization_id")
+    expect(migration).to include("t.string :active_team_id")
+    expect(migration).to include("t.string :credential_id, null: false")
+    expect(migration).to include("add_index :passkeys, :user_id")
+  end
 end

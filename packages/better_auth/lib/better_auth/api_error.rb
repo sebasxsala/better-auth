@@ -18,17 +18,20 @@ module BetterAuth
       "INTERNAL_SERVER_ERROR" => 500
     }.freeze
 
-    attr_reader :status, :status_code, :headers, :code
+    attr_reader :status, :status_code, :headers, :code, :body
 
-    def initialize(status, message: nil, headers: {}, code: nil)
+    def initialize(status, message: nil, headers: {}, code: nil, body: nil)
       @status = status.to_s.upcase
       @status_code = STATUS_CODES.fetch(@status, 500)
       @headers = normalize_headers(headers)
       @code = code || @status
+      @body = body
       super(message || default_message)
     end
 
     def to_h
+      return body if body
+
       {
         code: code,
         message: message

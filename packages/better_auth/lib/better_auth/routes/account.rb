@@ -46,17 +46,19 @@ module BetterAuth
         provider = social_provider(ctx.context, provider_id)
         raise APIError.new("BAD_REQUEST", message: "Provider #{provider_id} is not supported.") unless provider
 
-        account = find_provider_account(ctx, user_id, provider_id, body["accountId"] || body["account_id"])
+        account_id = body["accountId"] || body["account_id"]
+        account = account_cookie(ctx, provider_id, account_id, user_id) || find_provider_account(ctx, user_id, provider_id, account_id)
         raise APIError.new("BAD_REQUEST", message: "Account not found") unless account
 
         if account["refreshToken"] && access_token_expired?(account) && provider_callable(provider, :refresh_access_token)
-          tokens = call_provider(provider, :refresh_access_token, account["refreshToken"])
-          update_account_tokens(ctx, account, tokens)
+          tokens = call_provider(provider, :refresh_access_token, oauth_token_value(ctx, account["refreshToken"]))
+          updated = update_account_tokens(ctx, account, tokens)
           account = account.merge(token_hash(tokens))
+          Cookies.set_account_cookie(ctx, updated || account.merge(token_hash_for_storage(ctx, tokens)))
         end
 
         ctx.json({
-          accessToken: account["accessToken"],
+          accessToken: oauth_token_value(ctx, account["accessToken"]),
           accessTokenExpiresAt: account["accessTokenExpiresAt"],
           scopes: account["scopes"] || (account["scope"].to_s.empty? ? [] : account["scope"].to_s.split(",")),
           idToken: account["idToken"]
@@ -76,13 +78,16 @@ module BetterAuth
         raise APIError.new("BAD_REQUEST", message: "Provider #{provider_id} not found.") unless provider
         raise APIError.new("BAD_REQUEST", message: "Provider #{provider_id} does not support token refreshing.") unless provider_callable(provider, :refresh_access_token)
 
-        account = find_provider_account(ctx, user_id, provider_id, body["accountId"] || body["account_id"])
+        account_id = body["accountId"] || body["account_id"]
+        account = account_cookie(ctx, provider_id, account_id, user_id) || find_provider_account(ctx, user_id, provider_id, account_id)
         raise APIError.new("BAD_REQUEST", message: "Account not found") unless account
-        raise APIError.new("BAD_REQUEST", message: "Refresh token not found") if account["refreshToken"].to_s.empty?
+        refresh_token = oauth_token_value(ctx, account["refreshToken"])
+        raise APIError.new("BAD_REQUEST", message: "Refresh token not found") if refresh_token.to_s.empty?
 
-        tokens = call_provider(provider, :refresh_access_token, account["refreshToken"])
-        update_account_tokens(ctx, account, tokens)
+        tokens = call_provider(provider, :refresh_access_token, refresh_token)
+        updated = update_account_tokens(ctx, account, tokens)
         values = token_hash(tokens)
+        Cookies.set_account_cookie(ctx, updated || account.merge(token_hash_for_storage(ctx, tokens)))
         ctx.json({
           accessToken: values["accessToken"],
           refreshToken: values["refreshToken"],
@@ -112,8 +117,8 @@ module BetterAuth
         raise APIError.new("BAD_REQUEST", message: "Access token not found") if account["accessToken"].to_s.empty?
 
         info = call_provider(provider, :get_user_info, {
-          accessToken: account["accessToken"],
-          access_token: account["accessToken"],
+          accessToken: oauth_token_value(ctx, account["accessToken"]),
+          access_token: oauth_token_value(ctx, account["accessToken"]),
           idToken: account["idToken"],
           scopes: account["scope"].to_s.split(",")
         })
@@ -134,19 +139,62 @@ module BetterAuth
       end
     end
 
+    def self.account_cookie(ctx, provider_id, account_id = nil, user_id = nil)
+      return nil unless ctx.context.options.account[:store_account_cookie]
+
+      account = Cookies.get_account_cookie(ctx)
+      return nil unless account && account["providerId"] == provider_id
+      return nil unless account_id.to_s.empty? || account["id"] == account_id || account["accountId"] == account_id
+      return nil unless user_id.to_s.empty? || account["userId"].to_s.empty? || account["userId"] == user_id
+
+      account
+    end
+
     def self.access_token_expired?(account)
-      value = account["accessTokenExpiresAt"]
+      value = parse_time(account["accessTokenExpiresAt"])
       value && value < Time.now + 5
     end
 
+    def self.parse_time(value)
+      return value if value.is_a?(Time)
+      return nil if value.nil? || value.to_s.empty?
+
+      Time.parse(value.to_s)
+    rescue ArgumentError
+      nil
+    end
+
     def self.update_account_tokens(ctx, account, tokens)
-      ctx.context.internal_adapter.update_account(account["id"], token_hash(tokens))
+      return nil if account["id"].to_s.empty?
+
+      ctx.context.internal_adapter.update_account(account["id"], token_hash_for_storage(ctx, tokens))
     end
 
     def self.token_hash(tokens)
       data = normalize_hash(tokens || {})
       data["scope"] = Array(data.delete("scopes")).join(",") if data.key?("scopes")
       data
+    end
+
+    def self.token_hash_for_storage(ctx, tokens)
+      data = token_hash(tokens)
+      data["accessToken"] = oauth_token_for_storage(ctx, data["accessToken"]) if data.key?("accessToken")
+      data["refreshToken"] = oauth_token_for_storage(ctx, data["refreshToken"]) if data.key?("refreshToken")
+      data
+    end
+
+    def self.oauth_token_for_storage(ctx, token)
+      return token if token.to_s.empty?
+      return token unless ctx.context.options.account[:encrypt_oauth_tokens]
+
+      Crypto.symmetric_encrypt(key: ctx.context.secret, data: token)
+    end
+
+    def self.oauth_token_value(ctx, token)
+      return token if token.to_s.empty?
+      return token unless ctx.context.options.account[:encrypt_oauth_tokens]
+
+      Crypto.symmetric_decrypt(key: ctx.context.secret, data: token) || token
     end
 
     def self.provider_callable(provider, key)

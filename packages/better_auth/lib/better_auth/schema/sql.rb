@@ -8,17 +8,17 @@ module BetterAuth
       def create_statements(options, dialect:)
         dialect = dialect.to_sym
         tables = Schema.auth_tables(options)
-        statements = tables.map { |logical_name, table| create_table_statement(logical_name, table, dialect) }
+        statements = tables.map { |logical_name, table| create_table_statement(logical_name, table, dialect, tables) }
         statements.concat(tables.flat_map { |_logical_name, table| index_statements(table, dialect) })
       end
 
-      def create_table_statement(logical_name, table, dialect)
+      def create_table_statement(logical_name, table, dialect, tables = nil)
         table_name = table.fetch(:model_name)
         columns = table.fetch(:fields).map do |logical_field, attributes|
           column_definition(table_name, logical_field, attributes, dialect)
         end
         constraints = table.fetch(:fields).flat_map do |logical_field, attributes|
-          field_constraints(table_name, logical_field, attributes, dialect)
+          field_constraints(table_name, logical_field, attributes, dialect, tables)
         end
         body = (columns + constraints).join(",\n  ")
 
@@ -44,7 +44,7 @@ module BetterAuth
         parts.join(" ")
       end
 
-      def field_constraints(table_name, logical_field, attributes, dialect)
+      def field_constraints(table_name, logical_field, attributes, dialect, tables = nil)
         constraints = []
         column = attributes[:field_name] || physical_name(logical_field)
 
@@ -54,7 +54,7 @@ module BetterAuth
 
         reference = attributes[:references]
         if reference
-          constraints << foreign_key_constraint(table_name, column, reference, dialect)
+          constraints << foreign_key_constraint(table_name, column, reference, dialect, tables)
         end
 
         constraints
@@ -148,8 +148,8 @@ module BetterAuth
         end
       end
 
-      def foreign_key_constraint(table_name, column, reference, dialect)
-        target_model = reference.fetch(:model)
+      def foreign_key_constraint(table_name, column, reference, dialect, tables = nil)
+        target_model = tables&.fetch(reference.fetch(:model).to_s, nil)&.fetch(:model_name) || reference.fetch(:model)
         target_field = reference.fetch(:field)
         on_delete = reference[:on_delete] ? " ON DELETE #{reference[:on_delete].to_s.upcase}" : ""
 

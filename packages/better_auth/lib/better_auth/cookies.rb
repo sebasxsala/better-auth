@@ -124,6 +124,30 @@ module BetterAuth
       end
     end
 
+    def set_account_cookie(ctx, account_data)
+      return unless ctx.context.options.account[:store_account_cookie]
+
+      cookie = ctx.context.auth_cookies[:account_data]
+      attributes = cookie.attributes.merge(max_age: cookie.attributes[:max_age] || 60 * 5)
+      value = Crypto.symmetric_encode_jwt(stringify_keys(account_data), ctx.context.secret, "better-auth-account", expires_in: attributes[:max_age])
+      store = SessionStore.new(cookie.name, attributes, ctx)
+
+      if value.length > SessionStore::CHUNK_SIZE
+        store.set_cookies(store.chunk(value, attributes))
+      else
+        store.set_cookies(store.clean) if store.chunks?
+        ctx.set_cookie(cookie.name, value, attributes)
+      end
+    end
+
+    def get_account_cookie(ctx)
+      cookie = ctx.context.auth_cookies[:account_data]
+      value = SessionStore.get_chunked_cookie(ctx, cookie.name)
+      return nil unless value
+
+      Crypto.symmetric_decode_jwt(value, ctx.context.secret, "better-auth-account")
+    end
+
     def get_cookie_cache(request_or_cookie_header, secret:, strategy: "compact", version: nil, cookie_prefix: "better-auth", cookie_name: "session_data", is_secure: nil)
       cookie_header = header_value(request_or_cookie_header)
       return nil if cookie_header.to_s.empty?
