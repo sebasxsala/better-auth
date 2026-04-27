@@ -196,6 +196,7 @@ Steps:
 - [x] Implement cookie naming, prefixing, default attributes, secure cookie options, cross-subdomain attributes, and advanced cookie overrides.
 - [x] Implement signed `session_token` cookies.
 - [x] Implement `session_data` cookie cache, max age, refresh cache behavior, and disabling cache per request.
+- [x] Hardened cookie-cache strategy parity with standard JWE, filtered cache payloads, version validation, `disableCookieCache`, `disableRefresh`, and `rememberMe: false` refresh behavior.
 - [x] Implement cookie chunking and deletion for oversized cookie values.
 - [x] Implement session lookup priority: signed cookie parse, cookie cache when allowed, adapter or secondary storage lookup, expiration refresh, response cookie update.
 - [x] Add sensitive session behavior that bypasses stale cookie cache for sensitive routes.
@@ -231,6 +232,7 @@ Steps:
 - [x] Add integration tests that use root `docker-compose.yml` Postgres/MySQL services when drivers are available and skip with a clear message when drivers or services are unavailable.
 - [x] Run SQL adapter unit tests and available integration tests.
 - [x] Update `.docs/features/database-adapters.md` and `.docs/features/upstream-parity-matrix.md` with SQL adapter status and dependency decisions.
+- [x] Added public `experimental: { joins: true }` option as an adapter optimization with fallback behavior.
 
 ## Phase 5: Base Auth Routes
 
@@ -551,6 +553,7 @@ The final Ruby port should cover these upstream product features:
 - [x] Social OAuth sign-in and callback flow.
 - [x] Common social provider factories for Google, GitHub, GitLab, Discord, Apple, and Microsoft Entra ID.
 - [x] Session management and cookie cache.
+- [x] Advanced IP address configuration applies consistently to rate limiting and stored session metadata.
 - [x] Password reset.
 - [x] Email verification.
 - [x] User update/delete.

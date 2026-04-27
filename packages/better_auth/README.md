@@ -86,6 +86,19 @@ auth = BetterAuth.auth(
 )
 ```
 
+### JavaScript Client
+
+Ruby Better Auth exposes the same HTTP route surface. Frontend apps should use the upstream Better Auth JavaScript client and point it at the Ruby server:
+
+```ts
+import { createAuthClient } from "better-auth/client";
+
+export const authClient = createAuthClient({
+  baseURL: "http://localhost:3000",
+  basePath: "/api/auth",
+});
+```
+
 ### Rails Integration
 
 Add to your Gemfile:

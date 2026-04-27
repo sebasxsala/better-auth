@@ -1587,7 +1587,7 @@ git commit -m "feat: add common social provider factories"
 - Modify: `packages/better_auth/README.md`
 - Modify: `packages/better_auth-rails/README.md`
 
-- [ ] **Step 1: Update parity matrix statuses**
+- [x] **Step 1: Update parity matrix statuses**
 
 In `.docs/features/upstream-parity-matrix.md`, make these status updates:
 
@@ -1598,7 +1598,7 @@ In `.docs/features/upstream-parity-matrix.md`, make these status updates:
 | `better-auth`, `social-providers` | `upstream/packages/core/src/social-providers/` | `upstream/packages/better-auth/src/social.test.ts` | `packages/better_auth/lib/better_auth/social_providers/` | `packages/better_auth/test/better_auth/social_providers_test.rb` | `/sign-in/social`, `/callback/:providerId` | `account`, `user` | Partial | Common provider factories exist for Google, GitHub, GitLab, Discord, Apple, and Microsoft Entra ID. Full social flow/linking parity remains separate. |
 ```
 
-- [ ] **Step 2: Update the master plan**
+- [x] **Step 2: Update the master plan**
 
 In `.docs/plans/2026-04-25-better-auth-ruby-port.md`, add a progress line under Phase 4:
 
@@ -1619,7 +1619,7 @@ Add a progress line under Feature Coverage List:
 - [x] Common social provider factories for Google, GitHub, GitLab, Discord, Apple, and Microsoft Entra ID.
 ```
 
-- [ ] **Step 3: Add client configuration note**
+- [x] **Step 3: Add client configuration note**
 
 Add to `packages/better_auth/README.md` and `packages/better_auth-rails/README.md`:
 
@@ -1639,7 +1639,7 @@ export const authClient = createAuthClient({
 ```
 ```
 
-- [ ] **Step 4: Run docs grep for stale JWE warning**
+- [x] **Step 4: Run docs grep for stale JWE warning**
 
 Run:
 
@@ -1649,7 +1649,7 @@ rg -n "AES-256-GCM|not a public API token contract|JWE uses.*internal" .docs pac
 
 Expected: no stale statement claims Ruby `jwe` is not real JWE.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .docs/features/sessions-and-cookies.md .docs/features/database-adapters.md .docs/features/upstream-parity-matrix.md .docs/plans/2026-04-25-better-auth-ruby-port.md packages/better_auth/README.md packages/better_auth-rails/README.md

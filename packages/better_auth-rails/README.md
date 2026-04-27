@@ -123,6 +123,19 @@ Rails configuration is a thin option builder for the core Rack auth object. The 
 
 The ActiveRecord adapter uses whichever database adapter the Rails app is already configured with, including PostgreSQL and MySQL.
 
+### JavaScript Client
+
+Ruby Better Auth exposes the same HTTP route surface. Frontend apps should use the upstream Better Auth JavaScript client and point it at the Ruby server:
+
+```ts
+import { createAuthClient } from "better-auth/client";
+
+export const authClient = createAuthClient({
+  baseURL: "http://localhost:3000",
+  basePath: "/api/auth",
+});
+```
+
 Plugin schemas are included in generated migrations through the same configuration:
 
 ```ruby
