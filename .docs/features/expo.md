@@ -20,7 +20,7 @@ Adds server-side Expo/mobile support through `BetterAuth::Plugins.expo`: authori
 
 ## Key Differences
 
-- React Native storage, focus manager, online manager, and browser-opening client behavior are client-only and out of Ruby server scope.
+- React Native secure storage, cookie cache parsing/storage helpers, focus manager, online manager, browser-opening flow, and React Native behavior tests are client-only and out of Ruby server scope.
 - The core router allows some no-cookie POSTs without an Origin header; `disable_origin_override` therefore preserves core behavior rather than forcing a rejection.
 - Server-side Expo works with the Ruby Rack surface because it only depends on request origin rewriting, trusted-origin checks, temporary auth cookies, and redirect hook handling; native secure storage remains the Expo client package's responsibility.
 

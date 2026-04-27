@@ -177,10 +177,10 @@ Upstream Better Auth exposes many provider factories. The Ruby port currently sh
 | SIWE | Partial | Nonce, wallet sign-in, callback verification, ENS hook, and account/session creation exist; checksum casing remains a Ruby adaptation. |
 | SSO | Partial | OIDC/SAML provider flows, domain verification, ACS/metadata, replay protection, and organization assignment exist; full SAML XML signature/encryption matrix remains future work. |
 | SCIM | Partial | Tokens, metadata, user CRUD, common PATCH operations, filters, mappings, and Bearer middleware exist. |
-| Stripe | [x] Supported | Injected-client checkout/portal flows, reference authorization, plan/seat/trial abuse protection, billing event webhooks, subscription state transitions, and organization subscriptions are covered. |
+| Stripe | [x] Supported | Injected-client checkout/portal flows, reference authorization, plan/seat/trial abuse protection, trial-start callbacks, billing event webhooks, subscription state transitions, organization subscriptions, metadata helpers, customer callbacks, checkout params/options, lookup keys, and v18/v19 webhook construction are covered. |
 | Two-factor | [x] Supported | TOTP, OTP, backup codes, trusted devices, cookie max-age options, disable/recovery flows, `rememberMe: false` preservation, and post-login verification are implemented. |
 | Username | [x] Supported | Username sign-up/sign-in, availability, normalization, display username, validation order, duplicate/update behavior, and leak-prevention behavior are implemented. |
-| Expo server integration | [x] Supported | Authorization proxy cookies, optional OAuth state cookie, `expo-origin` override/preservation, disabled override, trusted `exp://`, wildcard trusted origins, and trusted deep-link cookie transfer are covered. Native Expo client storage/focus helpers are outside Ruby server scope. |
+| Expo server integration | [x] Supported | Authorization proxy cookies, optional OAuth state cookie, `expo-origin` override/preservation, disabled override, trusted `exp://`, wildcard trusted origins, and trusted deep-link cookie transfer are covered. Native Expo secure storage, cookie cache, focus/online managers, browser-opening flow, and React Native behavior tests are client-only. |
 
 ## Development
 

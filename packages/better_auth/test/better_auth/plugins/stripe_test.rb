@@ -31,6 +31,113 @@ class BetterAuthPluginsStripeTest < Minitest::Test
     assert_nil subscription["stripeSubscriptionId"]
   end
 
+  def test_metadata_helpers_protect_internal_fields_and_preserve_custom_keys
+    customer = BetterAuth::Plugins.stripe_customer_metadata_set(
+      {userId: "real", customerType: "user"},
+      {userId: "fake", customField: "value"}
+    )
+
+    assert_equal "real", customer.fetch("userId")
+    assert_equal "user", customer.fetch("customerType")
+    assert_equal "value", customer.fetch("customField")
+    assert_equal({userId: "real", organizationId: nil, customerType: "user"}, BetterAuth::Plugins.stripe_customer_metadata_get(customer))
+
+    subscription = BetterAuth::Plugins.stripe_subscription_metadata_set(
+      {userId: "u1", subscriptionId: "s1", referenceId: "r1"},
+      {subscriptionId: "fake", customField: "value"}
+    )
+
+    assert_equal "s1", subscription.fetch("subscriptionId")
+    assert_equal "value", subscription.fetch("customField")
+    assert_equal({userId: "u1", subscriptionId: "s1", referenceId: "r1"}, BetterAuth::Plugins.stripe_subscription_metadata_get(subscription))
+  end
+
+  def test_customer_create_params_and_callback_receive_upstream_shape
+    stripe = FakeStripeClient.new
+    payloads = []
+    auth = build_auth(
+      stripe_client: stripe,
+      create_customer_on_sign_up: true,
+      get_customer_create_params: ->(user, _ctx) { {phone: "+1234567890", metadata: {customField: "customValue", userId: "fake"}} },
+      on_customer_create: ->(payload, _ctx) { payloads << payload }
+    )
+
+    auth.api.sign_up_email(
+      body: {email: "customer-callback@example.com", password: "password123", name: "Customer Callback"},
+      as_response: true
+    )
+
+    user = auth.context.internal_adapter.find_user_by_email("customer-callback@example.com")[:user]
+    created = stripe.customers.created.fetch(0)
+    assert_equal "+1234567890", created.fetch(:phone)
+    assert_equal "customValue", created.fetch("metadata").fetch("customField")
+    assert_equal user.fetch("id"), created.fetch("metadata").fetch("userId")
+    assert_equal "user", created.fetch("metadata").fetch("customerType")
+    assert_equal 1, payloads.length
+    assert_equal created, payloads.fetch(0).fetch(:stripeCustomer)
+    assert_equal created, payloads.fetch(0).fetch(:stripe_customer)
+    assert_equal created.fetch("id"), payloads.fetch(0).fetch(:user).fetch("stripeCustomerId")
+  end
+
+  def test_checkout_session_params_merge_options_metadata_and_lookup_keys
+    stripe = FakeStripeClient.new
+    auth = build_auth(
+      stripe_client: stripe,
+      subscription: {
+        enabled: true,
+        plans: [{name: "lookup", lookup_key: "lookup_monthly"}],
+        get_checkout_session_params: lambda do |_data, _request, _ctx|
+          {
+            params: {
+              allow_promotion_codes: true,
+              metadata: {customField: "customValue", referenceId: "attacker"},
+              subscription_data: {metadata: {subscriptionField: "subscriptionValue"}}
+            },
+            options: {idempotency_key: "checkout-lookup"}
+          }
+        end
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "lookup@example.com")
+
+    checkout = auth.api.upgrade_subscription(
+      headers: {"cookie" => cookie},
+      body: {plan: "lookup", successUrl: "/success", cancelUrl: "/cancel"}
+    )
+
+    assert_equal "https://stripe.test/checkout", checkout.fetch(:url)
+    params = stripe.checkout.created.fetch(0)
+    assert_equal "price_lookup_123", params.fetch(:line_items).fetch(0).fetch(:price)
+    assert_equal true, params.fetch(:allow_promotion_codes)
+    assert_equal "customValue", params.fetch(:metadata).fetch("customField")
+    refute_equal "attacker", params.fetch(:metadata).fetch("referenceId")
+    assert_equal "subscriptionValue", params.fetch(:subscription_data).fetch(:metadata).fetch("subscriptionField")
+    assert_equal "checkout-lookup", stripe.checkout.created_options.fetch(0).fetch(:idempotency_key)
+  end
+
+  def test_upgrade_rejects_plan_when_price_id_cannot_be_resolved
+    stripe = FakeStripeClient.new
+    stripe.prices.list_result = {"data" => []}
+    auth = build_auth(
+      stripe_client: stripe,
+      subscription: {
+        enabled: true,
+        plans: [{name: "missing-price", lookup_key: "missing_lookup"}]
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "missing-price@example.com")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.upgrade_subscription(
+        headers: {"cookie" => cookie},
+        body: {plan: "missing-price", successUrl: "/success", cancelUrl: "/cancel"}
+      )
+    end
+
+    assert_equal "Price ID not found for the selected plan", error.message
+    assert_empty stripe.checkout.created
+  end
+
   def test_lists_cancels_restores_and_opens_billing_portal
     stripe = FakeStripeClient.new
     auth = build_auth(stripe_client: stripe)
@@ -224,6 +331,10 @@ class BetterAuthPluginsStripeTest < Minitest::Test
       stripe_webhook_secret: "whsec_test",
       on_event: ->(event) { events << [:event, event[:type] || event["type"]] },
       subscription: subscription_options.merge(
+        plans: [
+          {name: "basic", price_id: "price_basic"},
+          {name: "pro", price_id: "price_pro", annual_discount_price_id: "price_pro_year", limits: {projects: 10}, free_trial: {days: 14, on_trial_start: ->(subscription) { events << [:trial_start, subscription.fetch("id")] }}}
+        ],
         on_subscription_complete: ->(data, _ctx) { events << [:complete, data.fetch(:subscription).fetch("status")] },
         on_subscription_created: ->(data) { events << [:created, data.fetch(:subscription).fetch("referenceId")] },
         on_subscription_update: ->(data) { events << [:update, data.fetch(:subscription).fetch("status")] },
@@ -279,6 +390,7 @@ class BetterAuthPluginsStripeTest < Minitest::Test
     assert deleted.fetch("endedAt")
 
     assert_includes events, [:complete, "trialing"]
+    assert_includes events, [:trial_start, incomplete.fetch("id")]
     assert_includes events, [:created, user.fetch("id")]
     assert_includes events, [:update, "active"]
     assert_includes events, [:cancel, created.fetch("id")]
@@ -400,7 +512,7 @@ class BetterAuthPluginsStripeTest < Minitest::Test
   end
 
   class FakeStripeClient
-    attr_reader :customers, :checkout, :billing_portal, :subscriptions, :webhooks
+    attr_reader :customers, :checkout, :billing_portal, :subscriptions, :webhooks, :prices
 
     def initialize
       @customers = Customers.new
@@ -408,6 +520,7 @@ class BetterAuthPluginsStripeTest < Minitest::Test
       @billing_portal = BillingPortal.new
       @subscriptions = Subscriptions.new
       @webhooks = Webhooks.new
+      @prices = Prices.new
     end
 
     class Customers
@@ -418,7 +531,14 @@ class BetterAuthPluginsStripeTest < Minitest::Test
       end
 
       def create(params)
-        customer = {"id" => "cus_#{created.length + 1}", "email" => params[:email], "name" => params[:name], "metadata" => params[:metadata] || {}}
+        metadata = params[:metadata] || params["metadata"] || {}
+        customer = {
+          "id" => "cus_#{created.length + 1}",
+          "email" => params[:email],
+          "name" => params[:name],
+          "metadata" => metadata,
+          :metadata => metadata
+        }.merge(params.except(:email, :name, :metadata))
         created << customer
         customer
       end
@@ -437,19 +557,35 @@ class BetterAuthPluginsStripeTest < Minitest::Test
     end
 
     class Checkout
-      attr_reader :created
+      attr_reader :created, :created_options
 
       def initialize
         @created = []
+        @created_options = []
       end
 
       def sessions
         self
       end
 
-      def create(params, _options = nil)
+      def create(params, options = nil)
         created << params
+        created_options << (options || {})
         {"id" => "cs_test", "url" => "https://stripe.test/checkout", "subscription" => "checkout-subscription", "customer" => "cus_checkout"}
+      end
+    end
+
+    class Prices
+      attr_accessor :list_result
+      attr_reader :list_calls
+
+      def initialize
+        @list_calls = []
+      end
+
+      def list(params)
+        list_calls << params
+        list_result || {"data" => [{"id" => "price_lookup_123"}]}
       end
     end
 

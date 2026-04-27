@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "securerandom"
+
 module BetterAuth
   module Plugins
     module_function
@@ -96,11 +98,12 @@ module BetterAuth
       {
         user: {
           create: {
-            before: lambda do |data, _ctx|
+            before: lambda do |data, hook_ctx|
               next unless data["email"] && !data["stripeCustomerId"]
 
-              customer = stripe_find_or_create_user_customer(config, data)
-              {data: {stripeCustomerId: stripe_id(customer)}}
+              data["id"] ||= SecureRandom.hex(16)
+              customer = stripe_find_or_create_user_customer(config, data, nil, hook_ctx)
+              {data: {id: data["id"], stripeCustomerId: stripe_id(customer)}}
             end
           },
           update: {
@@ -192,6 +195,8 @@ module BetterAuth
         end
 
         price_id = stripe_price_id(config, plan, body[:annual])
+        raise APIError.new("BAD_REQUEST", message: "Price ID not found for the selected plan") if price_id.to_s.empty?
+
         active_stripe_item = stripe_subscription_item(active_stripe || {})
         stripe_price_id_value = stripe_fetch(stripe_fetch(active_stripe_item || {}, "price") || {}, "id")
         same_plan = active_or_trialing && active_or_trialing["plan"].to_s.downcase == body[:plan].to_s.downcase
@@ -234,19 +239,34 @@ module BetterAuth
           entry["trialStart"] || entry["trialEnd"] || entry["status"] == "trialing"
         end
         free_trial = (!has_ever_trialed && plan[:free_trial]) ? {trial_period_days: plan.dig(:free_trial, :days)} : {}
-        metadata = stripe_metadata({userId: user.fetch("id"), subscriptionId: subscription.fetch("id"), referenceId: reference_id}, body[:metadata])
-        checkout = stripe_client(config).checkout.sessions.create(
+        checkout_customization = subscription_options[:get_checkout_session_params]&.call(
+          {user: user, session: session.fetch(:session), plan: plan, subscription: subscription},
+          ctx.request,
+          ctx
+        ) || {}
+        custom_params = stripe_fetch(checkout_customization, "params") || {}
+        custom_options = normalize_hash(stripe_fetch(checkout_customization, "options") || {})
+        custom_subscription_data = stripe_fetch(custom_params, "subscription_data") || stripe_fetch(custom_params, "subscriptionData") || {}
+        internal_metadata = {userId: user.fetch("id"), subscriptionId: subscription.fetch("id"), referenceId: reference_id}
+        metadata = stripe_subscription_metadata_set(internal_metadata, body[:metadata], stripe_fetch(custom_params, "metadata"))
+        subscription_metadata = stripe_subscription_metadata_set(internal_metadata, body[:metadata], stripe_fetch(custom_subscription_data, "metadata"))
+        checkout_params = stripe_deep_merge(
+          custom_params,
           customer: customer_id,
           customer_update: (customer_type == "user") ? {name: "auto", address: "auto"} : {address: "auto"},
           locale: body[:locale],
           success_url: stripe_url(ctx, "#{ctx.context.base_url}/subscription/success?callbackURL=#{Rack::Utils.escape(body[:success_url] || "/")}&subscriptionId=#{Rack::Utils.escape(subscription.fetch("id"))}"),
           cancel_url: stripe_url(ctx, body[:cancel_url] || "/"),
           line_items: [{price: price_id, quantity: body[:seats] || 1}],
-          subscription_data: free_trial.merge(metadata: metadata),
+          subscription_data: free_trial.merge(metadata: subscription_metadata),
           mode: "subscription",
           client_reference_id: reference_id,
           metadata: metadata
         )
+        checkout_params[:metadata] = metadata
+        checkout_params[:subscription_data] ||= {}
+        checkout_params[:subscription_data][:metadata] = subscription_metadata
+        checkout = stripe_client(config).checkout.sessions.create(checkout_params, custom_options.empty? ? nil : custom_options)
         ctx.json(stripe_stringify_keys(checkout).merge(redirect: stripe_redirect?(body)))
       end
     end
@@ -480,6 +500,7 @@ module BetterAuth
         trialEnd: stripe_time(stripe_fetch(stripe_subscription, "trial_end"))
       ).compact
       db_subscription = ctx.context.adapter.update(model: "subscription", where: [{field: "id", value: subscription_id}], update: update)
+      plan.dig(:free_trial, :on_trial_start)&.call(db_subscription) if db_subscription && update[:trialStart]
       callback = config.dig(:subscription, :on_subscription_complete)
       callback&.call({event: event, subscription: db_subscription, stripeSubscription: stripe_subscription, stripe_subscription: stripe_subscription, plan: plan}, ctx)
     end
@@ -566,25 +587,33 @@ module BetterAuth
     end
 
     def stripe_create_customer(config, ctx, user, metadata = nil)
-      customer = stripe_find_or_create_user_customer(config, user, metadata)
+      customer = stripe_find_or_create_user_customer(config, user, metadata, ctx)
       id = stripe_id(customer)
       ctx.context.internal_adapter.update_user(user.fetch("id"), stripeCustomerId: id)
       id
     end
 
-    def stripe_find_or_create_user_customer(config, user, metadata = nil)
+    def stripe_find_or_create_user_customer(config, user, metadata = nil, ctx = nil)
       existing = stripe_client(config).customers.search(query: "email:\"#{stripe_escape_search(user["email"])}\" AND -metadata[\"customerType\"]:\"organization\"", limit: 1)
       customer = Array(stripe_fetch(existing, "data")).first
-      return customer if customer
+      if customer
+        stripe_notify_customer_created(config, customer, user, ctx)
+        return customer
+      end
 
-      extra = config[:get_customer_create_params]&.call(user, nil) || {}
+      raw_extra = config[:get_customer_create_params]&.call(user, ctx) || {}
+      extra_metadata = stripe_fetch(raw_extra, "metadata")
+      extra = normalize_hash(raw_extra)
       params = stripe_deep_merge(
         extra,
         email: user["email"],
         name: user["name"],
-        metadata: stripe_metadata({userId: user["id"], customerType: "user"}, metadata, extra[:metadata])
+        metadata: stripe_customer_metadata_set({userId: user["id"], customerType: "user"}, metadata, extra_metadata)
       )
-      stripe_client(config).customers.create(params)
+      params[:metadata] = stripe_customer_metadata_set({userId: user["id"], customerType: "user"}, metadata, extra_metadata)
+      customer = stripe_client(config).customers.create(params)
+      stripe_notify_customer_created(config, customer, user, ctx)
+      customer
     end
 
     def stripe_organization_customer(config, ctx, organization_id, metadata = nil)
@@ -597,12 +626,15 @@ module BetterAuth
       existing = stripe_client(config).customers.search(query: "metadata[\"organizationId\"]:\"#{stripe_escape_search(org["id"])}\"", limit: 1)
       customer = Array(stripe_fetch(existing, "data")).first
       unless customer
-        extra = config.dig(:organization, :get_customer_create_params)&.call(org, ctx) || {}
+        raw_extra = config.dig(:organization, :get_customer_create_params)&.call(org, ctx) || {}
+        extra_metadata = stripe_fetch(raw_extra, "metadata")
+        extra = normalize_hash(raw_extra)
         params = stripe_deep_merge(
           extra,
           name: org["name"],
-          metadata: stripe_metadata({organizationId: org["id"], customerType: "organization"}, metadata, extra[:metadata])
+          metadata: stripe_customer_metadata_set({organizationId: org["id"], customerType: "organization"}, metadata, extra_metadata)
         )
+        params[:metadata] = stripe_customer_metadata_set({organizationId: org["id"], customerType: "organization"}, metadata, extra_metadata)
         customer = stripe_client(config).customers.create(params)
         config.dig(:organization, :on_customer_create)&.call({stripeCustomer: customer, stripe_customer: customer, organization: org.merge("stripeCustomerId" => stripe_id(customer))}, ctx)
       end
@@ -754,8 +786,65 @@ module BetterAuth
 
     def stripe_metadata(internal, *user_metadata)
       user_metadata.compact
-        .reduce({}) { |acc, entry| acc.merge(normalize_hash(entry).transform_keys { |key| key.to_s }) }
-        .merge(internal.transform_keys { |key| key.to_s })
+        .reduce({}) do |acc, entry|
+          next acc unless entry.respond_to?(:each)
+
+          acc.merge(entry.each_with_object({}) { |(key, value), result| result[stripe_metadata_key(key)] = value })
+        end
+        .merge(internal.transform_keys { |key| stripe_metadata_key(key) })
+    end
+
+    def stripe_customer_metadata_set(internal_fields, *user_metadata)
+      stripe_metadata(internal_fields, *user_metadata)
+    end
+
+    def stripe_customer_metadata_get(metadata)
+      {
+        userId: stripe_metadata_fetch(metadata, "userId"),
+        organizationId: stripe_metadata_fetch(metadata, "organizationId"),
+        customerType: stripe_metadata_fetch(metadata, "customerType")
+      }
+    end
+
+    def stripe_subscription_metadata_set(internal_fields, *user_metadata)
+      stripe_metadata(internal_fields, *user_metadata)
+    end
+
+    def stripe_subscription_metadata_get(metadata)
+      {
+        userId: stripe_metadata_fetch(metadata, "userId"),
+        subscriptionId: stripe_metadata_fetch(metadata, "subscriptionId"),
+        referenceId: stripe_metadata_fetch(metadata, "referenceId")
+      }
+    end
+
+    def stripe_notify_customer_created(config, customer, user, ctx)
+      config[:on_customer_create]&.call(
+        {
+          stripeCustomer: customer,
+          stripe_customer: customer,
+          user: user.merge("stripeCustomerId" => stripe_id(customer))
+        },
+        ctx
+      )
+    end
+
+    def stripe_metadata_key(key)
+      case normalize_key(key)
+      when :user_id then "userId"
+      when :organization_id then "organizationId"
+      when :customer_type then "customerType"
+      when :subscription_id then "subscriptionId"
+      when :reference_id then "referenceId"
+      else
+        key.to_s
+      end
+    end
+
+    def stripe_metadata_fetch(metadata, key)
+      return nil unless metadata.respond_to?(:[])
+
+      metadata[key] || metadata[key.to_sym] || metadata[normalize_key(key)] || metadata[normalize_key(key).to_s]
     end
 
     def stripe_deep_merge(base, override)

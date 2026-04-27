@@ -91,6 +91,49 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
     assert_includes authorizations, [organization.fetch("id"), "list-subscription"]
   end
 
+  def test_organization_customer_create_params_preserve_metadata_and_callback_shape
+    stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
+    payloads = []
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.stripe(
+          stripe_client: stripe,
+          organization: {
+            enabled: true,
+            get_customer_create_params: ->(_org, _ctx) { {"email" => "billing@acme.test", "metadata" => {"organizationId" => "attacker", "customOrg" => "kept"}} },
+            on_customer_create: ->(payload, _ctx) { payloads << payload }
+          },
+          subscription: {
+            enabled: true,
+            plans: [{name: "team", price_id: "price_team"}],
+            authorize_reference: ->(_data, _ctx) { true }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, "org-metadata@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Metadata Org", slug: "metadata-org"})
+
+    auth.api.upgrade_subscription(
+      headers: {"cookie" => cookie},
+      body: {plan: "team", customerType: "organization", referenceId: organization.fetch("id"), successUrl: "/success", cancelUrl: "/cancel"}
+    )
+
+    created = stripe.customers.created.fetch(0)
+    assert_equal "billing@acme.test", created.fetch("email")
+    assert_equal organization.fetch("id"), created.fetch("metadata").fetch("organizationId")
+    assert_equal "organization", created.fetch("metadata").fetch("customerType")
+    assert_equal "kept", created.fetch("metadata").fetch("customOrg")
+    assert_equal created, payloads.fetch(0).fetch(:stripeCustomer)
+    assert_equal created, payloads.fetch(0).fetch(:stripe_customer)
+    assert_equal organization.fetch("id"), payloads.fetch(0).fetch(:organization).fetch("id")
+    assert_equal created.fetch("id"), payloads.fetch(0).fetch(:organization).fetch("stripeCustomerId")
+  end
+
   def test_organization_webhooks_and_delete_guard
     stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
     deleted_callbacks = []

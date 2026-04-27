@@ -1,5 +1,9 @@
 # Feature: [Feature Name]
 
+## Parity Status Rule
+
+Use `Complete` only when every server-relevant upstream runtime behavior has a Ruby test and documented Ruby adaptations are intentional. Keep the feature `Partial` when upstream has unported edge cases, missing route matrices, missing adapter coverage, or unresolved client/server scope decisions.
+
 **Upstream Reference:** `upstream/packages/better-auth/src/path/to/feature.ts`
 
 ## Summary
