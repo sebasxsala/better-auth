@@ -34,6 +34,52 @@ class BetterAuthPluginsSSOOIDCTest < Minitest::Test
     assert_equal "Invalid OIDC discovery document", error.message
   end
 
+  def test_oidc_discovery_hydrates_relative_urls_and_selects_auth_method
+    discovery = BetterAuth::Plugins.sso_discover_oidc_config(
+      issuer: "https://idp.example.com/tenant",
+      existing_config: {clientId: "configured", tokenEndpointAuthentication: "client_secret_post"},
+      trusted_origin: ->(url) { url.start_with?("https://idp.example.com") },
+      fetch: ->(url) {
+        assert_equal "https://idp.example.com/tenant/.well-known/openid-configuration", url
+        {
+          issuer: "https://idp.example.com/tenant",
+          authorization_endpoint: "/tenant/authorize",
+          token_endpoint: "/tenant/token",
+          jwks_uri: "/tenant/jwks",
+          userinfo_endpoint: "/tenant/userinfo",
+          token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
+          scopes_supported: ["openid", "email"]
+        }
+      }
+    )
+
+    assert_equal "configured", discovery.fetch(:client_id)
+    assert_equal "client_secret_post", discovery.fetch(:token_endpoint_authentication)
+    assert_equal "https://idp.example.com/tenant/authorize", discovery.fetch(:authorization_endpoint)
+    assert_equal "https://idp.example.com/tenant/jwks", discovery.fetch(:jwks_endpoint)
+    assert_equal ["openid", "email"], discovery.fetch(:scopes_supported)
+  end
+
+  def test_oidc_discovery_rejects_untrusted_discovered_urls
+    error = assert_raises(BetterAuth::APIError) do
+      BetterAuth::Plugins.sso_discover_oidc_config(
+        issuer: "https://idp.example.com",
+        trusted_origin: ->(url) { url.start_with?("https://idp.example.com") },
+        fetch: ->(_url) {
+          {
+            issuer: "https://idp.example.com",
+            authorization_endpoint: "https://evil.example.com/authorize",
+            token_endpoint: "https://idp.example.com/token",
+            jwks_uri: "https://idp.example.com/jwks"
+          }
+        }
+      )
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal "OIDC discovery endpoint is not trusted", error.message
+  end
+
   def test_oidc_callback_creates_user_session_and_rejects_invalid_state
     auth = build_auth
     cookie = sign_up_cookie(auth)

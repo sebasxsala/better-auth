@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "time"
+
 module BetterAuth
   module Plugins
     module OIDCProvider
@@ -23,9 +25,12 @@ module BetterAuth
       config = {
         code_expires_in: 600,
         consent_page: "/oauth2/authorize",
+        login_page: "/login",
         default_scope: "openid",
         access_token_expires_in: 3600,
         refresh_token_expires_in: 604_800,
+        allow_plain_code_challenge_method: true,
+        store_client_secret: "plain",
         scopes: %w[openid profile email offline_access],
         store: OAuthProtocol.stores
       }.merge(normalize_hash(options))
@@ -33,6 +38,14 @@ module BetterAuth
       Plugin.new(
         id: "oidc-provider",
         endpoints: oidc_provider_endpoints(config),
+        hooks: {
+          after: [
+            {
+              matcher: ->(ctx) { ctx.path.start_with?("/sign-in/", "/sign-up/") },
+              handler: ->(ctx) { oidc_resume_login_prompt(ctx, config) }
+            }
+          ]
+        },
         schema: oidc_provider_schema,
         options: config
       )
@@ -54,6 +67,7 @@ module BetterAuth
     def oidc_metadata_endpoint(config)
       Endpoint.new(path: "/.well-known/openid-configuration", method: "GET", metadata: {hide: true}) do |ctx|
         base = OAuthProtocol.endpoint_base(ctx)
+        supported_algs = oidc_use_jwt_plugin?(ctx, config) ? ["RS256", "EdDSA", "none"] : ["HS256", "none"]
         ctx.json({
           issuer: OAuthProtocol.issuer(ctx),
           authorization_endpoint: "#{base}/oauth2/authorize",
@@ -68,7 +82,7 @@ module BetterAuth
           grant_types_supported: ["authorization_code", "refresh_token"],
           acr_values_supported: ["urn:mace:incommon:iap:silver", "urn:mace:incommon:iap:bronze"],
           subject_types_supported: ["public"],
-          id_token_signing_alg_values_supported: ["HS256", "none"],
+          id_token_signing_alg_values_supported: supported_algs,
           token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"],
           code_challenge_methods_supported: ["S256"],
           claims_supported: %w[sub iss aud exp nbf iat jti email email_verified name]
@@ -78,8 +92,34 @@ module BetterAuth
 
     def oidc_register_endpoint(config)
       Endpoint.new(path: "/oauth2/register", method: "POST") do |ctx|
-        client = OAuthProtocol.create_client(ctx, model: "oauthApplication", body: ctx.body, default_auth_method: "client_secret_basic")
-        ctx.json(client)
+        session = Routes.current_session(ctx, allow_nil: true)
+        unless session || config[:allow_dynamic_client_registration]
+          raise APIError.new("UNAUTHORIZED", message: "invalid_token")
+        end
+
+        body = OAuthProtocol.stringify_keys(ctx.body)
+        grant_types = Array(body["grant_types"] || [OAuthProtocol::AUTH_CODE_GRANT])
+        response_types = Array(body["response_types"] || ["code"])
+        redirects = Array(body["redirect_uris"]).map(&:to_s)
+        if (grant_types.empty? || grant_types.include?(OAuthProtocol::AUTH_CODE_GRANT) || grant_types.include?("implicit")) && redirects.empty?
+          raise APIError.new("BAD_REQUEST", message: "invalid_redirect_uri")
+        end
+        if grant_types.include?(OAuthProtocol::AUTH_CODE_GRANT) && !response_types.include?("code")
+          raise APIError.new("BAD_REQUEST", message: "invalid_client_metadata")
+        end
+        if grant_types.include?("implicit") && !response_types.include?("token")
+          raise APIError.new("BAD_REQUEST", message: "invalid_client_metadata")
+        end
+
+        client = OAuthProtocol.create_client(
+          ctx,
+          model: "oauthApplication",
+          body: body,
+          owner_session: session,
+          default_auth_method: "client_secret_basic",
+          store_client_secret: config[:store_client_secret]
+        )
+        ctx.json(client, status: 201, headers: {"Cache-Control" => "no-store", "Pragma" => "no-cache"})
       end
     end
 
@@ -98,21 +138,44 @@ module BetterAuth
         prompts = OIDCProvider.parse_prompt(query["prompt"])
         session = Routes.current_session(ctx, allow_nil: true)
         if !session && prompts.include?("none")
-          redirect = OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], error: "login_required", state: query["state"], iss: OAuthProtocol.issuer(ctx))
+          redirect = OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], error: "login_required", error_description: "Authentication required but prompt is none", state: query["state"], iss: OAuthProtocol.issuer(ctx))
           raise ctx.redirect(redirect)
         end
-        raise APIError.new("UNAUTHORIZED") unless session
+        unless session
+          ctx.set_signed_cookie("oidc_login_prompt", JSON.generate(query), ctx.context.secret, max_age: 600, path: "/", same_site: "lax")
+          raise ctx.redirect(OAuthProtocol.redirect_uri_with_params(config[:login_page], query))
+        end
 
         client = OAuthProtocol.find_client(ctx, "oauthApplication", query["client_id"])
         raise APIError.new("BAD_REQUEST", message: "invalid_client") unless client
         OAuthProtocol.validate_redirect_uri!(client, query["redirect_uri"])
 
         scopes = OAuthProtocol.parse_scopes(query["scope"] || config[:default_scope])
+        invalid_scopes = scopes.reject { |scope| config[:scopes].include?(scope) }
+        unless invalid_scopes.empty?
+          redirect = OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], error: "invalid_scope", error_description: "The following scopes are invalid: #{invalid_scopes.join(", ")}", state: query["state"], iss: OAuthProtocol.issuer(ctx))
+          raise ctx.redirect(redirect)
+        end
+        if config[:require_pkce] && (query["code_challenge"].to_s.empty? || query["code_challenge_method"].to_s.empty?)
+          redirect = OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], error: "invalid_request", error_description: "pkce is required", state: query["state"], iss: OAuthProtocol.issuer(ctx))
+          raise ctx.redirect(redirect)
+        end
+        challenge_method = query["code_challenge_method"].to_s
+        if !challenge_method.empty? && !valid_code_challenge_method?(challenge_method, config)
+          redirect = OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], error: "invalid_request", error_description: "invalid code_challenge method", state: query["state"], iss: OAuthProtocol.issuer(ctx))
+          raise ctx.redirect(redirect)
+        end
+
         client_data = OAuthProtocol.stringify_keys(client)
         requires_consent = !client_data["skipConsent"] && (prompts.include?("consent") || !oauth_consent_granted?(ctx, client_data["clientId"], session[:user]["id"], scopes))
+        if oidc_requires_login?(session, prompts, query)
+          ctx.set_signed_cookie("oidc_login_prompt", JSON.generate(query), ctx.context.secret, max_age: 600, path: "/", same_site: "lax")
+          raise ctx.redirect(OAuthProtocol.redirect_uri_with_params(config[:login_page], client_id: client_data["clientId"], state: query["state"]))
+        end
+
         if requires_consent
           if prompts.include?("none")
-            redirect = OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], error: "consent_required", state: query["state"], iss: OAuthProtocol.issuer(ctx))
+            redirect = OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], error: "consent_required", error_description: "Consent required but prompt is none", state: query["state"], iss: OAuthProtocol.issuer(ctx))
             raise ctx.redirect(redirect)
           end
 
@@ -124,6 +187,21 @@ module BetterAuth
             scopes: scopes,
             expires_at: Time.now + config[:code_expires_in].to_i
           }
+          unless config[:consent_page]
+            renderer = config[:get_consent_html]
+            raise APIError.new("INTERNAL_SERVER_ERROR", message: "No consent page provided") unless renderer.respond_to?(:call)
+
+            ctx.set_header("content-type", "text/html")
+            next renderer.call(
+              scopes: scopes,
+              clientMetadata: client_data["metadata"] || {},
+              clientIcon: client_data["icon"],
+              clientId: client_data["clientId"],
+              clientName: client_data["name"],
+              code: consent_code
+            )
+          end
+
           raise ctx.redirect(OAuthProtocol.redirect_uri_with_params(config[:consent_page], consent_code: consent_code, client_id: client_data["clientId"], scope: OAuthProtocol.scope_string(scopes)))
         end
 
@@ -177,11 +255,7 @@ module BetterAuth
     def oidc_token_endpoint(config)
       Endpoint.new(path: "/oauth2/token", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
         body = OAuthProtocol.stringify_keys(ctx.body)
-        client = if body["client_id"]
-          OAuthProtocol.find_client(ctx, "oauthApplication", body["client_id"])
-        else
-          OAuthProtocol.authenticate_client!(ctx, "oauthApplication")
-        end
+        client = OAuthProtocol.authenticate_client!(ctx, "oauthApplication", store_client_secret: config[:store_client_secret])
         raise APIError.new("UNAUTHORIZED", message: "invalid_client") unless client
 
         response = case body["grant_type"]
@@ -201,10 +275,12 @@ module BetterAuth
             session: code[:session],
             scopes: code[:scopes],
             include_refresh: code[:scopes].include?("offline_access"),
-            issuer: OAuthProtocol.issuer(ctx)
+            issuer: OAuthProtocol.issuer(ctx),
+            access_token_expires_in: config[:access_token_expires_in],
+            id_token_signer: oidc_id_token_signer(ctx, config)
           )
         when OAuthProtocol::REFRESH_GRANT
-          OAuthProtocol.refresh_tokens(ctx, config[:store], model: "oauthAccessToken", client: client, refresh_token: body["refresh_token"], scopes: body["scope"], issuer: OAuthProtocol.issuer(ctx))
+          OAuthProtocol.refresh_tokens(ctx, config[:store], model: "oauthAccessToken", client: client, refresh_token: body["refresh_token"], scopes: body["scope"], issuer: OAuthProtocol.issuer(ctx), access_token_expires_in: config[:access_token_expires_in], id_token_signer: oidc_id_token_signer(ctx, config))
         else
           raise APIError.new("BAD_REQUEST", message: "unsupported_grant_type")
         end
@@ -214,7 +290,7 @@ module BetterAuth
 
     def oidc_userinfo_endpoint(config)
       Endpoint.new(path: "/oauth2/userinfo", method: "GET") do |ctx|
-        ctx.json(OAuthProtocol.userinfo(config[:store], ctx.headers["authorization"]))
+        ctx.json(OAuthProtocol.userinfo(config[:store], ctx.headers["authorization"], additional_claim: config[:get_additional_user_info_claim]))
       end
     end
 
@@ -293,6 +369,77 @@ module BetterAuth
           }
         }
       }
+    end
+
+    def valid_code_challenge_method?(method, config)
+      normalized = method.to_s.downcase
+      return true if normalized == "s256"
+
+      normalized == "plain" && config[:allow_plain_code_challenge_method]
+    end
+
+    def oidc_requires_login?(session, prompts, query)
+      return true if prompts.include?("login")
+      return false unless query.key?("max_age")
+
+      max_age = Integer(query["max_age"])
+      return false if max_age.negative?
+
+      created_at = session.dig(:session, "createdAt") || session.dig(:session, :createdAt)
+      created_at = Time.parse(created_at.to_s) unless created_at.is_a?(Time)
+      (Time.now - created_at) > max_age
+    rescue ArgumentError, TypeError
+      false
+    end
+
+    def oidc_use_jwt_plugin?(ctx, config)
+      return false unless config[:use_jwt_plugin]
+
+      oidc_jwt_plugin(ctx)
+    end
+
+    def oidc_jwt_plugin(ctx)
+      ctx.context.options.plugins.find { |plugin| plugin[:id] == "jwt" }
+    end
+
+    def oidc_id_token_signer(ctx, config)
+      jwt_plugin = oidc_use_jwt_plugin?(ctx, config)
+      return nil unless jwt_plugin
+
+      lambda do |sign_ctx, payload|
+        BetterAuth::Plugins.sign_jwt_payload(
+          sign_ctx,
+          OAuthProtocol.stringify_keys(payload),
+          jwt_plugin[:options] || {}
+        )
+      end
+    end
+
+    def oidc_resume_login_prompt(ctx, config)
+      prompt = ctx.get_signed_cookie("oidc_login_prompt", ctx.context.secret)
+      return unless prompt
+      return unless ctx.response_headers["set-cookie"].to_s.include?(ctx.context.auth_cookies[:session_token].name)
+
+      ctx.set_cookie("oidc_login_prompt", "", path: "/", max_age: 0)
+      query = JSON.parse(prompt)
+      prompts = OIDCProvider.parse_prompt(query["prompt"])
+      if prompts.include?("login")
+        prompts.delete("login")
+        query["prompt"] = prompts.to_a.join(" ")
+      end
+      ctx.query = query
+      ctx.context.set_current_session(ctx.context.new_session) if ctx.context.respond_to?(:set_current_session) && ctx.context.new_session
+      oidc_authorize_endpoint(config).call(ctx)
+    rescue APIError => error
+      raise APIError.new(
+        error.status,
+        message: error.message,
+        headers: Endpoint::Result.merge_headers(ctx.response_headers, error.headers),
+        code: error.code,
+        body: error.body
+      )
+    rescue JSON::ParserError
+      nil
     end
   end
 end

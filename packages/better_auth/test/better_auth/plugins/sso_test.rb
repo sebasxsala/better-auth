@@ -113,20 +113,94 @@ class BetterAuthPluginsSSOTest < Minitest::Test
     assert_equal true, provider.fetch("domainVerified")
   end
 
+  def test_provider_access_is_limited_to_owner_or_org_admin
+    auth = build_auth(plugins: [BetterAuth::Plugins.organization, BetterAuth::Plugins.sso])
+    owner_cookie = sign_up_cookie(auth, "owner@example.com")
+    other_cookie = sign_up_cookie(auth, "other@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "SSO Org", slug: "sso-org"})
+
+    auth.api.register_sso_provider(
+      headers: {"cookie" => owner_cookie},
+      body: {
+        providerId: "owned",
+        issuer: "https://idp.owned.test",
+        domain: "owned.test",
+        oidcConfig: {clientId: "owned-client", authorizationEndpoint: "https://idp.owned.test/authorize"}
+      }
+    )
+    auth.api.register_sso_provider(
+      headers: {"cookie" => owner_cookie},
+      body: {
+        providerId: "org",
+        issuer: "https://idp.org.test",
+        domain: "org.test",
+        organizationId: organization.fetch("id"),
+        oidcConfig: {clientId: "org-client", authorizationEndpoint: "https://idp.org.test/authorize"}
+      }
+    )
+
+    owner_list = auth.api.list_sso_providers(headers: {"cookie" => owner_cookie}).fetch(:providers).map { |provider| provider.fetch("providerId") }
+    assert_equal ["org", "owned"], owner_list.sort
+    assert_empty auth.api.list_sso_providers(headers: {"cookie" => other_cookie}).fetch(:providers)
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.get_sso_provider(headers: {"cookie" => other_cookie}, params: {providerId: "owned"})
+    end
+    assert_equal 403, error.status_code
+  end
+
+  def test_provider_sanitization_masks_oidc_client_and_hides_saml_certificate
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+
+    oidc = auth.api.register_sso_provider(
+      headers: {"cookie" => cookie},
+      body: {
+        providerId: "oidc",
+        issuer: "https://idp.oidc.test",
+        domain: "oidc.test",
+        oidcConfig: {
+          clientId: "client-id-1234",
+          clientSecret: "client-secret",
+          authorizationEndpoint: "https://idp.oidc.test/authorize",
+          tokenEndpoint: "https://idp.oidc.test/token"
+        }
+      }
+    )
+    assert_equal "oidc", oidc.fetch("type")
+    assert_equal "****1234", oidc.fetch("oidcConfig").fetch("clientIdLastFour")
+    refute oidc.fetch("oidcConfig").key?("clientId")
+    refute oidc.fetch("oidcConfig").key?("clientSecret")
+
+    saml = auth.api.register_sso_provider(
+      headers: {"cookie" => cookie},
+      body: {
+        providerId: "saml",
+        issuer: "https://idp.saml.test",
+        domain: "saml.test",
+        samlConfig: {entryPoint: "https://idp.saml.test/sso", cert: "not-a-cert", audience: "better-auth-ruby"}
+      }
+    )
+    assert_equal "saml", saml.fetch("type")
+    refute saml.fetch("samlConfig").key?("cert")
+    assert_equal "Failed to parse certificate", saml.fetch("samlConfig").fetch("certificate").fetch(:error)
+  end
+
   private
 
-  def build_auth(plugin_options = {})
+  def build_auth(plugin_options = nil, plugins: nil, **kwargs)
+    plugin_options = (plugin_options || {}).merge(kwargs)
     BetterAuth.auth(
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
-      plugins: [BetterAuth::Plugins.sso(plugin_options)]
+      plugins: plugins || [BetterAuth::Plugins.sso(plugin_options)]
     )
   end
 
-  def sign_up_cookie(auth)
+  def sign_up_cookie(auth, email = "owner@example.com")
     _status, headers, _body = auth.api.sign_up_email(
-      body: {email: "owner@example.com", password: "password123", name: "Owner"},
+      body: {email: email, password: "password123", name: email.split("@").first},
       as_response: true
     )
     cookie_header(headers.fetch("set-cookie"))

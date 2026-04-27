@@ -3,6 +3,7 @@
 require "base64"
 require "json"
 require "net/http"
+require "openssl"
 require "securerandom"
 require "uri"
 
@@ -60,23 +61,69 @@ module BetterAuth
       }
     end
 
-    def sso_discover_oidc_config(issuer:, fetch: nil)
+    def sso_discover_oidc_config(issuer:, fetch: nil, existing_config: nil, discovery_endpoint: nil, trusted_origin: nil, timeout: nil)
+      existing = normalize_hash(existing_config || {})
+      discovery_url = discovery_endpoint || existing[:discovery_endpoint] || "#{issuer.to_s.sub(%r{/+\z}, "")}/.well-known/openid-configuration"
+      if trusted_origin && !trusted_origin.call(discovery_url)
+        raise APIError.new("BAD_REQUEST", message: "OIDC discovery endpoint is not trusted")
+      end
       document = if fetch
-        fetch.call("#{issuer.to_s.sub(%r{/+\z}, "")}/.well-known/openid-configuration")
+        fetch.call(discovery_url)
       else
-        uri = URI("#{issuer.to_s.sub(%r{/+\z}, "")}/.well-known/openid-configuration")
+        uri = URI(discovery_url)
         JSON.parse(Net::HTTP.get(uri))
       end
       document = normalize_hash(document)
-      valid = document[:issuer] == issuer &&
+      valid = document[:issuer].to_s.sub(%r{/+\z}, "") == issuer.to_s.sub(%r{/+\z}, "") &&
         !document[:authorization_endpoint].to_s.empty? &&
-        !document[:token_endpoint].to_s.empty?
+        !document[:token_endpoint].to_s.empty? &&
+        !document[:jwks_uri].to_s.empty?
       raise APIError.new("BAD_REQUEST", message: "Invalid OIDC discovery document") unless valid
 
-      document
+      authorization_endpoint = sso_normalize_discovery_url(document[:authorization_endpoint], issuer, trusted_origin)
+      token_endpoint = sso_normalize_discovery_url(document[:token_endpoint], issuer, trusted_origin)
+      jwks_endpoint = sso_normalize_discovery_url(document[:jwks_uri], issuer, trusted_origin)
+      user_info_endpoint = document[:userinfo_endpoint] && sso_normalize_discovery_url(document[:userinfo_endpoint], issuer, trusted_origin)
+      auth_methods = Array(document[:token_endpoint_auth_methods_supported])
+      token_endpoint_authentication = if existing[:token_endpoint_authentication]
+        existing[:token_endpoint_authentication]
+      elsif auth_methods.include?("client_secret_post") && !auth_methods.include?("client_secret_basic")
+        "client_secret_post"
+      else
+        "client_secret_basic"
+      end
+
+      {
+        issuer: existing[:issuer] || document[:issuer],
+        discovery_endpoint: existing[:discovery_endpoint] || discovery_url,
+        client_id: existing[:client_id],
+        authorization_endpoint: existing[:authorization_endpoint] || authorization_endpoint,
+        token_endpoint: existing[:token_endpoint] || token_endpoint,
+        jwks_endpoint: existing[:jwks_endpoint] || jwks_endpoint,
+        user_info_endpoint: existing[:user_info_endpoint] || user_info_endpoint,
+        token_endpoint_authentication: token_endpoint_authentication,
+        scopes_supported: existing[:scopes_supported] || document[:scopes_supported]
+      }.compact
     rescue APIError
       raise
     rescue
+      raise APIError.new("BAD_REQUEST", message: "Invalid OIDC discovery document")
+    end
+
+    def sso_normalize_discovery_url(value, issuer, trusted_origin)
+      uri = URI(value.to_s)
+      normalized = if uri.absolute?
+        uri.to_s
+      else
+        issuer_uri = URI(issuer.to_s)
+        URI.join("#{issuer_uri.scheme}://#{issuer_uri.host}", value.to_s).to_s
+      end
+      if trusted_origin && !trusted_origin.call(normalized)
+        raise APIError.new("BAD_REQUEST", message: "OIDC discovery endpoint is not trusted")
+      end
+
+      normalized
+    rescue URI::InvalidURIError
       raise APIError.new("BAD_REQUEST", message: "Invalid OIDC discovery document")
     end
 
@@ -111,7 +158,7 @@ module BetterAuth
       Endpoint.new(path: "/sso/providers", method: "GET") do |ctx|
         session = Routes.current_session(ctx)
         providers = ctx.context.adapter.find_many(model: "ssoProvider")
-          .select { |provider| sso_provider_access?(provider, session.fetch(:user).fetch("id")) }
+          .select { |provider| sso_provider_access?(provider, session.fetch(:user).fetch("id"), ctx) }
           .map { |provider| sso_sanitize_provider(provider, ctx.context) }
         ctx.json({providers: providers})
       end
@@ -121,7 +168,7 @@ module BetterAuth
       Endpoint.new(path: "/sso/providers/:providerId", method: "GET") do |ctx|
         session = Routes.current_session(ctx)
         provider = sso_find_provider!(ctx, sso_fetch(ctx.params, :provider_id))
-        raise APIError.new("FORBIDDEN", message: "Access denied") unless sso_provider_access?(provider, session.fetch(:user).fetch("id"))
+        raise APIError.new("FORBIDDEN", message: "Access denied") unless sso_provider_access?(provider, session.fetch(:user).fetch("id"), ctx)
 
         ctx.json(sso_sanitize_provider(provider, ctx.context))
       end
@@ -131,7 +178,7 @@ module BetterAuth
       Endpoint.new(path: "/sso/providers/:providerId", method: "PATCH") do |ctx|
         session = Routes.current_session(ctx)
         provider = sso_find_provider!(ctx, sso_fetch(ctx.params, :provider_id))
-        raise APIError.new("FORBIDDEN", message: "Access denied") unless sso_provider_access?(provider, session.fetch(:user).fetch("id"))
+        raise APIError.new("FORBIDDEN", message: "Access denied") unless sso_provider_access?(provider, session.fetch(:user).fetch("id"), ctx)
 
         body = normalize_hash(ctx.body)
         update = {}
@@ -149,7 +196,7 @@ module BetterAuth
       Endpoint.new(path: "/sso/providers/:providerId", method: "DELETE") do |ctx|
         session = Routes.current_session(ctx)
         provider = sso_find_provider!(ctx, sso_fetch(ctx.params, :provider_id))
-        raise APIError.new("FORBIDDEN", message: "Access denied") unless sso_provider_access?(provider, session.fetch(:user).fetch("id"))
+        raise APIError.new("FORBIDDEN", message: "Access denied") unless sso_provider_access?(provider, session.fetch(:user).fetch("id"), ctx)
 
         ctx.context.adapter.delete(model: "ssoProvider", where: [{field: "id", value: provider.fetch("id")}])
         ctx.json({success: true})
@@ -319,6 +366,48 @@ module BetterAuth
       raise APIError.new("BAD_REQUEST", message: "Invalid SAML response")
     end
 
+    def sso_validate_single_saml_assertion!(saml_response)
+      xml = Base64.decode64(saml_response.to_s)
+      raise APIError.new("BAD_REQUEST", message: "Invalid base64-encoded SAML response") unless xml.include?("<")
+
+      assertions = xml.scan(/<(?:\w+:)?Assertion(?:\s|>|\/)/).length
+      encrypted_assertions = xml.scan(/<(?:\w+:)?EncryptedAssertion(?:\s|>|\/)/).length
+      total = assertions + encrypted_assertions
+      raise APIError.new("BAD_REQUEST", message: "SAML response contains no assertions") if total.zero?
+      if total > 1
+        raise APIError.new("BAD_REQUEST", message: "SAML response contains #{total} assertions, expected exactly 1")
+      end
+
+      true
+    rescue APIError
+      raise
+    rescue
+      raise APIError.new("BAD_REQUEST", message: "Invalid base64-encoded SAML response")
+    end
+
+    def sso_validate_saml_algorithms!(xml, options = {})
+      on_deprecated = (options[:on_deprecated] || "warn").to_s
+      signature_algorithms = xml.to_s.scan(/SignatureMethod[^>]+Algorithm=["']([^"']+)["']/).flatten
+      signature_algorithms.each do |algorithm|
+        if algorithm == "http://www.w3.org/2000/09/xmldsig#rsa-sha1"
+          raise APIError.new("BAD_REQUEST", message: "SAML response uses deprecated signature algorithm: #{algorithm}") if on_deprecated == "reject"
+          next
+        end
+        next if %w[
+          http://www.w3.org/2001/04/xmldsig-more#rsa-sha256
+          http://www.w3.org/2001/04/xmldsig-more#rsa-sha384
+          http://www.w3.org/2001/04/xmldsig-more#rsa-sha512
+          http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256
+          http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384
+          http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512
+        ].include?(algorithm)
+
+        raise APIError.new("BAD_REQUEST", message: "SAML signature algorithm not recognized: #{algorithm}")
+      end
+
+      true
+    end
+
     def sso_verify_state(value, secret)
       BetterAuth::Crypto.verify_jwt(value.to_s, secret)
     rescue
@@ -375,22 +464,76 @@ module BetterAuth
       provider
     end
 
-    def sso_provider_access?(provider, user_id)
-      provider["userId"] == user_id || provider["organizationId"].nil?
+    def sso_provider_access?(provider, user_id, ctx)
+      organization_id = provider["organizationId"]
+      return provider["userId"] == user_id if organization_id.to_s.empty?
+      return false unless ctx.context.options.plugins.any? { |plugin| plugin.id == "organization" }
+
+      member = ctx.context.adapter.find_one(
+        model: "member",
+        where: [{field: "userId", value: user_id}, {field: "organizationId", value: organization_id}]
+      )
+      Array(member&.fetch("role", nil).to_s.split(",")).map(&:strip).any? { |role| %w[owner admin].include?(role) }
     end
 
     def sso_sanitize_provider(provider, context)
       data = provider.dup
-      data["oidcConfig"] = sso_sanitize_config(data["oidcConfig"])
-      data["samlConfig"] = sso_sanitize_config(data["samlConfig"])
+      oidc_config = normalize_hash(data["oidcConfig"] || {})
+      saml_config = normalize_hash(data["samlConfig"] || {})
+      data["type"] = saml_config.empty? ? "oidc" : "saml"
+      data["organizationId"] ||= nil
+      data["domainVerified"] = !!data["domainVerified"]
+      data["oidcConfig"] = oidc_config.empty? ? nil : sso_sanitize_oidc_config(oidc_config)
+      data["samlConfig"] = saml_config.empty? ? nil : sso_sanitize_saml_config(saml_config)
       data["spMetadataUrl"] = "#{context.base_url}/sso/saml2/sp/metadata?providerId=#{URI.encode_www_form_component(data.fetch("providerId"))}"
-      data
+      data.compact
     end
 
     def sso_sanitize_config(config)
       data = normalize_hash(config || {})
       data.delete(:client_secret)
       data.each_with_object({}) { |(key, value), result| result[Schema.storage_key(key)] = value unless value.respond_to?(:call) }
+    end
+
+    def sso_sanitize_oidc_config(config)
+      {
+        "clientIdLastFour" => sso_mask_client_id(config[:client_id]),
+        "authorizationEndpoint" => config[:authorization_endpoint],
+        "tokenEndpoint" => config[:token_endpoint],
+        "userInfoEndpoint" => config[:user_info_endpoint],
+        "jwksEndpoint" => config[:jwks_endpoint],
+        "scopes" => config[:scopes],
+        "tokenEndpointAuthentication" => config[:token_endpoint_authentication],
+        "pkce" => config[:pkce],
+        "discoveryEndpoint" => config[:discovery_endpoint]
+      }.compact
+    end
+
+    def sso_sanitize_saml_config(config)
+      {
+        "entryPoint" => config[:entry_point],
+        "callbackUrl" => config[:callback_url],
+        "audience" => config[:audience],
+        "wantAssertionsSigned" => config[:want_assertions_signed],
+        "identifierFormat" => config[:identifier_format],
+        "signatureAlgorithm" => config[:signature_algorithm],
+        "digestAlgorithm" => config[:digest_algorithm],
+        "certificate" => sso_parse_certificate(config[:cert])
+      }.compact
+    end
+
+    def sso_mask_client_id(client_id)
+      value = client_id.to_s
+      return "****" if value.length <= 4
+
+      "****#{value[-4, 4]}"
+    end
+
+    def sso_parse_certificate(cert)
+      OpenSSL::X509::Certificate.new(cert.to_s)
+      {subject: cert.to_s.lines.first.to_s.strip}
+    rescue
+      {error: "Failed to parse certificate"}
     end
 
     def sso_fetch(data, key)

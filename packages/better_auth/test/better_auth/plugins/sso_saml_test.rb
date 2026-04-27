@@ -128,6 +128,45 @@ class BetterAuthPluginsSSOSAMLTest < Minitest::Test
     assert_equal [["saml", "http://localhost:3000/api/auth"]], calls
   end
 
+  def test_saml_xml_response_rejects_missing_and_multiple_assertions
+    no_assertion = Base64.strict_encode64("<Response></Response>")
+    error = assert_raises(BetterAuth::APIError) { BetterAuth::Plugins.sso_validate_single_saml_assertion!(no_assertion) }
+    assert_equal 400, error.status_code
+    assert_equal "SAML response contains no assertions", error.message
+
+    multiple = Base64.strict_encode64("<Response><Assertion ID=\"one\"/><EncryptedAssertion ID=\"two\"/></Response>")
+    multiple_error = assert_raises(BetterAuth::APIError) { BetterAuth::Plugins.sso_validate_single_saml_assertion!(multiple) }
+    assert_equal 400, multiple_error.status_code
+    assert_match(/expected exactly 1/, multiple_error.message)
+
+    valid = Base64.strict_encode64("<Response><Assertion ID=\"one\"><Subject /></Assertion></Response>")
+    assert_equal true, BetterAuth::Plugins.sso_validate_single_saml_assertion!(valid)
+  end
+
+  def test_saml_algorithm_validation_rejects_unknown_and_deprecated_when_configured
+    deprecated = <<~XML
+      <Response>
+        <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1" />
+      </Response>
+    XML
+    error = assert_raises(BetterAuth::APIError) do
+      BetterAuth::Plugins.sso_validate_saml_algorithms!(deprecated, on_deprecated: "reject")
+    end
+    assert_equal 400, error.status_code
+    assert_match(/deprecated signature algorithm/, error.message)
+
+    unknown = <<~XML
+      <Response>
+        <SignatureMethod Algorithm="urn:example:unknown" />
+      </Response>
+    XML
+    unknown_error = assert_raises(BetterAuth::APIError) { BetterAuth::Plugins.sso_validate_saml_algorithms!(unknown) }
+    assert_equal 400, unknown_error.status_code
+    assert_match(/not recognized/, unknown_error.message)
+
+    assert_equal true, BetterAuth::Plugins.sso_validate_saml_algorithms!("<Response />")
+  end
+
   def test_sso_assigns_new_domain_user_to_verified_provider_organization
     auth = build_auth(plugins: [BetterAuth::Plugins.organization, BetterAuth::Plugins.sso])
     owner_cookie = sign_up_cookie(auth, email: "owner@example.com")

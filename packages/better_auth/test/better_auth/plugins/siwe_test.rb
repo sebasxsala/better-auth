@@ -13,7 +13,7 @@ class BetterAuthPluginsSiweTest < Minitest::Test
     result = auth.api.get_siwe_nonce(body: {walletAddress: WALLET, chainId: 137})
 
     assert_equal "nonce-1", result[:nonce]
-    stored = auth.context.internal_adapter.find_verification_value("siwe:#{WALLET.downcase}:137")
+    stored = auth.context.internal_adapter.find_verification_value("siwe:#{WALLET}:137")
     refute_nil stored
     assert_equal "nonce-1", stored["value"]
   end
@@ -31,16 +31,16 @@ class BetterAuthPluginsSiweTest < Minitest::Test
     assert_equal 200, status
     assert_includes headers.fetch("set-cookie"), "better-auth.session_token="
     assert_equal true, data.fetch("success")
-    assert_equal WALLET.downcase, data.dig("user", "walletAddress")
+    assert_equal WALLET, data.dig("user", "walletAddress")
     assert_equal 1, data.dig("user", "chainId")
 
-    wallet = auth.context.adapter.find_one(model: "walletAddress", where: [{field: "address", value: WALLET.downcase}])
+    wallet = auth.context.adapter.find_one(model: "walletAddress", where: [{field: "address", value: WALLET}])
     refute_nil wallet
     assert_equal true, wallet["isPrimary"]
     user = auth.context.internal_adapter.find_user_by_id(wallet["userId"])
     assert_equal "vitalik.eth", user["name"]
     assert_equal "https://example.com/v.png", user["image"]
-    assert auth.context.internal_adapter.find_account_by_provider_id("#{WALLET.downcase}:1", "siwe")
+    assert auth.context.internal_adapter.find_account_by_provider_id("#{WALLET}:1", "siwe")
 
     error = assert_raises(BetterAuth::APIError) do
       auth.api.verify_siwe_message(body: {message: "valid-message", signature: "valid-signature", walletAddress: WALLET, chainId: 1})
@@ -88,7 +88,7 @@ class BetterAuthPluginsSiweTest < Minitest::Test
     auth.api.get_siwe_nonce(body: {walletAddress: WALLET})
     result = auth.api.verify_siwe_message(body: {message: "valid-message", signature: "valid-signature", walletAddress: WALLET, email: "wallet@example.com"})
     assert_equal true, result[:success]
-    wallet = auth.context.adapter.find_one(model: "walletAddress", where: [{field: "address", value: WALLET.downcase}])
+    wallet = auth.context.adapter.find_one(model: "walletAddress", where: [{field: "address", value: WALLET}])
     user = auth.context.internal_adapter.find_user_by_id(wallet["userId"])
     assert_equal "wallet@example.com", user["email"]
   end
@@ -102,10 +102,62 @@ class BetterAuthPluginsSiweTest < Minitest::Test
     second = auth.api.verify_siwe_message(body: {message: "valid-message", signature: "valid-signature", walletAddress: WALLET, chainId: 137})
 
     assert_equal first[:user][:id], second[:user][:id]
-    wallets = auth.context.adapter.find_many(model: "walletAddress", where: [{field: "address", value: WALLET.downcase}])
+    wallets = auth.context.adapter.find_many(model: "walletAddress", where: [{field: "address", value: WALLET}])
     assert_equal 2, wallets.length
     assert_equal [1, 137], wallets.map { |wallet| wallet["chainId"] }.sort
     refute wallets.find { |wallet| wallet["chainId"] == 137 }["isPrimary"]
+  end
+
+  def test_wallet_addresses_are_stored_and_returned_in_checksum_format
+    auth = build_auth
+    lowercase_wallet = WALLET.downcase
+
+    auth.api.get_siwe_nonce(body: {walletAddress: lowercase_wallet, chainId: 1})
+    result = auth.api.verify_siwe_message(body: {message: "valid-message", signature: "valid-signature", walletAddress: lowercase_wallet, chainId: 1})
+
+    assert_equal WALLET, result.dig(:user, :walletAddress)
+    wallet = auth.context.adapter.find_one(model: "walletAddress", where: [{field: "address", value: WALLET}])
+    refute_nil wallet
+    assert_equal WALLET, wallet["address"]
+  end
+
+  def test_wallet_lookup_is_case_insensitive_without_duplicate_records
+    auth = build_auth
+
+    auth.api.get_siwe_nonce(body: {walletAddress: WALLET.downcase, chainId: 1})
+    first = auth.api.verify_siwe_message(body: {message: "valid-message", signature: "valid-signature", walletAddress: WALLET.downcase, chainId: 1})
+    auth.api.get_siwe_nonce(body: {walletAddress: WALLET.upcase, chainId: 1})
+    second = auth.api.verify_siwe_message(body: {message: "valid-message", signature: "valid-signature", walletAddress: WALLET.upcase, chainId: 1})
+
+    assert_equal first.dig(:user, :id), second.dig(:user, :id)
+    wallets = auth.context.adapter.find_many(model: "walletAddress", where: [{field: "address", value: WALLET}])
+    assert_equal 1, wallets.length
+    assert_equal true, wallets.first["isPrimary"]
+  end
+
+  def test_custom_schema_merges_model_and_field_names_without_losing_base_metadata
+    auth = build_auth(
+      schema: {
+        walletAddress: {
+          modelName: "wallet_address",
+          fields: {
+            userId: "user_id",
+            address: "wallet_address",
+            chainId: "chain_id",
+            isPrimary: "is_primary",
+            createdAt: "created_at"
+          }
+        }
+      }
+    )
+
+    table = BetterAuth::Schema.auth_tables(auth.context.options).fetch("walletAddress")
+    assert_equal "wallet_address", table[:model_name]
+    assert_equal "string", table.dig(:fields, "userId", :type)
+    assert_equal true, table.dig(:fields, "userId", :required)
+    assert_equal "user_id", table.dig(:fields, "userId", :field_name)
+    assert_equal "wallet_address", table.dig(:fields, "address", :field_name)
+    assert_equal "chain_id", table.dig(:fields, "chainId", :field_name)
   end
 
   private
@@ -115,7 +167,7 @@ class BetterAuthPluginsSiweTest < Minitest::Test
     verify_message = options.delete(:verify_message) || lambda do |message:, signature:, address:, chain_id:, cacao:|
       signature == "valid-signature" &&
         message == "valid-message" &&
-        address == WALLET.downcase &&
+        address == WALLET &&
         chain_id.to_i.positive? &&
         cacao[:p][:nonce].start_with?("nonce-")
     end

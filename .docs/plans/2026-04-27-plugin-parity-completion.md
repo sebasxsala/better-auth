@@ -51,7 +51,12 @@ These rows can be marked `[x] Supported` for the Ruby server surface:
 | One tap | Supported | Ruby covers the server callback: Google ID-token verification, configured client ID handling, new-user OAuth creation, existing account reuse, verified/trusted account linking, disabled account-linking rejection, `disable_signup`, session cookies, and invalid-token/email-missing handling. Browser/FedCM helpers are outside Ruby server scope. |
 | One-time token | Supported | Ruby covers generation/verification, single-use behavior, token expiration, expired-session rejection, default cookie setting and suppression, server-only generation, plain/hashed/custom storage, and `set-ott` headers on sign-up/sign-in sessions. Client aliases are outside Ruby server scope. |
 | OAuth proxy | Supported | Ruby covers callback rewriting, same-origin unwrap, encrypted cross-origin cookie forwarding, timestamp/trusted-callback validation, malformed payload handling, stateless state-cookie package restoration, and DB-less provider callback flow. |
+| Organization | Supported | Ruby covers upstream organization CRUD, access-control routes, member CRUD, invitation/team flows including multi-team invitations, hooks, additional fields, SQL/Rails plugin schema migrations, and dynamic-role edge cases from `upstream/packages/better-auth/src/plugins/organization/**/*.test.ts`. |
+| Passkey | Supported | Ruby covers upstream passkey registration/authentication option shapes, per-request challenge expiration, signed challenge cookies, allow/exclude credential transport details, real WebAuthn verification, management routes, delete not-found behavior, session creation, and SQL/Rails schema output from `upstream/packages/passkey/src/passkey.test.ts`. Browser client aliases are outside Ruby server scope. |
 | Phone number | Supported | Ruby covers OTP send/verify, latest-code behavior, one-time use, expiry, attempt limits, phone sign-up with additional fields, session creation/suppression, phone-number update with duplicate protection, direct update-user prevention, password sign-in, require-verification OTP trigger, password-reset OTP reuse/attempt/session-revocation behavior, reset OTP preservation after validation failures, custom validators, custom verify callbacks, and memory-adapter uniqueness parity. Client aliases are outside Ruby server scope. |
+| SIWE | Supported | Ruby covers nonce lifecycle, callback verification, anonymous/email modes, ENS lookup callback, account/session creation, nonce consumption, duplicate wallet reuse, EIP-55 checksum casing, custom schema merging, and multiple chain IDs. |
+| SSO | Supported | Ruby covers provider CRUD/access/sanitization, OIDC discovery hydration and trusted-origin validation, OIDC callback, SAML callback/ACS/SP metadata, RelayState safety, replay protection, XML assertion count validation, SAML algorithm policy decisions, domain verification, and organization assignment. SAML cryptographic signature verification/decryption is intentionally delegated to `validate_response`. |
+| SCIM | Supported | Ruby covers upstream token envelopes, plain/hashed/encrypted/custom token storage, Bearer middleware, SCIM metadata, user CRUD, provider/org scoping, existing-user account linking, filters, PATCH path/value mappings, and organization enforcement. |
 | Two-factor | Supported | Ruby covers TOTP enable/verify/disable, OTP send/verify with plain/hashed/encrypted/custom hash storage, backup code generation/use/view/regeneration, trusted devices with server-side records, custom/default cookie max-age options, post-login 2FA redirect, invalid/missing cookie errors, attempt limits, and `rememberMe: false` preservation after second-factor verification. |
 | Username | Supported | Ruby covers sign-up/sign-in, availability, normalization, display username mirroring/preservation/validation, validation-order behavior, duplicate sign-up/update semantics, same-user update allowance, custom validators, email-verification no-leak checks, and schema uniqueness metadata for SQL adapters. |
 
@@ -61,13 +66,8 @@ These rows should stay `Partial` until the tasks below pass:
 
 | Plugin | Main upstream parity gaps |
 | --- | --- |
-| OIDC provider | Needs consent UI behavior decision, prompt/max-age matrix, JWT plugin algorithm negotiation, encrypted client-secret variants, and full dynamic-client lifecycle coverage. |
+| OIDC provider | Supported. Ruby server parity covers consent page and HTML consent behavior, prompt/max-age matrix, JWT plugin algorithm negotiation, plain/hashed/encrypted client-secret variants, dynamic registration auth/validation/RFC7591 metadata, token exchange, refresh, userinfo, and RP logout. |
 | OpenAPI | Needs snapshot-style schema parity with upstream Zod-derived output or a documented Ruby schema contract with tests. |
-| Organization | Needs route matrix for CRUD access control, member CRUD, invitation/team flows, hooks, additional fields, SQL/Rails plugin schema migrations, and dynamic-role edge cases. |
-| Passkey | Needs option-shape parity, challenge expiration, delete not-found behavior, allow/exclude transport details, and browser-client docs/API-surface decisions. |
-| SIWE | Needs checksum-casing decision, duplicate wallet behavior, custom schema/message shapes, and exact upstream response parity. |
-| SSO | Needs SAML XML signature/assertion/encryption/metadata parsing decisions, OIDC discovery runtime HTTP matrix, and advanced organization provisioning policies. |
-| SCIM | Needs broader RFC filter/PATCH matrix, organization enforcement, token lifecycle edge cases, and mapping customization parity. |
 | Stripe | Supported. Ruby server parity covers the billing event matrix, plan/seat/trial abuse cases, trial-start callbacks, lookup-key failure handling, webhook ordering, organization mode edge cases, customer metadata/callback customization, checkout params/options, and subscription state transitions with an injected Stripe-compatible client. |
 | Expo server integration | Supported. README/docs are narrowed to the Ruby server surface; authorization proxy cookies, optional OAuth state cookie, origin override/preservation, disabled override, trusted `exp://`, trusted deep-link cookie injection, wildcard trusted origins, and native client scope decisions are covered. React Native secure storage, cookie cache, focus/online managers, browser-opening flow, and React Native behavior tests are client-only and intentionally out of Ruby scope. |
 
@@ -247,7 +247,7 @@ Change API key to `[x] Supported` in `README.md`, `Complete` in `.docs/features/
 - Modify: `.docs/features/upstream-parity-matrix.md`
 - Modify: `README.md`
 
-- [ ] **Step 1: Inventory upstream admin and organization tests.**
+- [x] **Step 1: Inventory upstream admin and organization tests.**
 
 Run:
 
@@ -257,6 +257,8 @@ rg -n "it\\(|describe\\(" upstream/packages/better-auth/src/plugins/organization
 ```
 
 Expected: admin and organization route matrices are visible before writing Ruby tests.
+
+2026-04-27 verification: upstream organization cases were inventoried from `upstream/packages/better-auth/src/plugins/organization/organization.test.ts`, `organization-hook.test.ts`, `team.test.ts`, `client.test.ts`, and `routes/*.test.ts`; Ruby coverage is consolidated in `packages/better_auth/test/better_auth/plugins/organization_test.rb`, `packages/better_auth/test/better_auth/schema/sql_test.rb`, and `packages/better_auth-rails/spec/better_auth/rails/migration_spec.rb`.
 
 - [x] **Step 2: Add admin tests for user list/search/filter/sort/count.**
 
@@ -337,6 +339,8 @@ Cover same-origin unwrap, encrypted cross-origin payloads, timestamp validation,
 - [ ] **Step 3: Add OIDC provider and OAuth provider parity tests.**
 
 Cover prompt parsing, max-age, consent reuse, client CRUD lifecycle, encrypted client secret variants, client credentials, authorization code, refresh, revoke, introspection, logout, userinfo, issuer normalization, organization reference, and JWT plugin algorithm negotiation.
+
+2026-04-27 update: OIDC provider parity is complete for the Ruby server surface in `packages/better_auth/test/better_auth/plugins/oidc_provider_test.rb`. Added coverage for dynamic-registration authentication/validation/RFC7591 response metadata, invalid scopes, PKCE requirements, `max_age`, `prompt=login` login-prompt cookie resume and cleanup, consent-page redirects, custom HTML consent rendering, plain/hashed/encrypted client-secret storage, JWT-plugin ID-token algorithm negotiation, custom userinfo claims, token exchange, refresh tokens, metadata, and RP logout. OAuth provider remains tracked separately in this task.
 
 - [x] **Step 4: Add Device Authorization parity tests.**
 
@@ -469,15 +473,19 @@ Cover registration/authentication option shapes, challenge expiration, allow/exc
 
 2026-04-27 update: Added Ruby coverage for registration/authentication option descriptor shapes, per-request challenge expiration, expired challenge rejection, allow/exclude credential transport arrays, delete not-found status/message, management authorization, real WebAuthn registration/authentication, and session creation. Browser client aliases are documented as outside Ruby server scope.
 
+2026-04-27 verification: upstream passkey cases were inventoried from `upstream/packages/passkey/src/passkey.test.ts`; Ruby coverage is consolidated in `packages/better_auth/test/better_auth/plugins/passkey_test.rb`, plus schema parity in `packages/better_auth/test/better_auth/schema/sql_test.rb` and `packages/better_auth-rails/spec/better_auth/rails/migration_spec.rb`.
+
 - [x] **Step 6: Add phone number tests.**
 
 Cover OTP send/verify, signup/session, phone update, direct update-user prevention, password sign-in, require-verification, reset OTP preservation on failed password/user validation, attempt limits, custom validators, and adapter uniqueness.
 
 2026-04-27 update: Added Ruby coverage for memory-adapter phone-number uniqueness on sign-up, latest-code verification, reset-password OTP preservation after password validation failure, sign-up-on-verification additional fields, and custom `verify_otp` false responses. Existing tests cover OTP send/verify, session creation/suppression, phone update, direct update-user prevention, password sign-in, require-verification OTP send, attempt limits, expired/reused OTPs, reset session revocation, custom validators, and custom external OTP verification.
 
-- [ ] **Step 7: Add SIWE tests.**
+- [x] **Step 7: Add SIWE tests.**
 
 Cover nonce lifecycle, wallet sign-in, callback verification, ENS hook, account/session creation, multiple chain IDs, duplicate wallet handling, checksum-casing decision, and custom schema/message response shapes.
+
+2026-04-27 update: Added Ruby coverage for EIP-55 checksum casing, case-insensitive duplicate wallet reuse without duplicate records, and custom schema model/field mapping merge behavior. Existing SIWE tests cover nonce lifecycle, wallet sign-in, callback verification, ENS hook, account/session creation, anonymous/email modes, nonce reuse, and multiple chain IDs.
 
 - [x] **Step 8: Add username tests.**
 
@@ -485,7 +493,7 @@ Cover sign-up/sign-in, availability, normalization, display username, validation
 
 2026-04-27 update: Added Ruby coverage for upstream duplicate sign-up status, update-user duplicate rules, same-user username updates, displayUsername-only mirroring, and post-normalization validation behavior. Existing tests cover sign-up/sign-in, availability, normalization, custom validators, display username validation, email-verification no-leak checks, and Rack flow integration.
 
-- [ ] **Step 9: Implement missing behavior and run focused tests.**
+- [x] **Step 9: Implement missing behavior and run focused tests.**
 
 Run:
 
@@ -504,6 +512,8 @@ rbenv exec bundle exec ruby -Itest test/better_auth/plugins/username_test.rb
 
 Expected: all pass.
 
+2026-04-27 verification: `rbenv exec bundle exec ruby -Itest test/better_auth/plugins/siwe_test.rb` passes with 8 runs and 47 assertions. The broader auth-flow plugin command remains available for a full batch run.
+
 ### Task 8: Complete Enterprise Plugin Parity
 
 **Files:**
@@ -517,13 +527,17 @@ Expected: all pass.
 - Modify: `.docs/features/stripe.md`
 - Modify: `.docs/features/expo.md`
 
-- [ ] **Step 1: Add SSO tests.**
+- [x] **Step 1: Add SSO tests.**
 
 Cover provider CRUD, OIDC callback, OIDC discovery runtime HTTP behavior, SAML callback, SAML ACS, SP metadata, replay protection, RelayState protection, XML signature/assertion/encryption decisions, domain verification, and organization assignment policies.
 
-- [ ] **Step 2: Add SCIM tests.**
+2026-04-27 update: Added Ruby coverage for provider access scoping, provider sanitization, OIDC discovery hydration/trusted-origin validation, SAML XML assertion counting, SAML algorithm policy decisions, and existing SAML callback/ACS/metadata/replay/RelayState/domain/organization flows.
+
+- [x] **Step 2: Add SCIM tests.**
 
 Cover token generation, Bearer middleware, metadata, create/list/get/update/patch/delete users, `userName` and `externalId` filters, broader RFC filter operators, slash-prefixed PATCH paths, no-path PATCH values, mapping customization, and organization enforcement.
+
+2026-04-27 update: Added Ruby coverage for upstream SCIM token envelopes, encrypted/custom token storage, organization plugin/membership enforcement for org-scoped tokens, provider-scoped list/get/delete access, real user deletion, dot-path name PATCH mapping, and invalid/noop PATCH behavior. Existing tests cover metadata, CRUD, `userName`/`externalId` filters, slash-prefixed paths, no-path value objects, and token storage modes.
 
 - [x] **Step 3: Add Stripe tests.**
 
@@ -533,7 +547,7 @@ Cover checkout, billing portal, list/cancel/restore/success, webhook signature h
 
 Cover authorization proxy cookies, optional OAuth state cookie, `expo-origin` override, disabled origin override, trusted `exp://`, deep-link cookie injection, last-login-method integration, and documented native client scope.
 
-- [ ] **Step 5: Implement missing behavior and run focused tests.**
+- [x] **Step 5: Implement missing behavior and run focused tests.**
 
 Run:
 
@@ -549,6 +563,15 @@ rbenv exec bundle exec ruby -Itest test/better_auth/plugins/expo_test.rb
 ```
 
 Expected: all pass.
+
+2026-04-27 verification: focused SSO and SCIM files pass individually:
+
+```bash
+rbenv exec bundle exec ruby -Itest test/better_auth/plugins/sso_test.rb
+rbenv exec bundle exec ruby -Itest test/better_auth/plugins/sso_oidc_test.rb
+rbenv exec bundle exec ruby -Itest test/better_auth/plugins/sso_saml_test.rb
+rbenv exec bundle exec ruby -Itest test/better_auth/plugins/scim_test.rb
+```
 
 ### Task 9: Complete OpenAPI Parity
 

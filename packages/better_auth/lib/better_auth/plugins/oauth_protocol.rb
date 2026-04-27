@@ -71,7 +71,7 @@ module BetterAuth
         value.to_s.split(",").map(&:strip).reject(&:empty?)
       end
 
-      def create_client(ctx, model:, body:, owner_session: nil, default_auth_method: "client_secret_basic")
+      def create_client(ctx, model:, body:, owner_session: nil, default_auth_method: "client_secret_basic", store_client_secret: "plain")
         body = stringify_keys(body || {})
         auth_method = body["token_endpoint_auth_method"] || default_auth_method
         public_client = auth_method == "none"
@@ -83,7 +83,7 @@ module BetterAuth
         scopes = parse_scopes(body["scope"] || body["scopes"])
         data = {
           "clientId" => client_id,
-          "clientSecret" => client_secret,
+          "clientSecret" => client_secret ? store_client_secret_value(ctx, client_secret, store_client_secret) : nil,
           "type" => public_client ? "public" : "web",
           "name" => body["client_name"] || body["name"] || "OAuth Client",
           "icon" => body["logo_uri"],
@@ -101,7 +101,11 @@ module BetterAuth
         }
         data["userId"] = owner_session[:user]["id"] if owner_session
         created = ctx.context.adapter.create(model: model, data: data)
-        client_response(created)
+        client_response(created).merge(
+          client_secret: client_secret,
+          client_id_issued_at: Time.now.to_i,
+          client_secret_expires_at: 0
+        ).compact
       end
 
       def client_response(client, include_secret: true)
@@ -128,7 +132,7 @@ module BetterAuth
         ctx.context.adapter.find_one(model: model, where: [{field: "clientId", value: client_id.to_s}])
       end
 
-      def authenticate_client!(ctx, model)
+      def authenticate_client!(ctx, model, store_client_secret: "plain")
         body = stringify_keys(ctx.body || {})
         client_id = body["client_id"]
         client_secret = body["client_secret"]
@@ -143,7 +147,7 @@ module BetterAuth
         raise APIError.new("UNAUTHORIZED", message: "invalid_client") unless client
 
         method = stringify_keys(client)["tokenEndpointAuthMethod"] || "client_secret_basic"
-        if method != "none" && stringify_keys(client)["clientSecret"].to_s != client_secret.to_s
+        if method != "none" && !verify_client_secret(ctx, stringify_keys(client)["clientSecret"], client_secret, store_client_secret)
           raise APIError.new("UNAUTHORIZED", message: "invalid_client")
         end
 
@@ -186,7 +190,7 @@ module BetterAuth
         raise APIError.new("BAD_REQUEST", message: "invalid_grant") unless challenge == code_data[:code_challenge]
       end
 
-      def issue_tokens(ctx, store, model:, client:, session:, scopes:, include_refresh: false, issuer: nil, jwt_audience: nil)
+      def issue_tokens(ctx, store, model:, client:, session:, scopes:, include_refresh: false, issuer: nil, jwt_audience: nil, access_token_expires_in: 3600, id_token_signer: nil)
         data = stringify_keys(session || {})
         user = stringify_keys(data["user"] || data[:user] || {})
         session_data = stringify_keys(data["session"] || data[:session] || {})
@@ -194,7 +198,7 @@ module BetterAuth
         access_token = "ba_at_#{Crypto.random_string(32)}"
         refresh_token = include_refresh ? "ba_rt_#{Crypto.random_string(32)}" : nil
         scope = scope_string(scopes)
-        expires_at = Time.now + 3600
+        expires_at = Time.now + access_token_expires_in.to_i
         record = {
           "accessToken" => access_token,
           "token" => access_token,
@@ -209,21 +213,22 @@ module BetterAuth
           "revoked" => nil
         }
         ctx.context.adapter.create(model: model, data: record)
-        store[:tokens][access_token] = record.merge("user" => user, "session" => session_data)
-        store[:refresh_tokens][refresh_token] = record.merge("user" => user, "session" => session_data) if refresh_token
+        stored_record = record.merge("user" => user, "session" => session_data, "client" => client_data)
+        store[:tokens][access_token] = stored_record
+        store[:refresh_tokens][refresh_token] = stored_record if refresh_token
 
         response = {
           access_token: access_token,
           token_type: "Bearer",
-          expires_in: 3600,
+          expires_in: access_token_expires_in.to_i,
           scope: scope
         }
         response[:refresh_token] = refresh_token if refresh_token
-        response[:id_token] = id_token(user, client_data["clientId"], issuer || issuer(ctx), jwt_audience || client_data["clientId"]) if parse_scopes(scope).include?("openid")
+        response[:id_token] = id_token(user, client_data["clientId"], issuer || issuer(ctx), jwt_audience || client_data["clientId"], ctx: ctx, signer: id_token_signer) if parse_scopes(scope).include?("openid")
         response
       end
 
-      def refresh_tokens(ctx, store, model:, client:, refresh_token:, scopes: nil, issuer: nil)
+      def refresh_tokens(ctx, store, model:, client:, refresh_token:, scopes: nil, issuer: nil, access_token_expires_in: 3600, id_token_signer: nil)
         data = store[:refresh_tokens].delete(refresh_token.to_s)
         raise APIError.new("BAD_REQUEST", message: "invalid_grant") unless data
         requested = scopes ? parse_scopes(scopes) : data["scopes"]
@@ -239,7 +244,9 @@ module BetterAuth
           session: {"user" => data["user"], "session" => data["session"]},
           scopes: requested,
           include_refresh: true,
-          issuer: issuer
+          issuer: issuer,
+          access_token_expires_in: access_token_expires_in,
+          id_token_signer: id_token_signer
         )
       end
 
@@ -252,7 +259,7 @@ module BetterAuth
         data
       end
 
-      def userinfo(store, authorization)
+      def userinfo(store, authorization, additional_claim: nil)
         token = authorization.to_s.delete_prefix("Bearer ").strip
         record = token_record(store, token)
         raise APIError.new("UNAUTHORIZED", message: "invalid_token") unless record
@@ -264,22 +271,61 @@ module BetterAuth
           response[:email] = user["email"]
           response[:email_verified] = !!user["emailVerified"]
         end
+        if additional_claim.respond_to?(:call)
+          extra = additional_claim.call(user, scopes, stringify_keys(record["client"] || {}))
+          response.merge!(extra) if extra.is_a?(Hash)
+        end
         response
       end
 
-      def id_token(user, client_id, issuer_value, audience)
+      def id_token(user, client_id, issuer_value, audience, ctx: nil, signer: nil)
+        payload = {
+          sub: user["id"],
+          iss: issuer_value,
+          aud: audience || client_id,
+          email: user["email"],
+          email_verified: !!user["emailVerified"],
+          name: user["name"]
+        }
+        return signer.call(ctx, payload) if signer.respond_to?(:call)
+
         Crypto.sign_jwt(
-          {
-            sub: user["id"],
-            iss: issuer_value,
-            aud: audience || client_id,
-            email: user["email"],
-            email_verified: !!user["emailVerified"],
-            name: user["name"]
-          },
+          payload,
           client_id.to_s.empty? ? "better-auth" : client_id.to_s,
           expires_in: 3600
         )
+      end
+
+      def store_client_secret_value(ctx, secret, mode)
+        mode = normalize_secret_storage_mode(mode)
+        return Crypto.sha256(secret, encoding: :base64url) if mode == "hashed"
+        return Crypto.symmetric_encrypt(key: ctx.context.secret, data: secret) if mode == "encrypted"
+
+        if mode.is_a?(Hash)
+          return mode[:hash].call(secret) if mode[:hash].respond_to?(:call)
+          return mode[:encrypt].call(secret) if mode[:encrypt].respond_to?(:call)
+        end
+
+        secret
+      end
+
+      def verify_client_secret(ctx, stored_secret, provided_secret, mode)
+        mode = normalize_secret_storage_mode(mode)
+        return Crypto.constant_time_compare(Crypto.sha256(provided_secret, encoding: :base64url), stored_secret.to_s) if mode == "hashed"
+        return Crypto.symmetric_decrypt(key: ctx.context.secret, data: stored_secret) == provided_secret.to_s if mode == "encrypted"
+
+        if mode.is_a?(Hash)
+          return mode[:hash].call(provided_secret).to_s == stored_secret.to_s if mode[:hash].respond_to?(:call)
+          return mode[:decrypt].call(stored_secret).to_s == provided_secret.to_s if mode[:decrypt].respond_to?(:call)
+        end
+
+        Crypto.constant_time_compare(stored_secret.to_s, provided_secret.to_s)
+      end
+
+      def normalize_secret_storage_mode(mode)
+        return stringify_keys(mode).transform_keys(&:to_sym) if mode.is_a?(Hash)
+
+        mode.to_s
       end
 
       def stores

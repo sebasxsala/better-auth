@@ -10,6 +10,22 @@ require_relative "crypto/jwe"
 module BetterAuth
   module Crypto
     URL_SAFE_ALPHABET = [*"a".."z", *"A".."Z", *"0".."9", "-", "_"].freeze
+    MASK_64 = (1 << 64) - 1
+    KECCAK_ROUND_CONSTANTS = [
+      0x0000000000000001, 0x0000000000008082, 0x800000000000808a, 0x8000000080008000,
+      0x000000000000808b, 0x0000000080000001, 0x8000000080008081, 0x8000000000008009,
+      0x000000000000008a, 0x0000000000000088, 0x0000000080008009, 0x000000008000000a,
+      0x000000008000808b, 0x800000000000008b, 0x8000000000008089, 0x8000000000008003,
+      0x8000000000008002, 0x8000000000000080, 0x000000000000800a, 0x800000008000000a,
+      0x8000000080008081, 0x8000000000008080, 0x0000000080000001, 0x8000000080008008
+    ].freeze
+    KECCAK_ROTATION_OFFSETS = [
+      [0, 36, 3, 41, 18],
+      [1, 44, 10, 45, 2],
+      [62, 6, 43, 15, 61],
+      [28, 55, 25, 21, 56],
+      [27, 20, 39, 8, 14]
+    ].freeze
 
     module_function
 
@@ -24,6 +40,20 @@ module BetterAuth
     def sha256(value, encoding: :hex)
       digest = OpenSSL::Digest.digest("SHA256", value.to_s)
       (encoding == :base64url) ? base64url_encode(digest) : digest.unpack1("H*")
+    end
+
+    def keccak256(value, encoding: :hex)
+      digest = keccak256_bytes(value.to_s.b)
+      (encoding == :bytes) ? digest : digest.unpack1("H*")
+    end
+
+    def to_checksum_address(address)
+      normalized = address.to_s.downcase.delete_prefix("0x")
+      hash = keccak256(normalized)
+
+      "0x" + normalized.chars.each_with_index.map do |char, index|
+        (hash[index].to_i(16) >= 8) ? char.upcase : char
+      end.join
     end
 
     def hmac_signature(value, secret, encoding: :base64)
@@ -105,6 +135,57 @@ module BetterAuth
       return value.map { |entry| stringify_keys(entry) } if value.is_a?(Array)
 
       value
+    end
+
+    def keccak256_bytes(input)
+      rate = 136
+      state = Array.new(25, 0)
+      padded = input.bytes
+      padded << 0x01
+      padded << 0 while (padded.length % rate) != rate - 1
+      padded << 0x80
+
+      padded.each_slice(rate) do |block|
+        block.each_with_index do |byte, index|
+          state[index / 8] ^= byte << (8 * (index % 8))
+        end
+        keccak_permute!(state)
+      end
+
+      state.pack("Q<*").byteslice(0, 32)
+    end
+
+    def keccak_permute!(state)
+      KECCAK_ROUND_CONSTANTS.each do |round_constant|
+        columns = Array.new(5) { |x| state[x] ^ state[x + 5] ^ state[x + 10] ^ state[x + 15] ^ state[x + 20] }
+        deltas = Array.new(5) { |x| columns[(x - 1) % 5] ^ rotate_left_64(columns[(x + 1) % 5], 1) }
+        5.times do |x|
+          5.times { |y| state[x + (5 * y)] = (state[x + (5 * y)] ^ deltas[x]) & MASK_64 }
+        end
+
+        rotated = Array.new(25, 0)
+        5.times do |x|
+          5.times do |y|
+            rotated[y + (5 * ((2 * x + 3 * y) % 5))] =
+              rotate_left_64(state[x + (5 * y)], KECCAK_ROTATION_OFFSETS[x][y])
+          end
+        end
+
+        5.times do |y|
+          5.times do |x|
+            state[x + (5 * y)] =
+              (rotated[x + (5 * y)] ^ ((~rotated[((x + 1) % 5) + (5 * y)]) & rotated[((x + 2) % 5) + (5 * y)])) & MASK_64
+          end
+        end
+        state[0] = (state[0] ^ round_constant) & MASK_64
+      end
+    end
+
+    def rotate_left_64(value, shift)
+      shift %= 64
+      return value & MASK_64 if shift.zero?
+
+      ((value << shift) | (value >> (64 - shift))) & MASK_64
     end
   end
 end

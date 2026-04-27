@@ -86,7 +86,7 @@ module BetterAuth
 
     def siwe_schema(custom_schema = nil)
       base = {
-        walletAddress: {
+        "walletAddress" => {
           fields: {
             userId: {type: "string", references: {model: "user", field: "id"}, required: true, index: true},
             address: {type: "string", required: true},
@@ -98,9 +98,27 @@ module BetterAuth
       }
       return base unless custom_schema.is_a?(Hash)
 
-      base.merge(custom_schema) do |_key, old_value, new_value|
-        (old_value.is_a?(Hash) && new_value.is_a?(Hash)) ? old_value.merge(new_value) : new_value
+      normalize_hash(custom_schema).each_with_object(base) do |(raw_model, table), result|
+        model = Schema.storage_key(raw_model)
+        current = result[model] || {}
+        custom_table = normalize_hash(table)
+        fields = siwe_merge_schema_fields(current[:fields] || current["fields"] || {}, custom_table.delete(:fields) || {})
+        result[model] = current.merge(custom_table).merge(fields: fields)
       end
+    end
+
+    def siwe_merge_schema_fields(base_fields, custom_fields)
+      fields = base_fields.each_with_object({}) do |(raw_field, attributes), result|
+        result[Schema.storage_key(raw_field)] = normalize_hash(attributes)
+      end
+
+      normalize_hash(custom_fields).each do |raw_field, value|
+        field = Schema.storage_key(raw_field)
+        custom_attributes = (value.is_a?(String) || value.is_a?(Symbol)) ? {field_name: value.to_s} : normalize_hash(value)
+        fields[field] = (fields[field] || {}).merge(custom_attributes)
+      end
+
+      fields
     end
 
     def siwe_nonce_body(body)
@@ -129,7 +147,7 @@ module BetterAuth
       wallet = value.to_s
       raise APIError.new("BAD_REQUEST", message: "Invalid walletAddress") unless SIWE_WALLET_PATTERN.match?(wallet)
 
-      wallet.downcase
+      Crypto.to_checksum_address(wallet)
     end
 
     def siwe_chain_id(value)

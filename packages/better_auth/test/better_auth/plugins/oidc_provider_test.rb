@@ -29,6 +29,7 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
     assert_includes metadata[:scopes_supported], "openid"
 
     client = auth.api.register_o_auth_application(
+      headers: {"cookie" => cookie},
       body: {
         redirect_uris: ["https://client.example/callback"],
         token_endpoint_auth_method: "none",
@@ -93,6 +94,8 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
     register_response = request.post(
       "/api/auth/oauth2/register",
       "CONTENT_TYPE" => "application/json",
+      "HTTP_COOKIE" => cookie,
+      "HTTP_ORIGIN" => "http://localhost:3000",
       :input => JSON.generate(
         redirect_uris: ["https://client.example/callback"],
         token_endpoint_auth_method: "none",
@@ -104,7 +107,7 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
     )
     client = JSON.parse(register_response.body)
 
-    assert_equal 200, register_response.status
+    assert_equal 201, register_response.status
     assert_equal "none", client.fetch("token_endpoint_auth_method")
 
     authorize_response = request.get(
@@ -146,6 +149,7 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
     auth = build_auth
     cookie = sign_up_cookie(auth)
     client = auth.api.register_o_auth_application(
+      headers: {"cookie" => cookie},
       body: {
         redirect_uris: ["https://client.example/callback"],
         post_logout_redirect_uris: ["https://client.example/logout"],
@@ -175,6 +179,7 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
     auth = build_auth(consent_page: "/oidc/consent")
     cookie = sign_up_cookie(auth)
     client = auth.api.register_o_auth_application(
+      headers: {"cookie" => cookie},
       body: {
         redirect_uris: ["https://client.example/callback"],
         token_endpoint_auth_method: "none",
@@ -223,6 +228,7 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
     auth = build_auth
     cookie = sign_up_cookie(auth)
     client = auth.api.register_o_auth_application(
+      headers: {"cookie" => cookie},
       body: {
         redirect_uris: ["https://client.example/callback"],
         token_endpoint_auth_method: "none",
@@ -251,14 +257,255 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
     assert_equal "state-missing-consent", params.fetch("state")
   end
 
+  def test_dynamic_registration_requires_authentication_unless_enabled
+    auth = build_auth
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.register_o_auth_application(
+        body: {
+          redirect_uris: ["https://client.example/callback"],
+          client_name: "Anonymous Client"
+        }
+      )
+    end
+    assert_equal "UNAUTHORIZED", error.status
+
+    open_auth = build_auth(allow_dynamic_client_registration: true)
+    client = open_auth.api.register_o_auth_application(
+      body: {
+        redirect_uris: ["https://client.example/callback"],
+        client_name: "Anonymous Client"
+      }
+    )
+
+    assert client[:client_id]
+    assert client[:client_secret]
+    assert_equal 0, client[:client_secret_expires_at]
+  end
+
+  def test_registration_validates_grant_response_type_and_returns_rfc7591_metadata
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.register_o_auth_application(
+        headers: {"cookie" => cookie},
+        body: {
+          redirect_uris: ["https://client.example/callback"],
+          grant_types: ["authorization_code"],
+          response_types: ["token"],
+          client_name: "Invalid Client"
+        }
+      )
+    end
+    assert_equal "invalid_client_metadata", error.message
+
+    result = auth.api.register_o_auth_application(
+      headers: {"cookie" => cookie},
+      body: {
+        redirect_uris: ["https://client.example/callback"],
+        token_endpoint_auth_method: "client_secret_post",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        client_name: "Registered Client",
+        metadata: {tenant: "ruby"}
+      },
+      return_status: true,
+      return_headers: true
+    )
+
+    client = result.fetch(:response)
+    assert_equal 201, result.fetch(:status)
+    assert_equal "no-store", result.fetch(:headers).fetch("cache-control")
+    assert_equal "no-cache", result.fetch(:headers).fetch("pragma")
+    assert client[:client_id_issued_at]
+    assert_equal 0, client[:client_secret_expires_at]
+    assert_equal({"tenant" => "ruby"}, client[:metadata])
+  end
+
+  def test_authorization_validates_scope_pkce_and_max_age
+    auth = build_auth(require_pkce: true, login_page: "/login")
+    cookie = sign_up_cookie(auth)
+    client = register_public_client(auth, cookie)
+
+    invalid_scope = auth.api.o_auth2_authorize(
+      headers: {"cookie" => cookie},
+      query: authorize_query(client).merge(scope: "openid missing_scope", prompt: "none"),
+      as_response: true
+    )
+    invalid_scope_params = Rack::Utils.parse_query(URI.parse(invalid_scope[1].fetch("location")).query)
+    assert_equal "invalid_scope", invalid_scope_params.fetch("error")
+
+    missing_pkce = auth.api.o_auth2_authorize(
+      headers: {"cookie" => cookie},
+      query: authorize_query(client).merge(code_challenge: nil, code_challenge_method: nil, prompt: "none"),
+      as_response: true
+    )
+    missing_pkce_params = Rack::Utils.parse_query(URI.parse(missing_pkce[1].fetch("location")).query)
+    assert_equal "invalid_request", missing_pkce_params.fetch("error")
+
+    max_age = auth.api.o_auth2_authorize(
+      headers: {"cookie" => cookie},
+      query: authorize_query(client).merge(max_age: "0"),
+      as_response: true
+    )
+    assert_equal 302, max_age[0]
+    assert_match %r{\A/login\?}, max_age[1].fetch("location")
+    assert_includes max_age[1].fetch("set-cookie"), "oidc_login_prompt="
+  end
+
+  def test_stored_client_secret_can_be_hashed_or_encrypted_and_still_authenticate
+    [:hashed, :encrypted].each do |mode|
+      auth = build_auth(store_client_secret: mode)
+      cookie = sign_up_cookie(auth)
+      client = auth.api.register_o_auth_application(
+        headers: {"cookie" => cookie},
+        body: {
+          redirect_uris: ["https://client.example/callback"],
+          token_endpoint_auth_method: "client_secret_post",
+          client_name: "#{mode} client"
+        }
+      )
+      stored = auth.context.adapter.find_one(model: "oauthApplication", where: [{field: "clientId", value: client[:client_id]}])
+      refute_equal client[:client_secret], stored.fetch("clientSecret")
+
+      code = authorize_and_consent(auth, cookie, client, scope: "openid offline_access")
+      tokens = auth.api.o_auth2_token(
+        body: {
+          grant_type: "authorization_code",
+          code: code,
+          redirect_uri: "https://client.example/callback",
+          client_id: client[:client_id],
+          code_verifier: "verifier",
+          client_secret: client[:client_secret]
+        }
+      )
+      assert tokens[:access_token]
+      assert tokens[:refresh_token]
+    end
+  end
+
+  def test_jwt_plugin_negotiates_id_token_signing_algorithm
+    auth = build_auth(use_jwt_plugin: true, extra_plugins: [BetterAuth::Plugins.jwt])
+    cookie = sign_up_cookie(auth)
+    client = register_public_client(auth, cookie, skip_consent: true)
+
+    metadata = auth.api.get_open_id_config
+    assert_includes metadata[:id_token_signing_alg_values_supported], "EdDSA"
+    refute_includes metadata[:id_token_signing_alg_values_supported], "HS256"
+
+    code = authorize_code(auth, cookie, client, scope: "openid")
+    tokens = auth.api.o_auth2_token(
+      body: {
+        grant_type: "authorization_code",
+        code: code,
+        redirect_uri: "https://client.example/callback",
+        client_id: client[:client_id],
+        code_verifier: "verifier"
+      }
+    )
+    header = JWT.decode(tokens.fetch(:id_token), nil, false).last
+    assert_equal "EdDSA", header.fetch("alg")
+
+    jwk = auth.api.get_jwks[:keys].first
+    payload = BetterAuth::Plugins.verify_jwt_token(
+      endpoint_context(auth),
+      tokens.fetch(:id_token),
+      {jwks: {key_pair_config: {alg: "EdDSA"}}, jwt: {audience: client[:client_id], issuer: "http://localhost:3000"}}
+    )
+    assert_equal "oidc@example.com", payload.fetch("email")
+    assert_equal jwk[:kid], header.fetch("kid")
+  end
+
+  def test_userinfo_merges_additional_claims_for_requested_scopes
+    auth = build_auth(
+      get_additional_user_info_claim: ->(user, scopes, client) {
+        {custom: "custom value", userId: user.fetch("id"), requestedScopes: scopes, clientId: client.fetch("clientId")}
+      }
+    )
+    cookie = sign_up_cookie(auth)
+    client = register_public_client(auth, cookie, skip_consent: true)
+    code = authorize_code(auth, cookie, client, scope: "openid profile email")
+    tokens = auth.api.o_auth2_token(
+      body: {
+        grant_type: "authorization_code",
+        code: code,
+        redirect_uri: "https://client.example/callback",
+        client_id: client[:client_id],
+        code_verifier: "verifier"
+      }
+    )
+
+    userinfo = auth.api.o_auth2_user_info(headers: {"authorization" => "Bearer #{tokens[:access_token]}"})
+    assert_equal "custom value", userinfo[:custom]
+    assert_equal ["openid", "profile", "email"], userinfo[:requestedScopes]
+    assert_equal client[:client_id], userinfo[:clientId]
+  end
+
+  def test_consent_can_render_html_when_no_consent_page_is_configured
+    auth = build_auth(
+      consent_page: nil,
+      get_consent_html: ->(data) {
+        "<h1>Consent for #{data.fetch(:clientName)}</h1><p>#{data.fetch(:scopes).join(" ")}</p>"
+      }
+    )
+    cookie = sign_up_cookie(auth)
+    client = register_public_client(auth, cookie)
+
+    status, headers, body = auth.api.o_auth2_authorize(
+      headers: {"cookie" => cookie},
+      query: authorize_query(client),
+      as_response: true
+    )
+
+    assert_equal 200, status
+    assert_equal "text/html", headers.fetch("content-type")
+    assert_includes body.join, "Consent for Public Client"
+    assert_includes body.join, "openid email"
+  end
+
+  def test_prompt_login_resumes_authorization_after_successful_login
+    auth = build_auth(allow_dynamic_client_registration: true, login_page: "/login")
+    sign_up_cookie(auth)
+    client = auth.api.register_o_auth_application(
+      body: {
+        redirect_uris: ["https://client.example/callback"],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        client_name: "Login Prompt Client"
+      }
+    )
+
+    status, headers, = auth.api.o_auth2_authorize(
+      query: authorize_query(client).merge(prompt: "login"),
+      as_response: true
+    )
+    assert_equal 302, status
+    assert_match %r{\A/login\?}, headers.fetch("location")
+    prompt_cookie = headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")
+
+    login_status, login_headers, = auth.api.sign_in_email(
+      headers: {"cookie" => prompt_cookie},
+      body: {email: "oidc@example.com", password: "password123"},
+      as_response: true
+    )
+
+    assert_equal 302, login_status
+    assert_match %r{\A/oauth2/authorize\?}, login_headers.fetch("location")
+    assert_includes login_headers.fetch("location"), "consent_code="
+    assert_match(/oidc_login_prompt=; .*Max-Age=0/, login_headers.fetch("set-cookie"))
+  end
+
   private
 
   def build_auth(options = {})
+    extra_plugins = Array(options.delete(:extra_plugins))
     BetterAuth.auth(
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
-      plugins: [BetterAuth::Plugins.oidc_provider(options)]
+      plugins: [BetterAuth::Plugins.oidc_provider(options), *extra_plugins]
     )
   end
 
@@ -268,5 +515,67 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
       as_response: true
     )
     headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def register_public_client(auth, cookie, skip_consent: false)
+    auth.api.register_o_auth_application(
+      headers: {"cookie" => cookie},
+      body: {
+        redirect_uris: ["https://client.example/callback"],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        skip_consent: skip_consent,
+        client_name: "Public Client"
+      }
+    )
+  end
+
+  def authorize_query(client)
+    {
+      response_type: "code",
+      client_id: client[:client_id],
+      redirect_uri: "https://client.example/callback",
+      scope: "openid email",
+      state: "state-123",
+      code_challenge: Base64.urlsafe_encode64(OpenSSL::Digest.digest("SHA256", "verifier"), padding: false),
+      code_challenge_method: "S256"
+    }
+  end
+
+  def authorize_code(auth, cookie, client, scope: "openid email")
+    status, headers, = auth.api.o_auth2_authorize(
+      headers: {"cookie" => cookie},
+      query: authorize_query(client).merge(scope: scope, prompt: "none"),
+      as_response: true
+    )
+    assert_equal 302, status
+    Rack::Utils.parse_query(URI.parse(headers.fetch("location")).query).fetch("code")
+  end
+
+  def authorize_and_consent(auth, cookie, client, scope:)
+    status, headers, = auth.api.o_auth2_authorize(
+      headers: {"cookie" => cookie},
+      query: authorize_query(client).merge(scope: scope),
+      as_response: true
+    )
+    assert_equal 302, status
+    params = Rack::Utils.parse_query(URI.parse(headers.fetch("location")).query)
+    return params.fetch("code") if params["code"]
+
+    consent = auth.api.o_auth_consent(headers: {"cookie" => cookie}, body: {accept: true, consent_code: params.fetch("consent_code")})
+    Rack::Utils.parse_query(URI.parse(consent.fetch(:redirectURI)).query).fetch("code")
+  end
+
+  def endpoint_context(auth)
+    BetterAuth::Endpoint::Context.new(
+      path: "/oauth2/token",
+      method: "POST",
+      query: {},
+      body: {},
+      params: {},
+      headers: {},
+      context: auth.context
+    )
   end
 end
