@@ -358,6 +358,8 @@ module BetterAuth
 
       def coerce_value(value, attributes)
         return value if value.nil?
+        return value ? 1 : 0 if dialect == :sqlite && attributes[:type] == "boolean"
+        return value.iso8601(6) if dialect == :sqlite && attributes[:type] == "date" && value.respond_to?(:iso8601)
         return Time.parse(value) if attributes[:type] == "date" && value.is_a?(String)
 
         value

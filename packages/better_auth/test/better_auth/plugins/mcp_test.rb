@@ -103,8 +103,8 @@ class BetterAuthPluginsMCPTest < Minitest::Test
     jwks = auth.api.mcp_jwks
 
     assert_equal [header.fetch("kid")], jwks.fetch(:keys).map { |key| key.fetch(:kid) }
-    assert_equal "RSA", jwks.fetch(:keys).first.fetch(:kty)
-    assert_equal "RS256", jwks.fetch(:keys).first.fetch(:alg)
+    assert_equal "OKP", jwks.fetch(:keys).first.fetch(:kty)
+    assert_equal "EdDSA", jwks.fetch(:keys).first.fetch(:alg)
   end
 
   def test_mcp_authorize_restores_login_prompt_cookie_after_email_sign_in
