@@ -92,7 +92,16 @@ module BetterAuth
     end
 
     def self.truthy_query?(query, key)
-      value = query[key] || query[key.to_sym] || query[Schema.storage_key(key)] || query[Schema.storage_key(key).to_sym]
+      snake_key = key.to_s
+        .gsub(/([a-z\d])([A-Z])/, "\\1_\\2")
+        .tr("-", "_")
+        .downcase
+      value = query[key] ||
+        query[key.to_sym] ||
+        query[Schema.storage_key(key)] ||
+        query[Schema.storage_key(key).to_sym] ||
+        query[snake_key] ||
+        query[snake_key.to_sym]
       value == true || value.to_s == "true"
     end
 

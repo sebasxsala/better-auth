@@ -161,6 +161,11 @@ module BetterAuth
       expire_cookie(ctx, ctx.context.auth_cookies[:dont_remember]) unless skip_dont_remember_me
     end
 
+    def dont_remember?(ctx)
+      cookie = ctx.context.auth_cookies[:dont_remember]
+      ctx.get_signed_cookie(cookie.name, ctx.context.secret) == "true"
+    end
+
     def encode_cookie_cache(data, secret, strategy:, max_age:)
       case strategy.to_s
       when "jwt"

@@ -261,6 +261,10 @@ module BetterAuth
       end
 
       session[:cookie_cache] = deep_merge(session[:cookie_cache] || {}, cookie_cache) unless cookie_cache.empty?
+      if (database || secondary_storage) && session.dig(:cookie_cache, :refresh_cache)
+        warn("[better-auth] `session.cookieCache.refreshCache` is enabled while `database` or `secondaryStorage` is configured. `refreshCache` is meant for stateless setups. Disabling `refreshCache`.")
+        session[:cookie_cache] = session[:cookie_cache].merge(refresh_cache: false)
+      end
       session
     end
 

@@ -520,7 +520,7 @@ git commit -m "fix: filter session cookie cache payloads"
 - Modify: `packages/better_auth/test/better_auth/session_test.rb`
 - Modify: `packages/better_auth/test/better_auth/routes/session_routes_test.rb`
 
-- [ ] **Step 1: Write failing tests for `disableCookieCache` and tampered cache behavior**
+- [x] **Step 1: Write failing tests for `disableCookieCache` and tampered cache behavior**
 
 Add to `packages/better_auth/test/better_auth/routes/session_routes_test.rb`:
 
@@ -555,7 +555,7 @@ def test_get_session_with_tampered_cache_falls_back_to_database_and_refreshes_ca
 end
 ```
 
-- [ ] **Step 2: Write failing tests for `rememberMe: false` refresh behavior**
+- [x] **Step 2: Write failing tests for `rememberMe: false` refresh behavior**
 
 Add to `packages/better_auth/test/better_auth/routes/session_routes_test.rb`:
 
@@ -579,7 +579,7 @@ def test_remember_me_false_stays_session_cookie_after_refresh
 end
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run:
 
@@ -590,7 +590,7 @@ rbenv exec bundle exec rake test TEST=test/better_auth/routes/session_routes_tes
 
 Expected: FAIL on stale cache / browser-session refresh behavior until the implementation tracks `dont_remember`.
 
-- [ ] **Step 4: Add `dont_remember` detection**
+- [x] **Step 4: Add `dont_remember` detection**
 
 Add to `packages/better_auth/lib/better_auth/cookies.rb`:
 
@@ -608,7 +608,7 @@ Modify `Session.refresh_session` in `packages/better_auth/lib/better_auth/sessio
       Cookies.set_session_cookie(ctx, refreshed, dont_remember)
 ```
 
-- [ ] **Step 5: Implement stateless `refresh_cache` threshold**
+- [x] **Step 5: Implement stateless `refresh_cache` threshold**
 
 Add to `packages/better_auth/lib/better_auth/session.rb`:
 
@@ -636,7 +636,7 @@ Inside `cached_session`, after token validation and before returning:
       result
 ```
 
-- [ ] **Step 6: Warn and disable `refresh_cache` for stateful stores**
+- [x] **Step 6: Warn and disable `refresh_cache` for stateful stores**
 
 Modify `normalize_session` in `packages/better_auth/lib/better_auth/configuration.rb`:
 
@@ -647,7 +647,7 @@ Modify `normalize_session` in `packages/better_auth/lib/better_auth/configuratio
       end
 ```
 
-- [ ] **Step 7: Run session route tests**
+- [x] **Step 7: Run session route tests**
 
 Run:
 
@@ -658,7 +658,7 @@ rbenv exec bundle exec rake test TEST=test/better_auth/routes/session_routes_tes
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/better_auth/lib/better_auth/session.rb packages/better_auth/lib/better_auth/cookies.rb packages/better_auth/lib/better_auth/configuration.rb packages/better_auth/test/better_auth/routes/session_routes_test.rb

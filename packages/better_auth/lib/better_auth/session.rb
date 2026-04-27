@@ -50,7 +50,9 @@ module BetterAuth
       return nil unless payload
       return nil if payload["session"]["token"] && payload["session"]["token"] != token
 
-      {session: payload["session"], user: payload["user"]}
+      result = {session: payload["session"], user: payload["user"]}
+      Cookies.set_cookie_cache(ctx, result, false) if should_refresh_cookie_cache?(config, payload)
+      result
     end
 
     def missing_session(ctx)
@@ -83,8 +85,22 @@ module BetterAuth
       )
       session = stringify_keys(updated || result[:session]).merge("expiresAt" => expires_at, "updatedAt" => now)
       refreshed = {session: session, user: result[:user]}
-      Cookies.set_session_cookie(ctx, refreshed, false)
+      Cookies.set_session_cookie(ctx, refreshed, Cookies.dont_remember?(ctx))
       refreshed
+    end
+
+    def should_refresh_cookie_cache?(config, payload)
+      refresh_cache = config[:refresh_cache]
+      return false if refresh_cache == false || refresh_cache.nil?
+
+      max_age = (config[:max_age] || 60 * 5).to_i
+      update_age = if refresh_cache.is_a?(Hash)
+        (refresh_cache[:update_age] || refresh_cache["updateAge"] || refresh_cache["update_age"]).to_i
+      else
+        (max_age * 0.8).to_i
+      end
+      updated_at = payload["updatedAt"].to_i
+      updated_at.positive? && updated_at + (update_age * 1000) <= (Time.now.to_f * 1000).to_i
     end
 
     def normalize_time(value)

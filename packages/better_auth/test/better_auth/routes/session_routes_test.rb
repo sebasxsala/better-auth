@@ -23,6 +23,53 @@ class BetterAuthRoutesSessionTest < Minitest::Test
     assert_equal result[:user]["id"], result[:session]["userId"]
   end
 
+  def test_get_session_disable_cookie_cache_reads_authoritative_database
+    auth = build_auth(session: {cookie_cache: {enabled: true, strategy: "jwe", max_age: 300}})
+    cookie = sign_up_cookie(auth, email: "disable-cache@example.com")
+    session = auth.api.get_session(headers: {"cookie" => cookie})
+    auth.context.adapter.update(
+      model: "user",
+      where: [{field: "id", value: session[:user]["id"]}],
+      update: {name: "Authoritative Name"}
+    )
+
+    cached = auth.api.get_session(headers: {"cookie" => cookie})
+    authoritative = auth.api.get_session(headers: {"cookie" => cookie}, query: {disableCookieCache: true})
+
+    refute_equal "Authoritative Name", cached[:user]["name"]
+    assert_equal "Authoritative Name", authoritative[:user]["name"]
+  end
+
+  def test_get_session_with_tampered_cache_falls_back_to_database_and_refreshes_cache
+    auth = build_auth(session: {cookie_cache: {enabled: true, strategy: "jwe", max_age: 300}})
+    cookie = sign_up_cookie(auth, email: "tampered-cache@example.com")
+    tampered = cookie.gsub(/better-auth\.session_data=[^; ]+/, "better-auth.session_data=invalid")
+
+    status, headers, body = auth.api.get_session(headers: {"cookie" => tampered}, as_response: true)
+
+    assert_equal 200, status
+    assert_equal "tampered-cache@example.com", JSON.parse(body.join).fetch("user").fetch("email")
+    assert_includes headers.fetch("set-cookie"), "better-auth.session_data="
+  end
+
+  def test_remember_me_false_stays_session_cookie_after_refresh
+    auth = build_auth(session: {update_age: 0, expires_in: 120, cookie_cache: {enabled: false}})
+    _signup_cookie = sign_up_cookie(auth, email: "browser-session@example.com")
+
+    status, headers, _body = auth.api.sign_in_email(
+      body: {email: "browser-session@example.com", password: "password123", rememberMe: false},
+      as_response: true
+    )
+    assert_equal 200, status
+    cookie = cookie_header(headers.fetch("set-cookie"))
+    session_cookie_line = headers.fetch("set-cookie").lines.find { |line| line.include?("session_token") }
+    refute_includes session_cookie_line, "Max-Age="
+
+    _status, refresh_headers, _refresh_body = auth.api.get_session(headers: {"cookie" => cookie}, as_response: true)
+    refreshed_session_cookie_line = refresh_headers.fetch("set-cookie").lines.find { |line| line.include?("session_token") }
+    refute_includes refreshed_session_cookie_line, "Max-Age="
+  end
+
   def test_sign_out_deletes_current_session_and_clears_cookies
     deleted = []
     auth = build_auth(
