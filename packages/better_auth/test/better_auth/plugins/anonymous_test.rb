@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "uri"
 require_relative "../../test_helper"
 
 class BetterAuthPluginsAnonymousTest < Minitest::Test
@@ -39,6 +40,16 @@ class BetterAuthPluginsAnonymousTest < Minitest::Test
     domain_auth = build_auth(plugins: [BetterAuth::Plugins.anonymous(email_domain_name: "anon.example")])
     domain_result = domain_auth.api.sign_in_anonymous
     assert_match(/\Atemp-[0-9a-f]{32}@anon\.example\z/, domain_result[:user]["email"])
+  end
+
+  def test_anonymous_sign_in_falls_back_when_generators_return_blank_values
+    nil_name_auth = build_auth(plugins: [BetterAuth::Plugins.anonymous(generate_name: ->(_ctx) {})])
+    empty_name_auth = build_auth(plugins: [BetterAuth::Plugins.anonymous(generate_name: ->(_ctx) { "" })])
+    empty_email_auth = build_auth(plugins: [BetterAuth::Plugins.anonymous(generate_random_email: -> { "" })])
+
+    assert_equal "Anonymous", nil_name_auth.api.sign_in_anonymous[:user]["name"]
+    assert_equal "Anonymous", empty_name_auth.api.sign_in_anonymous[:user]["name"]
+    assert_match(/\Atemp@[0-9a-f]{32}\.com\z/, empty_email_auth.api.sign_in_anonymous[:user]["email"])
   end
 
   def test_anonymous_sign_in_rejects_invalid_generated_email_and_repeat_anonymous_session
@@ -126,6 +137,60 @@ class BetterAuthPluginsAnonymousTest < Minitest::Test
     assert_equal anon_user_id, link_calls.first[:anonymous_user][:user]["id"]
     assert_equal data.fetch("user").fetch("id"), link_calls.first[:new_user][:user]["id"]
     assert_equal "linked@example.com", auth.api.get_session(headers: {"cookie" => real_cookie})[:user]["email"]
+  end
+
+  def test_social_callback_links_and_deletes_previous_anonymous_user
+    link_calls = []
+    auth = build_auth(
+      social_providers: {
+        github: {
+          id: "github",
+          create_authorization_url: lambda do |data|
+            "https://github.example/oauth?state=#{URI.encode_www_form_component(data[:state])}"
+          end,
+          validate_authorization_code: ->(_data) { {accessToken: "oauth-access"} },
+          get_user_info: ->(_tokens) {
+            {
+              user: {
+                id: "gh-anonymous-link",
+                email: "social-linked@example.com",
+                name: "Social Linked",
+                emailVerified: true
+              }
+            }
+          }
+        }
+      },
+      plugins: [
+        BetterAuth::Plugins.anonymous(
+          on_link_account: ->(data) { link_calls << data }
+        )
+      ]
+    )
+    _status, anon_headers, _body = auth.api.sign_in_anonymous(as_response: true)
+    anon_cookie = cookie_header(anon_headers.fetch("set-cookie"))
+    anon_user_id = auth.api.get_session(headers: {"cookie" => anon_cookie})[:user]["id"]
+    sign_in = auth.api.sign_in_social(
+      headers: {"cookie" => anon_cookie},
+      body: {provider: "github", callbackURL: "/dashboard", disableRedirect: true}
+    )
+    state = URI.decode_www_form(URI.parse(sign_in.fetch(:url)).query).assoc("state").last
+
+    status, headers, _body = auth.api.callback_oauth(
+      headers: {"cookie" => anon_cookie},
+      params: {providerId: "github"},
+      query: {code: "oauth-code", state: state},
+      as_response: true
+    )
+    real_cookie = cookie_header(headers.fetch("set-cookie"))
+
+    assert_equal 302, status
+    assert_equal "/dashboard", headers["location"]
+    assert_nil auth.context.internal_adapter.find_user_by_id(anon_user_id)
+    assert_equal 1, link_calls.length
+    assert_equal anon_user_id, link_calls.first[:anonymous_user][:user]["id"]
+    assert_equal "social-linked@example.com", link_calls.first[:new_user][:user]["email"]
+    assert_equal "social-linked@example.com", auth.api.get_session(headers: {"cookie" => real_cookie})[:user]["email"]
   end
 
   private

@@ -34,6 +34,44 @@ class BetterAuthPluginsCustomSessionTest < Minitest::Test
     assert_includes headers.fetch("set-cookie"), "better-auth.session_data="
   end
 
+  def test_custom_session_preserves_individual_cookie_max_age_values
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.custom_session(->(session, _ctx) { session })
+      ],
+      session: {expires_in: 86_400, update_age: 0, cookie_cache: {enabled: true, max_age: 300}}
+    )
+    cookie = sign_up_cookie(auth, email: "max-age@example.com", name: "Max Age")
+
+    _status, headers, _body = auth.api.get_session(headers: {"cookie" => cookie}, as_response: true)
+    cookies = headers.fetch("set-cookie").lines
+    token_cookie = cookies.find { |line| line.start_with?("better-auth.session_token=") }
+    data_cookie = cookies.find { |line| line.start_with?("better-auth.session_data=") && !line.match?(/Max-Age=0/i) }
+
+    assert token_cookie
+    assert data_cookie
+    assert_match(/Max-Age=86400/i, token_cookie)
+    assert_match(/Max-Age=300/i, data_cookie)
+    cookies.each do |line|
+      assert_equal 1, line.scan("better-auth.").length
+    end
+  end
+
+  def test_custom_session_returns_nil_without_invoking_resolver_when_unauthenticated
+    called = false
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.custom_session(lambda do |session, _ctx|
+          called = true
+          session
+        end)
+      ]
+    )
+
+    assert_nil auth.api.get_session
+    assert_equal false, called
+  end
+
   def test_custom_session_can_mutate_multi_session_list
     auth = build_auth(
       plugins: [

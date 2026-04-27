@@ -46,7 +46,12 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
     cookie = sign_up_cookie(auth, email: "limits@example.com")
     user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
 
-    expired = auth.api.create_api_key(body: {userId: user_id, expiresIn: -1})
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["EXPIRES_IN_IS_TOO_SMALL"], assert_raises(BetterAuth::APIError) {
+      auth.api.create_api_key(body: {userId: user_id, expiresIn: 60 * 60 * 12})
+    }.message
+
+    expired = auth.api.create_api_key(body: {userId: user_id})
+    auth.context.adapter.update(model: "apikey", where: [{field: "id", value: expired[:id]}], update: {expiresAt: Time.now - 10})
     assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["KEY_EXPIRED"], assert_raises(BetterAuth::APIError) {
       auth.api.verify_api_key(body: {key: expired[:key]})
     }.message
@@ -102,10 +107,83 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
     assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["SERVER_ONLY_PROPERTY"], client_server_only.message
   end
 
+  def test_update_auth_boundaries_match_upstream
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "owner-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id, permissions: {repo: ["read"]}})
+
+    unauthorized = assert_raises(BetterAuth::APIError) do
+      auth.api.update_api_key(body: {keyId: created[:id], name: "stolen"})
+    end
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["UNAUTHORIZED_SESSION"], unauthorized.message
+
+    missing = assert_raises(BetterAuth::APIError) do
+      auth.api.update_api_key(body: {keyId: created[:id], userId: "different-user", name: "stolen"})
+    end
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["KEY_NOT_FOUND"], missing.message
+
+    server_update = auth.api.update_api_key(body: {keyId: created[:id], userId: user_id, permissions: {repo: ["read", "write"]}})
+    assert_equal({"repo" => ["read", "write"]}, server_update[:permissions])
+
+    client_server_only = assert_raises(BetterAuth::APIError) do
+      auth.api.update_api_key(headers: {"cookie" => cookie}, body: {keyId: created[:id], permissions: {repo: ["admin"]}})
+    end
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["SERVER_ONLY_PROPERTY"], client_server_only.message
+  end
+
+  def test_legacy_double_stringified_metadata_is_returned_as_object_and_migrated
+    auth = build_auth(enable_metadata: true)
+    cookie = sign_up_cookie(auth, email: "metadata-key@example.com")
+    created = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {metadata: {tier: "free"}})
+    legacy = JSON.generate(JSON.generate({tier: "legacy"}))
+
+    auth.context.adapter.update(model: "apikey", where: [{field: "id", value: created[:id]}], update: {metadata: legacy})
+
+    fetched = auth.api.get_api_key(headers: {"cookie" => cookie}, query: {id: created[:id]})
+    assert_equal({"tier" => "legacy"}, fetched[:metadata])
+
+    migrated = auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: created[:id]}])
+    assert_equal({"tier" => "legacy"}, JSON.parse(migrated["metadata"]))
+
+    auth.context.adapter.update(model: "apikey", where: [{field: "id", value: created[:id]}], update: {metadata: legacy})
+    verified = auth.api.verify_api_key(body: {key: created[:key]})
+    assert_equal({"tier" => "legacy"}, verified[:key][:metadata])
+  end
+
+  def test_defer_updates_uses_configured_background_task_handler
+    deferred = []
+    auth = build_auth(
+      defer_updates: true,
+      advanced: {
+        background_tasks: {
+          handler: ->(task) { deferred << task }
+        }
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "defer-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id, remaining: 2})
+
+    result = auth.api.verify_api_key(body: {key: created[:key]})
+
+    assert_equal true, result[:valid]
+    assert_equal 1, result[:key][:remaining]
+    assert_equal 1, deferred.length
+    stored_before_task = auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: created[:id]}])
+    assert_nil stored_before_task["lastRequest"]
+    deferred.each(&:call)
+    stored_after_task = auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: created[:id]}])
+    assert stored_after_task["lastRequest"]
+    assert_equal 1, stored_after_task["remaining"]
+  end
+
   def build_auth(options = {})
+    advanced = options.delete(:advanced)
     BetterAuth.auth({
       secret: SECRET,
       email_and_password: {enabled: true},
+      advanced: advanced,
       secondary_storage: options.delete(:secondary_storage),
       plugins: [BetterAuth::Plugins.api_key(options)]
     }.compact)

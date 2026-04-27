@@ -89,7 +89,7 @@ module BetterAuth
           default_expires_in: data.dig(:key_expiration, :default_expires_in),
           disable_custom_expires_time: data.dig(:key_expiration, :disable_custom_expires_time) || false,
           max_expires_in: data.dig(:key_expiration, :max_expires_in) || 365,
-          min_expires_in: data.dig(:key_expiration, :min_expires_in) || -365
+          min_expires_in: data.dig(:key_expiration, :min_expires_in) || 1
         },
         starting_characters_config: {
           should_store: starting_characters_options.fetch(:should_store, true),
@@ -197,6 +197,7 @@ module BetterAuth
         record = api_key_find_by_id(ctx, id, config)
         raise APIError.new("NOT_FOUND", message: API_KEY_ERROR_CODES["KEY_NOT_FOUND"]) unless record && record["userId"] == session[:user]["id"]
 
+        record = api_key_migrate_legacy_metadata(ctx, record, config)
         api_key_delete_expired(ctx.context, config)
         ctx.json(api_key_public(record, include_key_field: false))
       end
@@ -206,16 +207,23 @@ module BetterAuth
       Endpoint.new(path: "/api-key/update", method: "POST") do |ctx|
         body = normalize_hash(ctx.body)
         session = Routes.current_session(ctx, allow_nil: true)
+        user_id = session&.dig(:user, "id") || body[:user_id]
+        raise APIError.new("UNAUTHORIZED", message: API_KEY_ERROR_CODES["UNAUTHORIZED_SESSION"]) unless user_id
+        if session && body[:user_id] && body[:user_id] != session[:user]["id"]
+          raise APIError.new("UNAUTHORIZED", message: API_KEY_ERROR_CODES["UNAUTHORIZED_SESSION"])
+        end
+
         key_id = body[:key_id]
         record = api_key_find_by_id(ctx, key_id, config)
         raise APIError.new("NOT_FOUND", message: API_KEY_ERROR_CODES["KEY_NOT_FOUND"]) unless record
-        raise APIError.new("UNAUTHORIZED", message: API_KEY_ERROR_CODES["UNAUTHORIZED_SESSION"]) if session && record["userId"] != session[:user]["id"]
+        raise APIError.new("NOT_FOUND", message: API_KEY_ERROR_CODES["KEY_NOT_FOUND"]) if record["userId"] != user_id
 
         api_key_validate_create_update!(body, config, create: false, client: !!session)
         update = api_key_update_payload(body, config)
         raise APIError.new("BAD_REQUEST", message: API_KEY_ERROR_CODES["NO_VALUES_TO_UPDATE"]) if update.empty?
 
         updated = api_key_update_record(ctx, record, update.merge(updatedAt: Time.now), config)
+        updated = api_key_migrate_legacy_metadata(ctx, updated, config)
         api_key_delete_expired(ctx.context, config)
         ctx.json(api_key_public(updated, include_key_field: false))
       end
@@ -238,7 +246,7 @@ module BetterAuth
       Endpoint.new(path: "/api-key/list", method: "GET") do |ctx|
         session = Routes.current_session(ctx)
         api_key_delete_expired(ctx.context, config)
-        ctx.json(api_key_list_for_user(ctx, session[:user]["id"], config).map { |record| api_key_public(record, include_key_field: false) })
+        ctx.json(api_key_list_for_user(ctx, session[:user]["id"], config).map { |record| api_key_public(api_key_migrate_legacy_metadata(ctx, record, config), include_key_field: false) })
       end
     end
 
@@ -286,13 +294,19 @@ module BetterAuth
       record = api_key_find_by_hash(ctx, hashed, config)
       raise APIError.new("FORBIDDEN", message: API_KEY_ERROR_CODES["INVALID_API_KEY"]) unless record
       raise APIError.new("FORBIDDEN", message: API_KEY_ERROR_CODES["KEY_DISABLED"]) if record["enabled"] == false
-      raise APIError.new("FORBIDDEN", message: API_KEY_ERROR_CODES["KEY_EXPIRED"]) if record["expiresAt"] && record["expiresAt"] <= Time.now
-      raise APIError.new("FORBIDDEN", message: API_KEY_ERROR_CODES["USAGE_EXCEEDED"]) if record["remaining"].to_i <= 0 && !record["remaining"].nil? && record["refillAmount"].nil?
+      if record["expiresAt"] && record["expiresAt"] <= Time.now
+        api_key_delete_record(ctx, record, config)
+        raise APIError.new("FORBIDDEN", message: API_KEY_ERROR_CODES["KEY_EXPIRED"])
+      end
+      if record["remaining"].to_i <= 0 && !record["remaining"].nil? && record["refillAmount"].nil?
+        api_key_delete_record(ctx, record, config)
+        raise APIError.new("FORBIDDEN", message: API_KEY_ERROR_CODES["USAGE_EXCEEDED"])
+      end
 
       api_key_check_permissions!(record, permissions)
       update = api_key_usage_update(record, config)
-      updated = api_key_update_record(ctx, record, update, config)
-      updated || record.merge(update.transform_keys { |key_name| Schema.storage_key(key_name) })
+      updated = api_key_update_record(ctx, record, update, config, defer: true)
+      api_key_migrate_legacy_metadata(ctx, updated || record.merge(update.transform_keys { |key_name| Schema.storage_key(key_name) }), config)
     end
 
     def api_key_usage_update(record, config)
@@ -359,7 +373,8 @@ module BetterAuth
         raise APIError.new("BAD_REQUEST", message: API_KEY_ERROR_CODES["METADATA_DISABLED"]) unless config[:enable_metadata]
         raise APIError.new("BAD_REQUEST", message: API_KEY_ERROR_CODES["INVALID_METADATA_TYPE"]) unless body[:metadata].nil? || body[:metadata].is_a?(Hash)
       end
-      server_only_keys = %i[user_id refill_amount refill_interval rate_limit_max rate_limit_time_window rate_limit_enabled remaining]
+      server_only_keys = %i[refill_amount refill_interval rate_limit_max rate_limit_time_window rate_limit_enabled remaining]
+      server_only_keys << :permissions unless create
       if client && server_only_keys.any? { |key| body.key?(key) }
         raise APIError.new("BAD_REQUEST", message: API_KEY_ERROR_CODES["SERVER_ONLY_PROPERTY"])
       end
@@ -454,14 +469,24 @@ module BetterAuth
       ctx.context.adapter.find_many(model: API_KEY_TABLE_NAME, where: [{field: "userId", value: user_id}])
     end
 
-    def api_key_update_record(ctx, record, update, config)
-      updated = nil
-      if config[:storage] == "database" || config[:fallback_to_database]
-        updated = ctx.context.adapter.update(model: API_KEY_TABLE_NAME, where: [{field: "id", value: record["id"]}], update: update)
+    def api_key_update_record(ctx, record, update, config, defer: false)
+      performer = lambda do
+        updated = nil
+        if config[:storage] == "database" || config[:fallback_to_database]
+          updated = ctx.context.adapter.update(model: API_KEY_TABLE_NAME, where: [{field: "id", value: record["id"]}], update: update)
+        end
+        updated ||= record.merge(update.transform_keys { |key| Schema.storage_key(key) })
+        api_key_storage_set(ctx, updated, config) if config[:storage] == "secondary-storage"
+        updated
       end
-      updated ||= record.merge(update.transform_keys { |key| Schema.storage_key(key) })
-      api_key_storage_set(ctx, updated, config) if config[:storage] == "secondary-storage"
-      updated
+
+      if defer && config[:defer_updates] && api_key_background_tasks?(ctx)
+        scheduled = record.merge(update.transform_keys { |key| Schema.storage_key(key) })
+        ctx.context.run_in_background(performer)
+        scheduled
+      else
+        performer.call
+      end
     end
 
     def api_key_delete_record(ctx, record, config)
@@ -486,7 +511,7 @@ module BetterAuth
 
     def api_key_storage_get(ctx, key, config)
       raw = api_key_storage(config, ctx.context)&.get(key)
-      raw && JSON.parse(raw)
+      raw && api_key_deserialize_storage_record(JSON.parse(raw))
     rescue JSON::ParserError
       nil
     end
@@ -524,6 +549,13 @@ module BetterAuth
       record.transform_values { |value| value.is_a?(Time) ? value.iso8601 : value }
     end
 
+    def api_key_deserialize_storage_record(record)
+      %w[createdAt updatedAt expiresAt lastRefillAt lastRequest].each do |field|
+        record[field] = api_key_normalize_time(record[field]) if record[field]
+      end
+      record
+    end
+
     def api_key_public(record, reveal_key: nil, include_key_field: false)
       data = record.transform_keys(&:to_sym)
       output = data.except(:key)
@@ -531,6 +563,25 @@ module BetterAuth
       output[:metadata] = api_key_decode_json(data[:metadata])
       output[:permissions] = api_key_decode_json(data[:permissions])
       output
+    end
+
+    def api_key_migrate_legacy_metadata(ctx, record, config)
+      parsed = api_key_decode_json(record["metadata"])
+      return record unless parsed.is_a?(Hash)
+
+      encoded = api_key_encode_json(parsed)
+      return record.merge("metadata" => encoded) if record["metadata"] == encoded
+
+      updated = record.merge("metadata" => encoded)
+      if config[:storage] == "database" || config[:fallback_to_database]
+        ctx.context.adapter.update(model: API_KEY_TABLE_NAME, where: [{field: "id", value: record["id"]}], update: {metadata: encoded})
+      end
+      api_key_storage_set(ctx, updated, config) if config[:storage] == "secondary-storage"
+      updated
+    end
+
+    def api_key_background_tasks?(ctx)
+      ctx.context.options.advanced.dig(:background_tasks, :handler).respond_to?(:call)
     end
 
     def api_key_get_from_headers(ctx, config)
@@ -566,7 +617,8 @@ module BetterAuth
       return nil if value.nil?
       return value if value.is_a?(Hash)
 
-      JSON.parse(value.to_s)
+      parsed = JSON.parse(value.to_s)
+      parsed.is_a?(String) ? api_key_decode_json(parsed) : parsed
     rescue JSON::ParserError
       nil
     end

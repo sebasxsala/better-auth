@@ -65,7 +65,7 @@ module BetterAuth
           authenticator_selection: passkey_authenticator_selection(config, query)
         )
         passkey_store_challenge(ctx, config, options.challenge, user.fetch("id"))
-        ctx.json(options.as_json)
+        ctx.json(options.as_json.merge(excludeCredentials: existing.map { |passkey| passkey_credential_descriptor(passkey) }))
       end
     end
 
@@ -80,7 +80,9 @@ module BetterAuth
         end
         options = WebAuthn::Credential.options_for_get(allow: passkeys.map { |passkey| passkey_credential_id(passkey) })
         passkey_store_challenge(ctx, config, options.challenge, session ? session.fetch(:user).fetch("id") : "")
-        ctx.json(options.as_json.merge(userVerification: "preferred"))
+        payload = options.as_json.merge(userVerification: "preferred")
+        payload[:allowCredentials] = passkeys.map { |passkey| passkey_credential_descriptor(passkey) } if passkeys.any?
+        ctx.json(payload)
       end
     end
 
@@ -219,6 +221,7 @@ module BetterAuth
     def passkey_schema(custom_schema = nil)
       base = {
         passkey: {
+          model_name: "passkeys",
           fields: {
             name: {type: "string", required: false},
             publicKey: {type: "string", required: true},
@@ -340,6 +343,16 @@ module BetterAuth
 
     def passkey_credential_id(record)
       record["credentialID"] || record["credentialId"] || record[:credentialID] || record[:credential_id]
+    end
+
+    def passkey_credential_descriptor(record)
+      descriptor = {
+        id: passkey_credential_id(record),
+        type: "public-key"
+      }
+      transports = (record["transports"] || record[:transports]).to_s.split(",").map(&:strip).reject(&:empty?)
+      descriptor[:transports] = transports if transports.any?
+      descriptor
     end
   end
 end

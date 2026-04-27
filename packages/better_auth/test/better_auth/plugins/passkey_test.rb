@@ -92,6 +92,65 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
     assert_empty auth.api.list_passkeys(headers: {"cookie" => first_cookie})
   end
 
+  def test_option_shapes_include_transport_details_and_per_request_expiration
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "shape@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    create_passkey(auth, user_id: user.fetch("id"), name: "Security Key", credential_id: "credential-one", transports: "internal,usb")
+
+    before_registration = Time.now
+    registration = auth.api.generate_passkey_registration_options(
+      headers: {"cookie" => cookie},
+      query: {authenticatorAttachment: "platform", name: "Work laptop"},
+      return_headers: true
+    )
+    registration_options = registration.fetch(:response)
+    registration_verification = latest_passkey_verification(auth)
+
+    assert_equal "Work laptop", registration_options.fetch(:user).fetch(:name)
+    assert_equal "platform", registration_options.fetch(:authenticatorSelection).fetch(:authenticatorAttachment)
+    assert_equal [{id: "credential-one", type: "public-key", transports: ["internal", "usb"]}], registration_options.fetch(:excludeCredentials)
+    assert_operator Time.parse(registration_verification.fetch("expiresAt").to_s), :>, before_registration
+
+    before_authentication = Time.now
+    authentication = auth.api.generate_passkey_authentication_options(headers: {"cookie" => cookie})
+    authentication_verification = latest_passkey_verification(auth)
+
+    assert_equal [{id: "credential-one", type: "public-key", transports: ["internal", "usb"]}], authentication.fetch(:allowCredentials)
+    assert_equal "preferred", authentication.fetch(:userVerification)
+    assert_operator Time.parse(authentication_verification.fetch("expiresAt").to_s), :>, before_authentication
+  end
+
+  def test_rejects_expired_challenge_and_delete_not_found_message
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "expired-challenge@example.com")
+    client = WebAuthn::FakeClient.new(ORIGIN)
+    registration = auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie}, return_headers: true)
+    challenge_cookie = cookie_header(registration.fetch(:headers).fetch("set-cookie"))
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+    verification = latest_passkey_verification(auth)
+    auth.context.adapter.update(
+      model: "verification",
+      where: [{field: "id", value: verification.fetch("id")}],
+      update: {expiresAt: Time.now - 1}
+    )
+
+    expired = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_passkey_registration(
+        headers: {"cookie" => [cookie, challenge_cookie].join("; "), "origin" => ORIGIN},
+        body: {response: response}
+      )
+    end
+    assert_equal 400, expired.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("CHALLENGE_NOT_FOUND"), expired.message
+
+    missing = assert_raises(BetterAuth::APIError) do
+      auth.api.delete_passkey(headers: {"cookie" => cookie}, body: {id: "missing-passkey"})
+    end
+    assert_equal 404, missing.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND"), missing.message
+  end
+
   def test_rejects_missing_challenge_and_wrong_registration_user
     auth = build_auth
     first_cookie = sign_up_cookie(auth, email: "first-challenge@example.com")
@@ -143,21 +202,25 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
     cookie_header(headers.fetch("set-cookie"))
   end
 
-  def create_passkey(auth, user_id:, name:)
+  def create_passkey(auth, user_id:, name:, credential_id: "#{name}-credential", transports: "internal")
     auth.context.adapter.create(
       model: "passkey",
       data: {
         userId: user_id,
         name: name,
         publicKey: "mock-public-key",
-        credentialID: "#{name}-credential",
+        credentialID: credential_id,
         counter: 0,
         deviceType: "singleDevice",
         backedUp: false,
-        transports: "internal",
+        transports: transports,
         createdAt: Time.now
       }
     )
+  end
+
+  def latest_passkey_verification(auth)
+    auth.context.adapter.find_many(model: "verification").max_by { |entry| entry.fetch("createdAt") || Time.at(0) }
   end
 
   def cookie_header(set_cookie)

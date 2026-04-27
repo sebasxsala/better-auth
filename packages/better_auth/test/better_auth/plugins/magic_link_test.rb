@@ -53,6 +53,35 @@ class BetterAuthPluginsMagicLinkTest < Minitest::Test
     assert_equal true, result[:user]["emailVerified"]
   end
 
+  def test_magic_link_redirects_new_users_to_new_user_callback_url
+    sent = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.magic_link(send_magic_link: ->(data, _ctx = nil) { sent << data })
+      ]
+    )
+
+    auth.api.sign_in_magic_link(
+      body: {
+        email: "new-callback-magic@example.com",
+        name: "Callback Magic",
+        callbackURL: "/dashboard",
+        newUserCallbackURL: "/welcome"
+      }
+    )
+    status, headers, _body = auth.api.magic_link_verify(
+      query: {
+        token: sent.first[:token],
+        callbackURL: "/dashboard",
+        newUserCallbackURL: "/welcome"
+      },
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_equal "/welcome", headers.fetch("location")
+  end
+
   def test_magic_link_verifies_existing_unverified_user
     sent = []
     auth = build_auth(
@@ -70,6 +99,27 @@ class BetterAuthPluginsMagicLinkTest < Minitest::Test
     assert_equal true, result[:user]["emailVerified"]
     updated = auth.context.internal_adapter.find_user_by_email("unverified-magic@example.com")[:user]
     assert_equal true, updated["emailVerified"]
+  end
+
+  def test_magic_link_verifies_last_issued_token_and_sets_cookie_for_json_response
+    sent = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.magic_link(send_magic_link: ->(data, _ctx = nil) { sent << data })
+      ]
+    )
+    auth.api.sign_up_email(body: {email: "latest-magic@example.com", password: "password123", name: "Latest Magic"})
+
+    3.times { auth.api.sign_in_magic_link(body: {email: "latest-magic@example.com"}) }
+    latest_token = sent.last.fetch(:token)
+
+    status, headers, body = auth.api.magic_link_verify(query: {token: latest_token}, as_response: true)
+
+    assert_equal 200, status
+    assert_includes headers.fetch("set-cookie"), "better-auth.session_token="
+    parsed = JSON.parse(body.join)
+    assert_match(/\A[0-9a-f]{32}\z/, parsed.fetch("token"))
+    assert_equal "latest-magic@example.com", parsed.fetch("user").fetch("email")
   end
 
   def test_magic_link_redirects_for_expired_invalid_and_disabled_signup

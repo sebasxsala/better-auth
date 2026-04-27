@@ -8,6 +8,7 @@ module BetterAuth
       def build(config)
         schema = {
           organization: {
+            model_name: "organizations",
             fields: {
               name: {type: "string", required: true, sortable: true},
               slug: {type: "string", required: true, unique: true, sortable: true},
@@ -18,6 +19,7 @@ module BetterAuth
             }
           },
           member: {
+            model_name: "members",
             fields: {
               organizationId: {type: "string", required: true, references: {model: "organization", field: "id"}, index: true},
               userId: {type: "string", required: true, references: {model: "user", field: "id"}, index: true},
@@ -26,6 +28,7 @@ module BetterAuth
             }
           },
           invitation: {
+            model_name: "invitations",
             fields: {
               organizationId: {type: "string", required: true, references: {model: "organization", field: "id"}, index: true},
               email: {type: "string", required: true, sortable: true},
@@ -46,6 +49,7 @@ module BetterAuth
 
         if truthy?(config.dig(:teams, :enabled))
           schema[:team] = {
+            model_name: "teams",
             fields: {
               name: {type: "string", required: true},
               organizationId: {type: "string", required: true, references: {model: "organization", field: "id"}, index: true},
@@ -54,6 +58,7 @@ module BetterAuth
             }
           }
           schema[:teamMember] = {
+            model_name: "team_members",
             fields: {
               teamId: {type: "string", required: true, references: {model: "team", field: "id"}, index: true},
               userId: {type: "string", required: true, references: {model: "user", field: "id"}, index: true},
@@ -65,6 +70,7 @@ module BetterAuth
 
         if truthy?(config.dig(:dynamic_access_control, :enabled))
           schema[:organizationRole] = {
+            model_name: "organization_roles",
             fields: {
               organizationId: {type: "string", required: true, references: {model: "organization", field: "id"}, index: true},
               role: {type: "string", required: true},
@@ -88,7 +94,7 @@ module BetterAuth
           result[model][:model_name] = table[:model_name] || table["modelName"] || table["model_name"] if table[:model_name] || table["modelName"] || table["model_name"]
           fields = table[:fields] || table["fields"] || {}
           additional = table[:additional_fields] || table["additionalFields"] || table["additional_fields"] || {}
-          result[model][:fields] = (result[model][:fields] || {}).merge(storage_fields(fields)).merge(storage_fields(additional))
+          result[model][:fields] = (result[model][:fields] || {}).merge(Plugins.storage_fields(fields)).merge(Plugins.storage_fields(additional))
         end
       end
 

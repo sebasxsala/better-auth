@@ -48,6 +48,7 @@ module BetterAuth
 
     def set_active_session_endpoint
       Endpoint.new(path: "/multi-session/set-active", method: "POST") do |ctx|
+        Routes.current_session(ctx)
         token = fetch_value(ctx.body, "sessionToken").to_s
         cookie_name = multi_session_cookie_name(ctx, token)
         unless !token.empty? && ctx.get_signed_cookie(cookie_name, ctx.context.secret)
@@ -67,6 +68,7 @@ module BetterAuth
 
     def revoke_device_session_endpoint
       Endpoint.new(path: "/multi-session/revoke", method: "POST") do |ctx|
+        current = Routes.current_session(ctx)
         token = fetch_value(ctx.body, "sessionToken").to_s
         cookie_name = multi_session_cookie_name(ctx, token)
         unless !token.empty? && ctx.get_signed_cookie(cookie_name, ctx.context.secret)
@@ -76,11 +78,6 @@ module BetterAuth
         ctx.context.internal_adapter.delete_session(token)
         expire_cookie(ctx, cookie_name)
 
-        current = begin
-          Session.find_current(ctx)
-        rescue APIError
-          nil
-        end
         if current && current[:session]["token"] == token
           next_session = ctx.context.internal_adapter.find_sessions(verified_multi_session_tokens(ctx).reject { |entry| entry == token }).first
           if next_session
@@ -104,7 +101,9 @@ module BetterAuth
       cookies = ctx.cookies
       return if cookies.key?(cookie_name)
 
-      multi_cookie_names(ctx).each do |name|
+      deleted_count = 0
+      existing_multi_cookie_names = multi_cookie_names(ctx)
+      existing_multi_cookie_names.each do |name|
         existing_token = ctx.get_signed_cookie(name, ctx.context.secret)
         next unless existing_token
 
@@ -113,9 +112,10 @@ module BetterAuth
 
         ctx.context.internal_adapter.delete_session(existing_token)
         expire_cookie(ctx, name)
+        deleted_count += 1
       end
 
-      current_count = multi_cookie_names(ctx).length + 1
+      current_count = existing_multi_cookie_names.length - deleted_count + 1
       return if current_count > config[:maximum_sessions].to_i
 
       ctx.set_signed_cookie(cookie_name, token, ctx.context.secret, cookie_config.attributes)

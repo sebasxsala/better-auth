@@ -47,7 +47,7 @@ class BetterAuthPluginsUsernameTest < Minitest::Test
     duplicate = assert_raises(BetterAuth::APIError) do
       auth.api.sign_up_email(body: {email: "two@example.com", username: "FIRST_USER", password: "password123", name: "Two"})
     end
-    assert_equal 400, duplicate.status_code
+    assert_equal 422, duplicate.status_code
     assert_equal BetterAuth::Plugins::USERNAME_ERROR_CODES["USERNAME_IS_ALREADY_TAKEN"], duplicate.message
 
     invalid = assert_raises(BetterAuth::APIError) do
@@ -61,6 +61,49 @@ class BetterAuthPluginsUsernameTest < Minitest::Test
     end
     assert_equal 422, too_short.status_code
     assert_equal BetterAuth::Plugins::USERNAME_ERROR_CODES["USERNAME_TOO_SHORT"], too_short.message
+  end
+
+  def test_username_update_duplicate_rules_match_upstream
+    auth = build_auth(plugins: [BetterAuth::Plugins.username(min_username_length: 4)])
+    first_cookie = sign_up_cookie(auth, email: "first@example.com", username: "first_user")
+    second_cookie = sign_up_cookie(auth, email: "second@example.com", username: "second_user")
+
+    different_user = assert_raises(BetterAuth::APIError) do
+      auth.api.update_user(headers: {"cookie" => second_cookie}, body: {username: "FIRST_USER"})
+    end
+    assert_equal 400, different_user.status_code
+    assert_equal BetterAuth::Plugins::USERNAME_ERROR_CODES["USERNAME_IS_ALREADY_TAKEN"], different_user.message
+
+    auth.api.update_user(headers: {"cookie" => first_cookie}, body: {username: "FIRST_USER"})
+    session = auth.api.get_session(headers: {"cookie" => first_cookie}, query: {disableCookieCache: true})
+    assert_equal "first_user", session[:user]["username"]
+  end
+
+  def test_username_display_only_and_post_normalization_flow
+    display_auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.username(
+          display_username_validator: ->(display_username) { display_username.match?(/\A[a-zA-Z0-9_\-\s]+\z/) }
+        )
+      ]
+    )
+    display_cookie = sign_up_cookie(display_auth, email: "display-only@example.com", display_username: "Test Username")
+    display_session = display_auth.api.get_session(headers: {"cookie" => display_cookie}, query: {disableCookieCache: true})
+    assert_equal "test username", display_session[:user]["username"]
+    assert_equal "Test Username", display_session[:user]["displayUsername"]
+
+    post_auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.username(
+          validation_order: {username: "post-normalization", display_username: "post-normalization"},
+          username_normalization: ->(username) { username.tr(" ", "_").downcase }
+        )
+      ]
+    )
+    post_cookie = sign_up_cookie(post_auth, email: "post-normalized@example.com", username: "Post Normalized")
+    post_session = post_auth.api.get_session(headers: {"cookie" => post_cookie}, query: {disableCookieCache: true})
+    assert_equal "post_normalized", post_session[:user]["username"]
+    assert_equal "Post Normalized", post_session[:user]["displayUsername"]
   end
 
   def test_username_custom_normalization_and_validators
@@ -159,6 +202,14 @@ class BetterAuthPluginsUsernameTest < Minitest::Test
 
   def build_auth(options = {})
     BetterAuth.auth({base_url: "http://localhost:3000", secret: SECRET, database: :memory}.merge(options))
+  end
+
+  def sign_up_cookie(auth, email:, username: nil, display_username: nil)
+    body = {email: email, password: "password123", name: "Username User"}
+    body[:username] = username if username
+    body[:display_username] = display_username if display_username
+    _status, headers, _body = auth.api.sign_up_email(body: body, as_response: true)
+    cookie_header(headers.fetch("set-cookie"))
   end
 
   def cookie_header(set_cookie)

@@ -133,7 +133,7 @@ module BetterAuth
         body = normalize_hash(ctx.body)
         user_id = body[:user_id].to_s
         raise APIError.new("BAD_REQUEST", message: "userId is required") if user_id.empty?
-        update = {role: admin_parse_roles(body[:role])}
+        update = {role: admin_validate_roles!(body[:role], config)}
         user = ctx.context.internal_adapter.update_user(user_id, update)
         ctx.json(Schema.parse_output(ctx.context.options, "user", user || {}))
       end
@@ -143,31 +143,42 @@ module BetterAuth
       Endpoint.new(path: "/admin/get-user", method: "GET") do |ctx|
         admin_require_permission!(ctx, config, {user: ["get"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_GET_USER"))
         query = normalize_hash(ctx.query)
-        user = if query[:user_id]
-          ctx.context.internal_adapter.find_user_by_id(query[:user_id])
+        user = if query[:id] || query[:user_id]
+          ctx.context.internal_adapter.find_user_by_id(query[:id] || query[:user_id])
         elsif query[:email]
           ctx.context.internal_adapter.find_user_by_email(query[:email])&.fetch(:user)
         end
-        raise APIError.new("NOT_FOUND", message: "User not found") unless user
-        ctx.json({user: Schema.parse_output(ctx.context.options, "user", user)})
+        raise APIError.new("NOT_FOUND", message: BASE_ERROR_CODES.fetch("USER_NOT_FOUND")) unless user
+        ctx.json(Schema.parse_output(ctx.context.options, "user", user))
       end
     end
 
     def admin_create_user_endpoint(config)
       Endpoint.new(path: "/admin/create-user", method: "POST") do |ctx|
-        admin_require_permission!(ctx, config, {user: ["create"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_CREATE_USERS"))
+        session = Routes.current_session(ctx, allow_nil: true)
+        if session
+          unless admin_permission?(session[:user], session[:user]["role"], {user: ["create"]}, config)
+            raise APIError.new("FORBIDDEN", message: ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_CREATE_USERS"))
+          end
+        elsif !ctx.headers.empty?
+          raise APIError.new("UNAUTHORIZED")
+        end
+
         body = normalize_hash(ctx.body)
         email = body[:email].to_s.downcase
+        raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES.fetch("INVALID_EMAIL")) unless Routes::EMAIL_PATTERN.match?(email)
+
         if ctx.context.internal_adapter.find_user_by_email(email)
-          raise APIError.new("CONFLICT", message: ADMIN_ERROR_CODES.fetch("USER_ALREADY_EXISTS"))
+          raise APIError.new("BAD_REQUEST", message: ADMIN_ERROR_CODES.fetch("USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL"))
         end
-        user = ctx.context.internal_adapter.create_user(
+        data = normalize_hash(body[:data]).each_with_object({}) { |(key, value), result| result[Schema.storage_key(key)] = value }
+        user = ctx.context.internal_adapter.create_user(data.merge(
           name: body[:name].to_s,
           email: email,
-          emailVerified: body.key?(:email_verified) ? body[:email_verified] : true,
-          image: body[:image],
-          role: admin_parse_roles(body[:role] || config[:default_role])
-        )
+          role: admin_validate_roles!(body[:role] || config[:default_role], config)
+        ).merge(body.key?(:image) ? {image: body[:image]} : {}))
+        raise APIError.new("INTERNAL_SERVER_ERROR", message: ADMIN_ERROR_CODES.fetch("FAILED_TO_CREATE_USER")) unless user
+
         if body[:password].to_s != ""
           ctx.context.internal_adapter.link_account(userId: user["id"], providerId: "credential", accountId: user["id"], password: Password.hash(body[:password]))
         end
@@ -181,9 +192,12 @@ module BetterAuth
         body = normalize_hash(ctx.body)
         data = normalize_hash(body[:data] || body).except(:user_id, :data)
         raise APIError.new("BAD_REQUEST", message: ADMIN_ERROR_CODES.fetch("NO_DATA_TO_UPDATE")) if data.empty?
-        data[:role] = admin_parse_roles(data[:role]) if data.key?(:role)
+        if data.key?(:role)
+          admin_require_permission!(ctx, config, {user: ["set-role"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE"))
+          data[:role] = admin_validate_roles!(data[:role], config)
+        end
         user = ctx.context.internal_adapter.update_user(body[:user_id], data)
-        ctx.json({user: Schema.parse_output(ctx.context.options, "user", user)})
+        ctx.json(Schema.parse_output(ctx.context.options, "user", user))
       end
     end
 
@@ -191,15 +205,17 @@ module BetterAuth
       Endpoint.new(path: "/admin/list-users", method: "GET") do |ctx|
         admin_require_permission!(ctx, config, {user: ["list"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_LIST_USERS"))
         query = normalize_hash(ctx.query)
-        users = ctx.context.internal_adapter.list_users(
-          limit: query[:limit],
-          offset: query[:offset],
-          sort_by: query[:sort_by] ? {field: query[:sort_by], direction: query[:sort_direction] || query[:sort_order] || "asc"} : nil
-        )
-        users = admin_filter_users(users, query)
+        where = admin_user_where(query)
+        sort_by = admin_user_sort(query)
+        limit = query.key?(:limit) ? query[:limit].to_i : nil
+        offset = query.key?(:offset) ? query[:offset].to_i : nil
+        users = ctx.context.internal_adapter.list_users(limit: limit, offset: offset, sort_by: sort_by, where: where)
+        total = ctx.context.internal_adapter.count_total_users(where: where)
         ctx.json({
           users: users.map { |user| Schema.parse_output(ctx.context.options, "user", user) },
-          total: users.length
+          total: total,
+          limit: limit,
+          offset: offset
         })
       end
     end
@@ -208,7 +224,7 @@ module BetterAuth
       Endpoint.new(path: "/admin/list-user-sessions", method: "POST") do |ctx|
         admin_require_permission!(ctx, config, {session: ["list"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_LIST_USERS_SESSIONS"))
         sessions = ctx.context.internal_adapter.list_sessions(normalize_hash(ctx.body)[:user_id])
-        ctx.json(sessions.map { |session| Schema.parse_output(ctx.context.options, "session", session) })
+        ctx.json({sessions: sessions.map { |session| Schema.parse_output(ctx.context.options, "session", session) }})
       end
     end
 
@@ -216,11 +232,13 @@ module BetterAuth
       Endpoint.new(path: "/admin/ban-user", method: "POST") do |ctx|
         session = admin_require_permission!(ctx, config, {user: ["ban"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_BAN_USERS"))
         body = normalize_hash(ctx.body)
+        found = ctx.context.internal_adapter.find_user_by_id(body[:user_id])
+        raise APIError.new("NOT_FOUND", message: BASE_ERROR_CODES.fetch("USER_NOT_FOUND")) unless found
         raise APIError.new("BAD_REQUEST", message: ADMIN_ERROR_CODES.fetch("YOU_CANNOT_BAN_YOURSELF")) if body[:user_id] == session[:user]["id"]
         expires_in = body[:ban_expires_in] || config[:default_ban_expires_in]
-        user = ctx.context.internal_adapter.update_user(body[:user_id], banned: true, banReason: body[:ban_reason] || config[:default_ban_reason], banExpires: expires_in ? Time.now + expires_in.to_i : nil)
+        user = ctx.context.internal_adapter.update_user(body[:user_id], banned: true, banReason: body[:ban_reason] || config[:default_ban_reason] || "No reason", banExpires: expires_in ? Time.now + expires_in.to_i : nil)
         ctx.context.internal_adapter.delete_sessions(body[:user_id])
-        ctx.json(Schema.parse_output(ctx.context.options, "user", user))
+        ctx.json({user: Schema.parse_output(ctx.context.options, "user", user)})
       end
     end
 
@@ -228,7 +246,7 @@ module BetterAuth
       Endpoint.new(path: "/admin/unban-user", method: "POST") do |ctx|
         admin_require_permission!(ctx, config, {user: ["ban"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_BAN_USERS"))
         user = ctx.context.internal_adapter.update_user(normalize_hash(ctx.body)[:user_id], banned: false, banReason: nil, banExpires: nil)
-        ctx.json(Schema.parse_output(ctx.context.options, "user", user))
+        ctx.json({user: Schema.parse_output(ctx.context.options, "user", user)})
       end
     end
 
@@ -241,9 +259,18 @@ module BetterAuth
         if !config[:allow_impersonating_admins] && admin_user?(target, config)
           raise APIError.new("FORBIDDEN", message: ADMIN_ERROR_CODES.fetch("YOU_CANNOT_IMPERSONATE_ADMINS"))
         end
-        impersonated = ctx.context.internal_adapter.create_session(target["id"], false, {impersonatedBy: session[:user]["id"], expiresAt: Time.now + config[:impersonation_session_duration].to_i}, false, ctx)
-        Cookies.set_session_cookie(ctx, {session: impersonated, user: target})
-        ctx.json({session: impersonated, user: Schema.parse_output(ctx.context.options, "user", target), headers: ctx.response_headers})
+        impersonated = ctx.context.internal_adapter.create_session(target["id"], true, {impersonatedBy: session[:user]["id"], expiresAt: Time.now + config[:impersonation_session_duration].to_i}, true, ctx)
+        raise APIError.new("INTERNAL_SERVER_ERROR", message: ADMIN_ERROR_CODES.fetch("FAILED_TO_CREATE_USER")) unless impersonated
+
+        dont_remember_cookie = ctx.get_signed_cookie(ctx.context.auth_cookies[:dont_remember].name, ctx.context.secret)
+        Cookies.delete_session_cookie(ctx)
+        admin_cookie = ctx.context.create_auth_cookie("admin_session")
+        ctx.set_signed_cookie(admin_cookie.name, "#{session[:session]["token"]}:#{dont_remember_cookie}", ctx.context.secret, ctx.context.auth_cookies[:session_token].attributes)
+        Cookies.set_session_cookie(ctx, {session: impersonated, user: target}, true)
+        ctx.json({
+          session: Schema.parse_output(ctx.context.options, "session", impersonated),
+          user: Schema.parse_output(ctx.context.options, "user", target)
+        })
       end
     end
 
@@ -251,12 +278,27 @@ module BetterAuth
       Endpoint.new(path: "/admin/stop-impersonating", method: "POST") do |ctx|
         session = Routes.current_session(ctx, sensitive: true)
         admin_id = session[:session]["impersonatedBy"]
-        raise APIError.new("BAD_REQUEST", message: "Not impersonating") unless admin_id
+        raise APIError.new("BAD_REQUEST", message: "You are not impersonating anyone") unless admin_id
         admin = ctx.context.internal_adapter.find_user_by_id(admin_id)
-        raise APIError.new("NOT_FOUND", message: "User not found") unless admin
-        new_session = ctx.context.internal_adapter.create_session(admin["id"], false, nil, false, ctx)
-        Cookies.set_session_cookie(ctx, {session: new_session, user: admin})
-        ctx.json({status: true})
+        raise APIError.new("INTERNAL_SERVER_ERROR", message: "Failed to find user") unless admin
+
+        admin_cookie = ctx.context.create_auth_cookie("admin_session")
+        admin_cookie_value = ctx.get_signed_cookie(admin_cookie.name, ctx.context.secret)
+        raise APIError.new("INTERNAL_SERVER_ERROR", message: "Failed to find admin session") unless admin_cookie_value
+
+        admin_session_token, dont_remember_cookie = admin_cookie_value.split(":", 2)
+        admin_session = ctx.context.internal_adapter.find_session(admin_session_token)
+        if !admin_session || admin_session[:session]["userId"] != admin["id"]
+          raise APIError.new("INTERNAL_SERVER_ERROR", message: "Failed to find admin session")
+        end
+
+        ctx.context.internal_adapter.delete_session(session[:session]["token"])
+        Cookies.set_session_cookie(ctx, admin_session, !dont_remember_cookie.to_s.empty?)
+        Cookies.expire_cookie(ctx, admin_cookie)
+        ctx.json({
+          session: Schema.parse_output(ctx.context.options, "session", admin_session[:session]),
+          user: Schema.parse_output(ctx.context.options, "user", admin_session[:user])
+        })
       end
     end
 
@@ -264,7 +306,7 @@ module BetterAuth
       Endpoint.new(path: "/admin/revoke-user-session", method: "POST") do |ctx|
         admin_require_permission!(ctx, config, {session: ["revoke"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS"))
         ctx.context.internal_adapter.delete_session(normalize_hash(ctx.body)[:session_token])
-        ctx.json({status: true})
+        ctx.json({success: true})
       end
     end
 
@@ -272,7 +314,7 @@ module BetterAuth
       Endpoint.new(path: "/admin/revoke-user-sessions", method: "POST") do |ctx|
         admin_require_permission!(ctx, config, {session: ["revoke"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS"))
         ctx.context.internal_adapter.delete_sessions(normalize_hash(ctx.body)[:user_id])
-        ctx.json({status: true})
+        ctx.json({success: true})
       end
     end
 
@@ -281,8 +323,9 @@ module BetterAuth
         session = admin_require_permission!(ctx, config, {user: ["delete"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS"))
         user_id = normalize_hash(ctx.body)[:user_id]
         raise APIError.new("BAD_REQUEST", message: ADMIN_ERROR_CODES.fetch("YOU_CANNOT_REMOVE_YOURSELF")) if user_id == session[:user]["id"]
+        raise APIError.new("NOT_FOUND", message: BASE_ERROR_CODES.fetch("USER_NOT_FOUND")) unless ctx.context.internal_adapter.find_user_by_id(user_id)
         ctx.context.internal_adapter.delete_user(user_id)
-        ctx.json({status: true})
+        ctx.json({success: true})
       end
     end
 
@@ -306,9 +349,31 @@ module BetterAuth
       Endpoint.new(path: "/admin/has-permission", method: "POST") do |ctx|
         session = Routes.current_session(ctx, allow_nil: true)
         body = normalize_hash(ctx.body)
-        user = body[:user_id] ? ctx.context.internal_adapter.find_user_by_id(body[:user_id]) : session&.fetch(:user)
-        role = body[:role] || user&.fetch("role", nil) || config[:default_role]
-        ctx.json({success: admin_permission?(user, role, body[:permissions] || body[:permission], config)})
+        permissions = body[:permissions] || body[:permission]
+        unless permissions
+          raise APIError.new("BAD_REQUEST", message: "invalid permission check. no permission(s) were passed.")
+        end
+
+        if session
+          user = session[:user]
+          role = user["role"]
+        elsif !ctx.headers.empty?
+          raise APIError.new("UNAUTHORIZED")
+        elsif body.key?(:role)
+          role = body[:role]
+          user = {"id" => body[:user_id].to_s, "role" => role}
+        elsif body.key?(:user_id)
+          user_id = body[:user_id].to_s
+          raise APIError.new("BAD_REQUEST", message: "user id or role is required") if user_id.empty?
+
+          user = ctx.context.internal_adapter.find_user_by_id(user_id)
+          raise APIError.new("BAD_REQUEST", message: "user not found") unless user
+
+          role = user["role"]
+        else
+          raise APIError.new("BAD_REQUEST", message: "user id or role is required")
+        end
+        ctx.json({error: nil, success: admin_permission?(user, role, permissions, config)})
       end
     end
 
@@ -339,6 +404,55 @@ module BetterAuth
       Array(roles).join(",")
     end
 
+    def admin_validate_roles!(roles, config)
+      unless Array(roles).all? { |role| role.is_a?(String) || role.is_a?(Symbol) }
+        raise APIError.new("BAD_REQUEST", message: ADMIN_ERROR_CODES.fetch("INVALID_ROLE_TYPE"))
+      end
+
+      parsed = admin_parse_roles(roles)
+      defined_roles = (config[:roles] || {}).transform_keys(&:to_s)
+      invalid = parsed.split(",", -1).reject { |role| defined_roles.key?(role) }
+      if invalid.any?
+        raise APIError.new("BAD_REQUEST", message: ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_SET_NON_EXISTENT_VALUE"))
+      end
+
+      parsed
+    end
+
+    def admin_user_where(query)
+      where = []
+      search_value = query[:search_value]
+      if search_value && !search_value.to_s.empty?
+        where << {
+          field: query[:search_field] || "email",
+          operator: query[:search_operator] || "contains",
+          value: search_value
+        }
+      end
+
+      filter_value_defined = query.key?(:filter_value) || (query[:filter].is_a?(Hash) && query[:filter].key?(:value))
+      if filter_value_defined
+        filter_field = query[:filter_field] || query.dig(:filter, :field) || "email"
+        where << {
+          field: (filter_field.to_s == "_id") ? "id" : filter_field,
+          operator: query[:filter_operator] || query.dig(:filter, :operator) || "eq",
+          value: query.key?(:filter_value) ? query[:filter_value] : query.dig(:filter, :value)
+        }
+      end
+
+      where
+    end
+
+    def admin_user_sort(query)
+      sort_field = query[:sort_by] || query[:sort_field]
+      return nil unless sort_field
+
+      {
+        field: sort_field,
+        direction: query[:sort_direction] || query[:sort_order] || "asc"
+      }
+    end
+
     def admin_filter_users(users, query)
       result = users
       search_value = query[:search_value].to_s
@@ -348,7 +462,11 @@ module BetterAuth
       end
       filter_field = (query[:filter_field] || query.dig(:filter, :field)).to_s
       if !filter_field.empty?
-        filter_value = query[:filter_value] || query.dig(:filter, :value)
+        filter_value = if query.key?(:filter_value)
+          query[:filter_value]
+        else
+          query.dig(:filter, :value)
+        end
         operator = (query[:filter_operator] || query.dig(:filter, :operator) || "eq").to_s
         field = (filter_field == "_id") ? "id" : Schema.storage_key(filter_field)
         result = result.select do |user|
@@ -361,6 +479,23 @@ module BetterAuth
         end
       end
       result
+    end
+
+    def admin_sort_users(users, query)
+      sort_field = query[:sort_by] || query[:sort_field]
+      return users unless sort_field
+
+      field = Schema.storage_key(sort_field)
+      sorted = users.sort_by { |user| user[field].to_s }
+      direction = (query[:sort_direction] || query[:sort_order] || "asc").to_s
+      (direction.downcase == "desc") ? sorted.reverse : sorted
+    end
+
+    def admin_paginate_users(users, query)
+      offset = query[:offset].to_i
+      limit = query[:limit]
+      result = offset.positive? ? users.drop(offset) : users
+      limit ? result.first(limit.to_i) : result
     end
   end
 end

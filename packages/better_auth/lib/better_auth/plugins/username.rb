@@ -186,7 +186,11 @@ module BetterAuth
         current = (ctx.path == "/update-user") ? Routes.current_session(ctx, allow_nil: true) : nil
         same_user = existing && current && existing["id"] == current[:session]["userId"]
 
-        if existing && (ctx.path == "/sign-up/email" || (ctx.path == "/update-user" && !same_user))
+        if existing && ctx.path == "/sign-up/email"
+          raise APIError.new("UNPROCESSABLE_ENTITY", message: USERNAME_ERROR_CODES["USERNAME_IS_ALREADY_TAKEN"])
+        end
+
+        if existing && ctx.path == "/update-user" && !same_user
           raise APIError.new("BAD_REQUEST", message: USERNAME_ERROR_CODES["USERNAME_IS_ALREADY_TAKEN"])
         end
       end

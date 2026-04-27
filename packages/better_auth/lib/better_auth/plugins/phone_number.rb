@@ -35,6 +35,10 @@ module BetterAuth
         hooks: {
           before: [
             {
+              matcher: ->(ctx) { ctx.path == "/sign-up/email" && normalize_hash(ctx.body).key?(:phone_number) },
+              handler: ->(ctx) { validate_unique_phone_number!(ctx, normalize_hash(ctx.body)[:phone_number]) }
+            },
+            {
               matcher: ->(ctx) { ctx.path == "/update-user" && normalize_hash(ctx.body).key?(:phone_number) },
               handler: ->(_ctx) { raise APIError.new("BAD_REQUEST", message: PHONE_NUMBER_ERROR_CODES["PHONE_NUMBER_CANNOT_BE_UPDATED"]) }
             }
@@ -181,12 +185,13 @@ module BetterAuth
         otp = body[:otp].to_s
         new_password = body[:new_password]
 
-        phone_number_verify_code!(ctx, config, "#{phone_number}-request-password-reset", otp)
+        verification = phone_number_verify_code!(ctx, config, "#{phone_number}-request-password-reset", otp, consume: false)
         user = ctx.context.adapter.find_one(model: "user", where: [{field: "phoneNumber", value: phone_number}])
         raise APIError.new("BAD_REQUEST", message: PHONE_NUMBER_ERROR_CODES["UNEXPECTED_ERROR"]) unless user
 
         Routes.validate_password_length!(new_password, ctx.context.options.email_and_password)
         ctx.context.internal_adapter.update_password(user["id"], Password.hash(new_password, hasher: ctx.context.options.email_and_password.dig(:password, :hash)))
+        ctx.context.internal_adapter.delete_verification_value(verification["id"])
         ctx.context.internal_adapter.delete_sessions(user["id"]) if ctx.context.options.email_and_password[:revoke_sessions_on_password_reset]
         ctx.json({status: true})
       end
@@ -224,15 +229,15 @@ module BetterAuth
       )
     end
 
-    def phone_number_verify_code!(ctx, config, identifier, code)
+    def phone_number_verify_code!(ctx, config, identifier, code, consume: true)
       verifier = config[:verify_otp]
       if verifier.respond_to?(:call)
         valid = verifier.call({phone_number: identifier.delete_suffix("-request-password-reset"), code: code}, ctx)
         raise APIError.new("BAD_REQUEST", message: PHONE_NUMBER_ERROR_CODES["INVALID_OTP"]) unless valid
 
         verification = ctx.context.internal_adapter.find_verification_value(identifier)
-        ctx.context.internal_adapter.delete_verification_value(verification["id"]) if verification
-        return true
+        ctx.context.internal_adapter.delete_verification_value(verification["id"]) if consume && verification
+        return verification || true
       end
 
       verification = ctx.context.internal_adapter.find_verification_value(identifier)
@@ -254,8 +259,8 @@ module BetterAuth
         raise APIError.new("BAD_REQUEST", message: PHONE_NUMBER_ERROR_CODES["INVALID_OTP"])
       end
 
-      ctx.context.internal_adapter.delete_verification_value(verification["id"])
-      true
+      ctx.context.internal_adapter.delete_verification_value(verification["id"]) if consume
+      verification
     end
 
     def phone_number_store_code(ctx, config, identifier, code)
@@ -270,6 +275,13 @@ module BetterAuth
     def phone_number_deliver_otp(config, data, ctx)
       sender = config[:send_otp]
       sender.call(data, ctx) if sender.respond_to?(:call)
+    end
+
+    def validate_unique_phone_number!(ctx, phone_number)
+      return if phone_number.to_s.empty?
+
+      existing = ctx.context.adapter.find_one(model: "user", where: [{field: "phoneNumber", value: phone_number.to_s}])
+      raise APIError.new("UNPROCESSABLE_ENTITY", message: PHONE_NUMBER_ERROR_CODES["PHONE_NUMBER_EXIST"]) if existing
     end
 
     def validate_phone_number!(config, phone_number)

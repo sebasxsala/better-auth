@@ -128,6 +128,50 @@ class BetterAuthPluginsPhoneNumberTest < Minitest::Test
     assert_match(/\A\d{6}\z/, sent.first[:code])
   end
 
+  def test_sign_up_rejects_duplicate_phone_number_in_memory_adapter
+    auth = build_auth(plugins: [BetterAuth::Plugins.phone_number(send_otp: ->(_data, _ctx = nil) {})])
+    auth.api.sign_up_email(
+      body: {email: "phone-duplicate-one@example.com", password: "password123", name: "One", phoneNumber: "+18005550200"}
+    )
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_up_email(
+        body: {email: "phone-duplicate-two@example.com", password: "password123", name: "Two", phoneNumber: "+18005550200"}
+      )
+    end
+
+    assert_equal 422, error.status_code
+    assert_equal BetterAuth::Plugins::PHONE_NUMBER_ERROR_CODES["PHONE_NUMBER_EXIST"], error.message
+  end
+
+  def test_verify_uses_latest_phone_otp
+    sent = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.phone_number(
+          send_otp: ->(data, _ctx = nil) { sent << data },
+          sign_up_on_verification: {
+            get_temp_email: ->(phone_number) { "temp-#{phone_number}@example.test" }
+          }
+        )
+      ]
+    )
+    auth.api.send_phone_number_otp(body: {phoneNumber: "+18005550201"})
+    first_code = sent.last[:code]
+    auth.api.send_phone_number_otp(body: {phoneNumber: "+18005550201"})
+    latest_code = sent.last[:code]
+
+    old_code = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_phone_number(body: {phoneNumber: "+18005550201", code: first_code})
+    end
+    assert_equal 400, old_code.status_code
+    assert_equal BetterAuth::Plugins::PHONE_NUMBER_ERROR_CODES["INVALID_OTP"], old_code.message
+
+    result = auth.api.verify_phone_number(body: {phoneNumber: "+18005550201", code: latest_code})
+    assert_equal true, result[:status]
+    assert_equal "+18005550201", result[:user]["phoneNumber"]
+  end
+
   def test_attempt_limits_apply_to_verification_and_password_reset
     sent = []
     reset_sent = []
@@ -238,6 +282,71 @@ class BetterAuthPluginsPhoneNumberTest < Minitest::Test
     assert_match(/\A[0-9a-f]{32}\z/, auth.api.sign_in_phone_number(body: {phoneNumber: "+15105550123", password: "newpassword123"})[:token])
   end
 
+  def test_password_reset_keeps_otp_after_password_validation_failure
+    sent = []
+    reset_sent = []
+    auth = build_auth(
+      email_and_password: {min_password_length: 8},
+      plugins: [
+        BetterAuth::Plugins.phone_number(
+          send_otp: ->(data, _ctx = nil) { sent << data },
+          send_password_reset_otp: ->(data, _ctx = nil) { reset_sent << data },
+          sign_up_on_verification: {
+            get_temp_email: ->(phone_number) { "temp-#{phone_number}@example.test" }
+          }
+        )
+      ]
+    )
+    auth.api.send_phone_number_otp(body: {phoneNumber: "+15105550124"})
+    _status, headers, _body = auth.api.verify_phone_number(
+      body: {phoneNumber: "+15105550124", code: sent.last[:code]},
+      as_response: true
+    )
+    auth.api.set_password(headers: {"cookie" => cookie_header(headers.fetch("set-cookie"))}, body: {newPassword: "password123"})
+
+    auth.api.request_password_reset_phone_number(body: {phoneNumber: "+15105550124"})
+    too_short = assert_raises(BetterAuth::APIError) do
+      auth.api.reset_password_phone_number(body: {phoneNumber: "+15105550124", otp: reset_sent.last[:code], newPassword: "short"})
+    end
+    assert_equal 400, too_short.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["PASSWORD_TOO_SHORT"], too_short.message
+    refute_nil auth.context.internal_adapter.find_verification_value("+15105550124-request-password-reset")
+
+    assert_equal(
+      {status: true},
+      auth.api.reset_password_phone_number(body: {phoneNumber: "+15105550124", otp: reset_sent.last[:code], newPassword: "newpassword123"})
+    )
+    assert_nil auth.context.internal_adapter.find_verification_value("+15105550124-request-password-reset")
+    assert_match(/\A[0-9a-f]{32}\z/, auth.api.sign_in_phone_number(body: {phoneNumber: "+15105550124", password: "newpassword123"})[:token])
+  end
+
+  def test_sign_up_on_verification_preserves_additional_user_fields
+    sent = []
+    auth = build_auth(
+      user: {
+        additional_fields: {
+          lastName: {type: "string", required: true, returned: true}
+        }
+      },
+      plugins: [
+        BetterAuth::Plugins.phone_number(
+          send_otp: ->(data, _ctx = nil) { sent << data },
+          sign_up_on_verification: {
+            get_temp_email: ->(phone_number) { "temp-#{phone_number}@example.test" }
+          }
+        )
+      ]
+    )
+    auth.api.send_phone_number_otp(body: {phoneNumber: "+15105550125"})
+
+    result = auth.api.verify_phone_number(
+      body: {phoneNumber: "+15105550125", code: sent.last[:code], lastName: "Doe"}
+    )
+
+    assert_equal true, result[:status]
+    assert_equal "Doe", result[:user]["lastName"]
+  end
+
   def test_custom_validator_and_verify_otp_are_used
     verify_calls = []
     auth = build_auth(
@@ -266,6 +375,12 @@ class BetterAuthPluginsPhoneNumberTest < Minitest::Test
 
     assert_equal true, result[:status]
     assert_equal({phone_number: "+14155550100", code: "external-code"}, verify_calls.first)
+
+    rejected = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_phone_number(body: {phoneNumber: "+14155550101", code: "wrong-code"})
+    end
+    assert_equal 400, rejected.status_code
+    assert_equal BetterAuth::Plugins::PHONE_NUMBER_ERROR_CODES["INVALID_OTP"], rejected.message
   end
 
   def test_send_otp_requires_configured_delivery_callback

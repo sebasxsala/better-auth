@@ -32,6 +32,52 @@ class BetterAuthPluginsTwoFactorTest < Minitest::Test
     assert_includes headers.fetch("set-cookie"), "Max-Age=0"
   end
 
+  def test_second_factor_verification_preserves_dont_remember_me_session
+    auth = build_auth(plugins: [BetterAuth::Plugins.two_factor(skip_verification_on_enable: true)])
+    cookie = sign_up_cookie(auth, email: "dont-remember-2fa@example.com")
+    auth.api.enable_two_factor(headers: {"cookie" => cookie}, body: {password: "password123"})
+
+    sign_in = auth.api.sign_in_email(
+      body: {email: "dont-remember-2fa@example.com", password: "password123", rememberMe: false},
+      return_headers: true
+    )
+    two_factor_cookie = cookie_header(sign_in.fetch(:headers).fetch("set-cookie"))
+    record = auth.context.adapter.find_one(model: "twoFactor", where: [{field: "userId", value: user_id_from_email(auth, "dont-remember-2fa@example.com")}])
+    secret = BetterAuth::Crypto.symmetric_decrypt(key: SECRET, data: record.fetch("secret"))
+    verify = auth.api.verify_totp(headers: {"cookie" => two_factor_cookie}, body: {code: BetterAuth::Plugins.two_factor_totp(secret)}, return_headers: true)
+
+    set_cookie = verify.fetch(:headers).fetch("set-cookie")
+    session_cookie = set_cookie.lines.find { |line| line.include?("better-auth.session_token=") }
+    assert session_cookie
+    refute_includes session_cookie, "Max-Age="
+    assert_includes set_cookie, "better-auth.dont_remember="
+  end
+
+  def test_two_factor_cookie_max_age_options_are_applied
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.two_factor(
+          skip_verification_on_enable: true,
+          two_factor_cookie_max_age: 15 * 60,
+          trust_device_max_age: 7 * 24 * 60 * 60,
+          otp_options: {send_otp: ->(_data, _ctx = nil) {}}
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "cookie-age@example.com")
+    auth.api.enable_two_factor(headers: {"cookie" => cookie}, body: {password: "password123"})
+
+    sign_in = auth.api.sign_in_email(body: {email: "cookie-age@example.com", password: "password123"}, return_headers: true)
+    assert_cookie_max_age sign_in.fetch(:headers).fetch("set-cookie"), "better-auth.two_factor", 15 * 60
+
+    two_factor_cookie = cookie_header(sign_in.fetch(:headers).fetch("set-cookie"))
+    auth.api.send_two_factor_otp(headers: {"cookie" => two_factor_cookie})
+    verification = auth.context.adapter.find_many(model: "verification").find { |entry| entry["identifier"].to_s.start_with?("2fa-otp-") }
+    code = verification.fetch("value").split(":").first
+    verified = auth.api.verify_two_factor_otp(headers: {"cookie" => two_factor_cookie}, body: {code: code, trustDevice: true}, return_headers: true)
+    assert_cookie_max_age verified.fetch(:headers).fetch("set-cookie"), "better-auth.trust_device", 7 * 24 * 60 * 60
+  end
+
   def test_otp_verification_supports_hashed_storage_and_attempt_limits
     sent = []
     auth = build_auth(
@@ -102,6 +148,48 @@ class BetterAuthPluginsTwoFactorTest < Minitest::Test
     assert_equal false, session[:user]["twoFactorEnabled"]
   end
 
+  def test_otp_verification_supports_encrypted_and_custom_hash_storage
+    encrypted_sent = []
+    encrypted_auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.two_factor(
+          skip_verification_on_enable: true,
+          otp_options: {
+            store_otp: "encrypted",
+            send_otp: ->(data, _ctx = nil) { encrypted_sent << data }
+          }
+        )
+      ]
+    )
+    encrypted_cookie = sign_up_cookie(encrypted_auth, email: "encrypted-otp@example.com")
+    encrypted_auth.api.enable_two_factor(headers: {"cookie" => encrypted_cookie}, body: {password: "password123"})
+    encrypted_sign_in = encrypted_auth.api.sign_in_email(body: {email: "encrypted-otp@example.com", password: "password123"}, return_headers: true)
+    encrypted_two_factor_cookie = cookie_header(encrypted_sign_in.fetch(:headers).fetch("set-cookie"))
+    encrypted_auth.api.send_two_factor_otp(headers: {"cookie" => encrypted_two_factor_cookie})
+    encrypted_verified = encrypted_auth.api.verify_two_factor_otp(headers: {"cookie" => encrypted_two_factor_cookie}, body: {code: encrypted_sent.last.fetch(:otp)})
+    assert_equal "encrypted-otp@example.com", encrypted_verified[:user]["email"]
+
+    custom_sent = []
+    custom_auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.two_factor(
+          skip_verification_on_enable: true,
+          otp_options: {
+            store_otp: {hash: ->(token) { "custom_#{token.reverse}" }},
+            send_otp: ->(data, _ctx = nil) { custom_sent << data }
+          }
+        )
+      ]
+    )
+    custom_cookie = sign_up_cookie(custom_auth, email: "custom-otp@example.com")
+    custom_auth.api.enable_two_factor(headers: {"cookie" => custom_cookie}, body: {password: "password123"})
+    custom_sign_in = custom_auth.api.sign_in_email(body: {email: "custom-otp@example.com", password: "password123"}, return_headers: true)
+    custom_two_factor_cookie = cookie_header(custom_sign_in.fetch(:headers).fetch("set-cookie"))
+    custom_auth.api.send_two_factor_otp(headers: {"cookie" => custom_two_factor_cookie})
+    custom_verified = custom_auth.api.verify_two_factor_otp(headers: {"cookie" => custom_two_factor_cookie}, body: {code: custom_sent.last.fetch(:otp)})
+    assert_equal "custom-otp@example.com", custom_verified[:user]["email"]
+  end
+
   def build_auth(options = {})
     plugin_list = options.delete(:plugins) || [BetterAuth::Plugins.two_factor(otp_options: {send_otp: ->(_data, _ctx = nil) {}})]
     BetterAuth.auth({
@@ -123,7 +211,17 @@ class BetterAuthPluginsTwoFactorTest < Minitest::Test
     auth.api.get_session(headers: {"cookie" => cookie}, query: {disableCookieCache: true})[:user]["id"]
   end
 
+  def user_id_from_email(auth, email)
+    auth.context.adapter.find_one(model: "user", where: [{field: "email", value: email}]).fetch("id")
+  end
+
   def cookie_header(set_cookie)
     set_cookie.to_s.lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def assert_cookie_max_age(set_cookie, name, max_age)
+    line = set_cookie.lines.find { |candidate| candidate.include?("#{name}=") }
+    assert line, "expected #{name} Set-Cookie line in #{set_cookie.inspect}"
+    assert_includes line.downcase, "max-age=#{max_age}"
   end
 end

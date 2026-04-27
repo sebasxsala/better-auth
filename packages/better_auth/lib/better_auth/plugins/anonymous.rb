@@ -109,10 +109,10 @@ module BetterAuth
     def anonymous_email(config)
       generator = config[:generate_random_email]
       email = generator.call if generator.respond_to?(:call)
-      if email && !Routes::EMAIL_PATTERN.match?(email)
+      if present_string?(email) && !Routes::EMAIL_PATTERN.match?(email)
         raise APIError.new("BAD_REQUEST", message: ANONYMOUS_ERROR_CODES["INVALID_EMAIL_FORMAT"])
       end
-      return email if email
+      return email if present_string?(email)
 
       id = SecureRandom.hex(16)
       domain = config[:email_domain_name]
@@ -121,7 +121,8 @@ module BetterAuth
 
     def anonymous_name(ctx, config)
       generator = config[:generate_name]
-      return generator.call(ctx) if generator.respond_to?(:call)
+      name = generator.call(ctx) if generator.respond_to?(:call)
+      return name if present_string?(name)
 
       "Anonymous"
     end
@@ -176,6 +177,10 @@ module BetterAuth
       return mapping[:field_name] || mapping[:fieldName] if mapping.is_a?(Hash)
 
       nil
+    end
+
+    def present_string?(value)
+      value.is_a?(String) && !value.empty?
     end
   end
 end

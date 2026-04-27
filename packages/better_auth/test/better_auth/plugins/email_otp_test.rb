@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "rack/mock"
 require_relative "../../test_helper"
 
 class BetterAuthPluginsEmailOTPTest < Minitest::Test
@@ -54,6 +55,57 @@ class BetterAuthPluginsEmailOTPTest < Minitest::Test
 
     assert_match(/\A[0-9a-f]{32}\z/, result[:token])
     assert_equal "new-otp@example.com", result[:user]["email"]
+    assert_equal true, result[:user]["emailVerified"]
+  end
+
+  def test_sign_in_with_email_otp_normalizes_email_case
+    sent = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.email_otp(send_verification_otp: ->(data, _ctx = nil) { sent << data })
+      ]
+    )
+
+    auth.api.send_verification_otp(body: {email: "CASE-OTP@Example.COM", type: "sign-in"})
+    result = auth.api.sign_in_email_otp(body: {email: "case-otp@example.com", otp: sent.last[:otp]})
+
+    assert_equal "case-otp@example.com", result[:user]["email"]
+    assert_equal true, result[:user]["emailVerified"]
+  end
+
+  def test_send_verification_otp_prevents_enumeration_when_sign_up_is_disabled
+    sent = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.email_otp(
+          disable_sign_up: true,
+          send_verification_otp: ->(data, _ctx = nil) { sent << data }
+        )
+      ]
+    )
+    auth.api.sign_up_email(body: {email: "existing-otp@example.com", password: "password123", name: "Existing"})
+
+    missing = auth.api.send_verification_otp(body: {email: "missing-otp@example.com", type: "sign-in"})
+    existing = auth.api.send_verification_otp(body: {email: "existing-otp@example.com", type: "sign-in"})
+
+    assert_equal({success: true}, missing)
+    assert_equal({success: true}, existing)
+    assert_equal ["existing-otp@example.com"], sent.map { |entry| entry[:email] }
+  end
+
+  def test_email_otp_verifies_last_issued_otp
+    sent = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.email_otp(send_verification_otp: ->(data, _ctx = nil) { sent << data })
+      ]
+    )
+    auth.api.sign_up_email(body: {email: "latest-otp@example.com", password: "password123", name: "Latest"})
+
+    3.times { auth.api.send_verification_otp(body: {email: "latest-otp@example.com", type: "email-verification"}) }
+    result = auth.api.verify_email_otp(body: {email: "latest-otp@example.com", otp: sent.last[:otp]})
+
+    assert_equal true, result[:status]
     assert_equal true, result[:user]["emailVerified"]
   end
 
@@ -150,6 +202,42 @@ class BetterAuthPluginsEmailOTPTest < Minitest::Test
     assert_match(/\A[0-9a-f]{32}\z/, encrypted.api.sign_in_email_otp(body: {email: "encrypted@example.com", otp: "654321"})[:token])
   end
 
+  def test_server_otp_helpers_support_custom_encryptor_and_hasher_storage
+    encrypted = build_auth(
+      plugins: [
+        BetterAuth::Plugins.email_otp(
+          store_otp: {
+            encrypt: ->(otp) { "#{otp}:encrypted" },
+            decrypt: ->(stored) { stored.delete_suffix(":encrypted") }
+          },
+          generate_otp: ->(_data, _ctx = nil) { "246810" },
+          send_verification_otp: ->(_data, _ctx = nil) {}
+        )
+      ]
+    )
+    encrypted.api.create_verification_otp(body: {email: "custom-encrypted@example.com", type: "sign-in"})
+
+    assert_equal({otp: "246810"}, encrypted.api.get_verification_otp(query: {email: "custom-encrypted@example.com", type: "sign-in"}))
+    assert_match(/\A[0-9a-f]{32}\z/, encrypted.api.sign_in_email_otp(body: {email: "custom-encrypted@example.com", otp: "246810"})[:token])
+
+    hashed = build_auth(
+      plugins: [
+        BetterAuth::Plugins.email_otp(
+          store_otp: {hash: ->(otp) { "#{otp}:hashed" }},
+          generate_otp: ->(_data, _ctx = nil) { "135791" },
+          send_verification_otp: ->(_data, _ctx = nil) {}
+        )
+      ]
+    )
+    hashed.api.create_verification_otp(body: {email: "custom-hashed@example.com", type: "sign-in"})
+
+    error = assert_raises(BetterAuth::APIError) do
+      hashed.api.get_verification_otp(query: {email: "custom-hashed@example.com", type: "sign-in"})
+    end
+    assert_equal 400, error.status_code
+    assert_match(/\A[0-9a-f]{32}\z/, hashed.api.sign_in_email_otp(body: {email: "custom-hashed@example.com", otp: "135791"})[:token])
+  end
+
   def test_password_reset_with_email_otp_updates_password_and_revokes_sessions
     sent = []
     reset_calls = []
@@ -193,6 +281,53 @@ class BetterAuthPluginsEmailOTPTest < Minitest::Test
     assert auth.context.internal_adapter.find_verification_value("email-verification-otp-signup-otp@example.com")
   end
 
+  def test_override_default_email_verification_sends_once_and_calls_after_hook
+    sent = []
+    after_calls = []
+    auth = build_auth(
+      email_verification: {
+        send_on_sign_up: true,
+        after_email_verification: ->(user, _request = nil) { after_calls << user }
+      },
+      plugins: [
+        BetterAuth::Plugins.email_otp(
+          override_default_email_verification: true,
+          send_verification_on_sign_up: true,
+          send_verification_otp: ->(data, _ctx = nil) { sent << data }
+        )
+      ]
+    )
+
+    auth.api.sign_up_email(body: {email: "override-otp@example.com", password: "password123", name: "Override"})
+    result = auth.api.verify_email_otp(body: {email: "override-otp@example.com", otp: sent.first[:otp]})
+
+    assert_equal 1, sent.length
+    assert_equal true, result[:user]["emailVerified"]
+    assert_equal 1, after_calls.length
+    assert_equal "override-otp@example.com", after_calls.first["email"]
+    assert_equal true, after_calls.first["emailVerified"]
+  end
+
+  def test_email_otp_routes_use_plugin_rate_limits
+    auth = build_auth(
+      rate_limit: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.email_otp(send_verification_otp: ->(_data, _ctx = nil) {})
+      ]
+    )
+    app = auth.handler
+
+    statuses = 4.times.map do
+      status, _headers, _body = app.call(rack_json_env(
+        "/api/auth/email-otp/send-verification-otp",
+        {email: "rate-limited@example.com", type: "sign-in"}
+      ))
+      status
+    end
+
+    assert_equal [200, 200, 200, 429], statuses
+  end
+
   private
 
   def build_auth(options = {})
@@ -201,5 +336,15 @@ class BetterAuthPluginsEmailOTPTest < Minitest::Test
 
   def cookie_header(set_cookie)
     set_cookie.lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def rack_json_env(path, body)
+    Rack::MockRequest.env_for(
+      "http://localhost:3000#{path}",
+      :method => "POST",
+      "CONTENT_TYPE" => "application/json",
+      "REMOTE_ADDR" => "127.0.0.1",
+      :input => JSON.generate(body)
+    )
   end
 end

@@ -76,6 +76,73 @@ class BetterAuthPluginsOneTapTest < Minitest::Test
     assert_equal "openid,profile,email", account["scope"]
   end
 
+  def test_callback_links_existing_user_when_google_is_trusted_even_if_email_is_unverified
+    auth = build_auth(
+      account: {account_linking: {trusted_providers: ["google"]}},
+      plugins: [
+        BetterAuth::Plugins.one_tap(verify_id_token: google_verifier(
+          email: "trusted-link@example.com",
+          email_verified: false,
+          name: "Trusted Link",
+          sub: "google-sub-trusted-link"
+        ))
+      ]
+    )
+    auth.api.sign_up_email(body: {email: "trusted-link@example.com", password: "password123", name: "Trusted Link"})
+
+    result = auth.api.one_tap_callback(body: {idToken: "trusted-token"})
+
+    assert_equal "trusted-link@example.com", result[:user]["email"]
+    account = auth.context.internal_adapter.find_account_by_provider_id("google-sub-trusted-link", "google")
+    refute_nil account
+  end
+
+  def test_callback_rejects_linking_when_account_linking_is_disabled
+    auth = build_auth(
+      account: {account_linking: {enabled: false, trusted_providers: ["google"]}},
+      plugins: [
+        BetterAuth::Plugins.one_tap(verify_id_token: google_verifier(
+          email: "disabled-link@example.com",
+          email_verified: true,
+          name: "Disabled Link",
+          sub: "google-sub-disabled-link"
+        ))
+      ]
+    )
+    auth.api.sign_up_email(body: {email: "disabled-link@example.com", password: "password123", name: "Disabled Link"})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.one_tap_callback(body: {idToken: "verified-token"})
+    end
+
+    assert_equal 401, error.status_code
+    assert_equal "Google sub doesn't match", error.message
+  end
+
+  def test_callback_passes_configured_client_id_to_token_verifier
+    audiences = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.one_tap(
+          clientId: "one-tap-client-id",
+          verify_id_token: ->(_token, _ctx = nil, audience: nil) {
+            audiences << audience
+            {
+              "email" => "audience@example.com",
+              "email_verified" => "true",
+              "name" => "Audience",
+              "sub" => "google-sub-audience"
+            }
+          }
+        )
+      ]
+    )
+
+    auth.api.one_tap_callback(body: {idToken: "audience-token"})
+
+    assert_equal ["one-tap-client-id"], audiences
+  end
+
   def test_callback_rejects_untrusted_google_sub_for_existing_user
     auth = build_auth(
       account: {account_linking: {trusted_providers: []}},

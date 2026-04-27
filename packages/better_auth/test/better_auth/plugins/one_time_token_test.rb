@@ -128,6 +128,26 @@ class BetterAuthPluginsOneTimeTokenTest < Minitest::Test
     assert_equal 200, status
     assert_match(/\A[A-Za-z0-9_-]{32}\z/, headers.fetch("set-ott"))
     assert_includes headers.fetch("access-control-expose-headers"), "set-ott"
+
+    sign_in_status, sign_in_headers, _sign_in_body = auth.api.sign_in_email(
+      body: {email: "header-ott@example.com", password: "password123"},
+      as_response: true
+    )
+
+    assert_equal 200, sign_in_status
+    assert_match(/\A[A-Za-z0-9_-]{32}\z/, sign_in_headers.fetch("set-ott"))
+    assert_includes sign_in_headers.fetch("access-control-expose-headers"), "set-ott"
+  end
+
+  def test_set_ott_header_is_disabled_by_default
+    auth = build_auth(plugins: [BetterAuth::Plugins.one_time_token])
+
+    _status, headers, _body = auth.api.sign_up_email(
+      body: {email: "default-header-ott@example.com", password: "password123", name: "Header"},
+      as_response: true
+    )
+
+    refute headers.key?("set-ott")
   end
 
   private

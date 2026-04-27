@@ -332,13 +332,17 @@ module BetterAuth
       raise APIError.new("UNAUTHORIZED", message: TWO_FACTOR_ERROR_CODES["INVALID_TWO_FACTOR_COOKIE"]) unless user
 
       valid = lambda do
-        new_session = ctx.context.internal_adapter.create_session(user["id"])
+        dont_remember_me = Cookies.dont_remember?(ctx)
+        new_session = ctx.context.internal_adapter.create_session(user["id"], dont_remember_me)
         raise APIError.new("INTERNAL_SERVER_ERROR", message: "failed to create session") unless new_session
 
         ctx.context.internal_adapter.delete_verification_value(verification["id"])
-        Cookies.set_session_cookie(ctx, {session: new_session, user: user})
+        Cookies.set_session_cookie(ctx, {session: new_session, user: user}, dont_remember_me)
         Cookies.expire_cookie(ctx, cookie)
-        two_factor_set_trusted_device(ctx, config, user["id"]) if normalize_hash(ctx.body)[:trust_device]
+        if normalize_hash(ctx.body)[:trust_device]
+          two_factor_set_trusted_device(ctx, config, user["id"])
+          Cookies.expire_cookie(ctx, ctx.context.auth_cookies[:dont_remember])
+        end
         ctx.json({token: new_session["token"], user: Schema.parse_output(ctx.context.options, "user", user)})
       end
 

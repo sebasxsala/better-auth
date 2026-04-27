@@ -97,7 +97,8 @@ class BetterAuthPluginsOrganizationTest < Minitest::Test
       headers: {"cookie" => cookie},
       body: {organizationId: organization.fetch("id"), role: "billing", permission: {organization: ["update"], ac: ["read"]}}
     )
-    assert_equal "billing", role.fetch("role")
+    assert_equal true, role.fetch(:success)
+    assert_equal "billing", role.fetch(:roleData).fetch("role")
 
     roles = auth.api.list_org_roles(headers: {"cookie" => cookie}, query: {organizationId: organization.fetch("id")})
     assert_includes roles.map { |entry| entry.fetch("role") }, "billing"
@@ -106,6 +107,156 @@ class BetterAuthPluginsOrganizationTest < Minitest::Test
       headers: {"cookie" => cookie},
       body: {organizationId: organization.fetch("id"), permissions: {organization: ["delete"]}}
     ).fetch(:success)
+  end
+
+  def test_dynamic_access_control_rejects_invalid_and_assigned_roles
+    ac = BetterAuth::Plugins.create_access_control(
+      organization: ["update", "delete"],
+      member: ["create", "update", "delete"],
+      invitation: ["create", "cancel"],
+      team: ["create", "update", "delete"],
+      ac: ["create", "read", "update", "delete"],
+      project: ["create", "read", "update", "delete"]
+    )
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.organization(
+          dynamic_access_control: {enabled: true},
+          ac: ac,
+          roles: {
+            owner: ac.new_role(organization: ["update", "delete"], member: ["create", "update", "delete"], invitation: ["create", "cancel"], team: ["create", "update", "delete"], ac: ["create", "read", "update", "delete"], project: ["create", "read", "update", "delete"]),
+            member: ac.new_role(ac: ["read"])
+          },
+          schema: {
+            organizationRole: {
+              additionalFields: {
+                color: {type: "string", required: false}
+              }
+            }
+          }
+        )
+      ]
+    )
+    owner_cookie = sign_up_cookie(auth, email: "dac-owner@example.com")
+    member_cookie = sign_up_cookie(auth, email: "dac-member@example.com")
+    member_user = auth.api.get_session(headers: {"cookie" => member_cookie})[:user]
+    organization = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "DAC", slug: "dac"})
+
+    invalid = assert_raises(BetterAuth::APIError) do
+      auth.api.create_org_role(
+        headers: {"cookie" => owner_cookie},
+        body: {organizationId: organization.fetch("id"), role: "billing", permission: {billing: ["read"]}}
+      )
+    end
+    assert_equal 400, invalid.status_code
+    assert_equal BetterAuth::Plugins::ORGANIZATION_ERROR_CODES.fetch("INVALID_RESOURCE"), invalid.message
+
+    role = auth.api.create_org_role(
+      headers: {"cookie" => owner_cookie},
+      body: {organizationId: organization.fetch("id"), role: "project-reader", permission: {project: ["read"]}, additionalFields: {color: "#000000"}}
+    )
+    assert_equal true, role.fetch(:success)
+    assert_equal({"project" => ["read"]}, role.fetch(:roleData).fetch("permission"))
+    assert_equal "#000000", role.fetch(:roleData).fetch("color")
+
+    auth.api.add_member(headers: {"cookie" => owner_cookie}, body: {organizationId: organization.fetch("id"), userId: member_user.fetch("id"), role: "project-reader"})
+
+    assigned = assert_raises(BetterAuth::APIError) do
+      auth.api.delete_org_role(headers: {"cookie" => owner_cookie}, body: {organizationId: organization.fetch("id"), roleName: "project-reader"})
+    end
+    assert_equal 400, assigned.status_code
+    assert_equal BetterAuth::Plugins::ORGANIZATION_ERROR_CODES.fetch("ROLE_IS_ASSIGNED_TO_MEMBERS"), assigned.message
+  end
+
+  def test_additional_fields_and_organization_hooks
+    calls = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.organization(
+          teams: {enabled: true},
+          organization_hooks: {
+            before_create_organization: lambda { |data, _ctx|
+              calls << [:before_create_org, data[:organization][:slug]]
+              {data: {logo: "https://cdn.example/logo.png"}}
+            },
+            after_create_organization: ->(data, _ctx) { calls << [:after_create_org, data[:organization].fetch("slug")] },
+            before_add_member: lambda { |data, _ctx|
+              calls << [:before_add_member, data[:member][:role]]
+              {data: {role: "admin", title: "Founder"}}
+            },
+            after_add_member: ->(data, _ctx) { calls << [:after_add_member, data[:member].fetch("role")] },
+            before_create_team: lambda { |data, _ctx|
+              calls << [:before_create_team, data[:team][:name]]
+              {data: {name: "Founding Team", code: "founders"}}
+            },
+            after_create_team: ->(data, _ctx) { calls << [:after_create_team, data[:team].fetch("name")] }
+          },
+          schema: {
+            organization: {
+              additionalFields: {
+                publicCode: {type: "string", required: false},
+                secretCode: {type: "string", required: false, returned: false}
+              }
+            },
+            member: {
+              additionalFields: {
+                title: {type: "string", required: false}
+              }
+            },
+            team: {
+              additionalFields: {
+                code: {type: "string", required: false}
+              }
+            }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "additional@example.com")
+
+    organization = auth.api.create_organization(
+      headers: {"cookie" => cookie},
+      body: {name: "Additional", slug: "additional", additionalFields: {publicCode: "public", secretCode: "secret"}}
+    )
+
+    assert_equal "https://cdn.example/logo.png", organization.fetch("logo")
+    assert_equal "public", organization.fetch("publicCode")
+    refute organization.key?("secretCode")
+
+    full = auth.api.get_full_organization(headers: {"cookie" => cookie}, query: {organizationId: organization.fetch("id")})
+    assert_equal "admin", full.fetch(:members).first.fetch("role")
+    assert_equal "Founder", full.fetch(:members).first.fetch("title")
+    assert_equal "Founding Team", full.fetch(:teams).first.fetch("name")
+    assert_equal "founders", full.fetch(:teams).first.fetch("code")
+    assert_equal [
+      [:before_create_org, "additional"],
+      [:before_add_member, "owner"],
+      [:after_add_member, "admin"],
+      [:before_create_team, "Additional"],
+      [:after_create_team, "Founding Team"],
+      [:after_create_org, "additional"]
+    ], calls
+  end
+
+  def test_multi_team_invitations_join_all_teams
+    auth = build_auth
+    owner_cookie = sign_up_cookie(auth, email: "multi-team-owner@example.com")
+    invitee_cookie = sign_up_cookie(auth, email: "multi-team-invitee@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Multi Team", slug: "multi-team"})
+    engineering = auth.api.create_team(headers: {"cookie" => owner_cookie}, body: {organizationId: organization.fetch("id"), name: "Engineering"})
+    support = auth.api.create_team(headers: {"cookie" => owner_cookie}, body: {organizationId: organization.fetch("id"), name: "Support"})
+
+    invitation = auth.api.create_invitation(
+      headers: {"cookie" => owner_cookie},
+      body: {organizationId: organization.fetch("id"), email: "multi-team-invitee@example.com", role: "member", teamId: [engineering.fetch("id"), support.fetch("id")]}
+    )
+    assert_equal [engineering.fetch("id"), support.fetch("id")].join(","), invitation.fetch("teamId")
+
+    auth.api.accept_invitation(headers: {"cookie" => invitee_cookie}, body: {invitationId: invitation.fetch("id")})
+    team_ids = auth.api.list_user_teams(headers: {"cookie" => invitee_cookie}).map { |team| team.fetch("id") }
+
+    assert_includes team_ids, engineering.fetch("id")
+    assert_includes team_ids, support.fetch("id")
   end
 
   def test_invokes_organization_hooks
