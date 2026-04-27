@@ -106,6 +106,8 @@ Legend:
 - [ ] Not supported: not implemented or intentionally outside the Ruby server scope.
 - Partial: implemented for the main Ruby server path, with documented upstream parity gaps.
 
+Plugin support is tracked against Ruby server parity: TypeScript inference, browser helper packages, and native mobile client behavior are treated as out of scope only when the row says so explicitly.
+
 ### Core
 
 | Area | Status | Notes |
@@ -166,21 +168,21 @@ Upstream Better Auth exposes many provider factories. The Ruby port currently sh
 | MCP | [x] Supported | OAuth/protected-resource metadata, registration, authorization-code PKCE, token refresh, userinfo, JWKS publication, login-prompt cookie restoration, and helper challenge headers are implemented. |
 | Multi-session | [x] Supported | Device sessions, active switching, same-user replacement, active-session authorization, revocation, sign-out cleanup, and invalid-token errors are implemented. |
 | OAuth proxy | [x] Supported | Callback rewriting, same-origin unwrap, encrypted cross-origin cookie forwarding, timestamp/trusted-callback validation, malformed payload handling, stateless state-cookie package restoration, and DB-less provider callback flow are implemented. |
-| OAuth provider | Partial | OAuth/OIDC metadata, client registration, consent, authorization-code/client-credentials tokens, introspection, and revocation exist; organization, logout, encrypted client-secret, and rate-limit matrices remain. |
-| OIDC provider | Partial | Metadata, dynamic registration, consent-code flow, token, refresh token, userinfo, and logout exist. |
+| OAuth provider | Partial | OAuth/OIDC metadata, client registration, consent, authorization-code/client-credentials tokens, introspection, revocation, and userinfo exist; organization reference, logout, encrypted client-secret, and rate-limit matrices remain. |
+| OIDC provider | Partial | Metadata, prompt parsing, dynamic registration, consent-code flow, token exchange, refresh tokens, userinfo, and logout exist; consent UI, max-age, JWT negotiation, and encrypted client-secret matrices remain. |
 | One tap | [x] Supported | Google ID-token callback, account reuse/linking, trusted/verified account linking, disabled signup, client ID handling, invalid-token handling, and session cookies are implemented. Browser/FedCM helpers are outside Ruby server scope. |
 | One-time token | [x] Supported | Generate/verify, single-use, expiration, expired-session rejection, cookie behavior, storage modes, server-only generation, and `set-ott` session headers are implemented. |
-| OpenAPI | Partial | See core status above. |
+| OpenAPI | Partial | Practical OpenAPI 3.1 generation, route/model inventory, reference HTML, theme, nonce, and disable-reference behavior exist; upstream Zod snapshot parity remains future work. |
 | Organization | [x] Supported | Organization/member CRUD, invitations including multi-team acceptance, team flows, active org/team session fields, dynamic role CRUD safeguards, hooks, additional fields, permissions, and SQL/Rails plugin schema migrations are implemented. Browser client hooks and TypeScript inference are outside Ruby server scope. |
 | Passkey | [x] Supported | WebAuthn registration/authentication, upstream option shapes, challenge expiration, allow/exclude credential transports, not-found delete behavior, management routes, session creation, and SQL/Rails schema output are implemented through the `webauthn` gem. Browser client package aliases are outside Ruby server scope. |
 | Phone number | [x] Supported | OTP send/verify, sign-in/sign-up, phone updates, password reset safety, attempt limits, uniqueness, additional fields, custom validation, and custom OTP verification are implemented. |
 | SIWE | Partial | Nonce, wallet sign-in, callback verification, ENS hook, and account/session creation exist; checksum casing remains a Ruby adaptation. |
 | SSO | Partial | OIDC/SAML provider flows, domain verification, ACS/metadata, replay protection, and organization assignment exist; full SAML XML signature/encryption matrix remains future work. |
-| SCIM | Partial | Tokens, metadata, user CRUD, common PATCH operations, filters, mappings, and Bearer middleware exist. |
-| Stripe | [x] Supported | Injected-client checkout/portal flows, reference authorization, plan/seat/trial abuse protection, trial-start callbacks, billing event webhooks, subscription state transitions, organization subscriptions, metadata helpers, customer callbacks, checkout params/options, lookup keys, and v18/v19 webhook construction are covered. |
+| SCIM | Partial | Tokens, metadata, user CRUD, common PATCH operations, filters, mappings, and Bearer middleware exist; exhaustive RFC filter/PATCH and organization-enforcement matrices remain. |
+| Stripe | [x] Supported | Ruby server parity covers injected-client checkout/portal flows, reference authorization, plan/seat/trial abuse protection, trial-start callbacks, billing event webhooks, subscription state transitions, organization subscriptions, metadata helpers, customer callbacks, checkout params/options, lookup keys, and v18/v19 webhook construction. |
 | Two-factor | [x] Supported | TOTP, OTP, backup codes, trusted devices, cookie max-age options, disable/recovery flows, `rememberMe: false` preservation, and post-login verification are implemented. |
 | Username | [x] Supported | Username sign-up/sign-in, availability, normalization, display username, validation order, duplicate/update behavior, and leak-prevention behavior are implemented. |
-| Expo server integration | [x] Supported | Authorization proxy cookies, optional OAuth state cookie, `expo-origin` override/preservation, disabled override, trusted `exp://`, wildcard trusted origins, and trusted deep-link cookie transfer are covered. Native Expo secure storage, cookie cache, focus/online managers, browser-opening flow, and React Native behavior tests are client-only. |
+| Expo server integration | [x] Supported | Ruby server parity covers authorization proxy cookies, optional OAuth state cookie, `expo-origin` override/preservation, disabled override, trusted `exp://`, wildcard trusted origins, and trusted deep-link cookie transfer. Native Expo secure storage, cookie cache, focus/online managers, browser-opening flow, and React Native behavior tests are client-only. |
 
 ## Development
 
