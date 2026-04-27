@@ -27,11 +27,12 @@ Ruby keeps upstream logical and wire field names such as `emailVerified`, `userI
 - The memory adapter implements Better Auth-specific where operators, basic joins for `session -> user`, `account -> user`, and `user -> account`, sorting, pagination, counts, and rollbackable in-memory transactions.
 - The direct SQL layer generates PostgreSQL and MySQL schema DDL from the same `BetterAuth::Schema` metadata. PostgreSQL uses `text`, `boolean`, `timestamptz`, `bigint`, FK constraints, and explicit FK indexes. MySQL uses InnoDB, `utf8mb4`, `varchar(191)` for indexed strings, `text`, `tinyint(1)`, `datetime(6)`, FK constraints, and explicit FK indexes.
 - `BetterAuth::Adapters::SQL` implements parameterized CRUD, count, transactions, logical-to-physical field mapping, current internal-adapter joins for SQL-backed storage, and collection aggregation for `user -> account`. `BetterAuth::Adapters::Postgres` and `BetterAuth::Adapters::MySQL` are thin wrappers that require `pg` or `mysql2` only when instantiated without an injected connection.
+- `BetterAuth::Rails::ActiveRecordAdapter` defines dynamic ActiveRecord associations for supported joins and uses native eager loading for `session -> user`, `account -> user`, and `user -> account`, avoiding per-record manual lookup while preserving the same logical result shape.
 - PostgreSQL output normalization now coerces `pg` string values such as `"f"`/`"t"` and timestamp strings back into Ruby booleans and `Time` values before returning logical Better Auth hashes.
 
 ### Experimental Joins
 
-Ruby accepts the upstream public option `experimental: { joins: true }`. Joins are treated as an optimization, not a behavior switch: when enabled and supported by the adapter, the internal adapter requests native joins; when disabled or unsupported, it performs separate adapter reads and combines the same logical response. This keeps the option safe for production Ruby apps while preserving upstream's documented configuration shape.
+Ruby accepts the upstream public option `experimental: { joins: true }`. Joins are treated as an optimization, not a behavior switch: when enabled and supported by the adapter, the internal adapter requests native joins; when disabled or unsupported, it performs separate adapter reads and combines the same logical response. Core SQL adapters use SQL joins for supported relationships, and the Rails ActiveRecord adapter now uses native eager loading for those supported relationships. This keeps the option safe for production Ruby apps while preserving upstream's documented configuration shape.
 
 ## Configuration Examples
 

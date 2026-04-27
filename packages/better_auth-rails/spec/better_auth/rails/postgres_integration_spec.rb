@@ -119,6 +119,35 @@ RSpec.describe "BetterAuth::Rails PostgreSQL integration" do
     expect(ActiveRecord::Base.connection.foreign_keys("audit_logs").map(&:to_table)).to include("users")
   end
 
+  it "uses native ActiveRecord eager loading for supported joins" do
+    run_generated_migration
+    active_record_adapter = BetterAuth::Rails::ActiveRecordAdapter.new(config, connection: ActiveRecord::Base)
+
+    active_record_adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    active_record_adapter.create(model: "user", data: {id: "user-2", name: "Grace", email: "grace@example.com"}, force_allow_id: true)
+    active_record_adapter.create(model: "session", data: {id: "session-1", userId: "user-1", token: "token-1", expiresAt: Time.now + 3600}, force_allow_id: true)
+    active_record_adapter.create(model: "session", data: {id: "session-2", userId: "user-2", token: "token-2", expiresAt: Time.now + 3600}, force_allow_id: true)
+    active_record_adapter.create(model: "account", data: {id: "account-1", userId: "user-1", accountId: "github-1", providerId: "github"}, force_allow_id: true)
+    active_record_adapter.create(model: "account", data: {id: "account-2", userId: "user-2", accountId: "github-2", providerId: "github"}, force_allow_id: true)
+
+    session_query_count = count_selects do
+      joined_sessions = active_record_adapter.find_many(model: "session", sort_by: {field: "id", direction: "asc"}, join: {user: true})
+      expect(joined_sessions.map { |session| session.fetch("user").fetch("email") }).to eq(["ada@example.com", "grace@example.com"])
+    end
+    account_query_count = count_selects do
+      joined_accounts = active_record_adapter.find_many(model: "account", sort_by: {field: "id", direction: "asc"}, join: {user: true})
+      expect(joined_accounts.map { |account| account.fetch("user").fetch("email") }).to eq(["ada@example.com", "grace@example.com"])
+    end
+    user_query_count = count_selects do
+      joined_users = active_record_adapter.find_many(model: "user", sort_by: {field: "id", direction: "asc"}, join: {account: true})
+      expect(joined_users.map { |user| user.fetch("account").map { |account| account.fetch("accountId") } }).to eq([["github-1"], ["github-2"]])
+    end
+
+    expect(session_query_count).to be <= 2
+    expect(account_query_count).to be <= 2
+    expect(user_query_count).to be <= 2
+  end
+
   def run_generated_migration(render_config = config)
     Object.send(:remove_const, :CreateBetterAuthTables) if Object.const_defined?(:CreateBetterAuthTables)
     Dir.mktmpdir("better-auth-migration") do |dir|
@@ -141,5 +170,16 @@ RSpec.describe "BetterAuth::Rails PostgreSQL integration" do
     yield connection
   ensure
     connection&.close
+  end
+
+  def count_selects
+    count = 0
+    callback = lambda do |_name, _start, _finish, _id, payload|
+      sql = payload[:sql].to_s
+      count += 1 if sql.start_with?("SELECT") && payload[:name] != "SCHEMA"
+    end
+
+    ActiveSupport::Notifications.subscribed(callback, "sql.active_record") { yield }
+    count
   end
 end

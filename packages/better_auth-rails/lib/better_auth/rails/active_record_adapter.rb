@@ -39,7 +39,7 @@ module BetterAuth
 
       def find_many(model:, where: [], sort_by: nil, limit: nil, offset: nil, select: nil, join: nil)
         model = model.to_s
-        relation = relation_for(model, where: where, sort_by: sort_by, limit: limit, offset: offset, select: select)
+        relation = relation_for(model, where: where, sort_by: sort_by, limit: limit, offset: offset, select: select, join: join)
         records = relation.map { |record| normalize_record(model, record, join: join) }
         collection_join?(model, join) ? aggregate_collection_joins(records) : records
       end
@@ -89,16 +89,23 @@ module BetterAuth
       private
 
       def model_class(model)
-        @models[model] ||= Class.new(ApplicationRecord).tap do |klass|
-          klass.table_name = table_for(model) if klass.respond_to?(:table_name=)
-          klass.primary_key = storage_field(model, "id") if klass.respond_to?(:primary_key=)
-        end
+        model = model.to_s
+        return @models[model] if @models.key?(model)
+
+        klass = Class.new(ApplicationRecord)
+        model_namespace.const_set(class_name_for(model), klass)
+        klass.table_name = table_for(model) if klass.respond_to?(:table_name=)
+        klass.primary_key = storage_field(model, "id") if klass.respond_to?(:primary_key=)
+        @models[model] = klass
+        define_join_associations(model, klass)
+        klass
       end
 
-      def relation_for(model, where:, sort_by: nil, limit: nil, offset: nil, select: nil)
+      def relation_for(model, where:, sort_by: nil, limit: nil, offset: nil, select: nil, join: nil)
         relation = model_class(model).all
         relation = apply_where(model, relation, where || [])
         relation = apply_select(model, relation, select) if select
+        relation = apply_join_includes(model, relation, join) if join
         relation = apply_order(model, relation, sort_by) if sort_by
         relation = relation.limit(Integer(limit)) if limit
         relation = relation.offset(Integer(offset)) if offset
@@ -178,22 +185,78 @@ module BetterAuth
           column = config[:field_name] || physical_name(field)
           output[field] = attributes[column] if attributes.key?(column)
         end
-        attach_joins(model, normalized, join)
+        attach_joins(model, normalized, record, join)
       end
 
-      def attach_joins(model, normalized, join)
+      def attach_joins(model, normalized, record, join)
         return normalized unless join
 
         join.each_key do |join_model|
           join_model = join_model.to_s
-          case [model, join_model]
-          when ["session", "user"], ["account", "user"]
-            normalized[join_model] = find_one(model: "user", where: [{field: "id", value: normalized["userId"]}])
-          when ["user", "account"]
-            normalized[join_model] = find_many(model: "account", where: [{field: "userId", value: normalized["id"]}])
+          definition = join_definition(model, join_model)
+          next unless definition
+
+          association = definition.fetch(:association)
+          next unless record.respond_to?(association)
+
+          joined = record.public_send(association)
+          normalized[join_model] = if definition[:collection]
+            Array(joined).map { |joined_record| normalize_record(join_model, joined_record) }
+          else
+            normalize_record(join_model, joined)
           end
         end
         normalized
+      end
+
+      def apply_join_includes(model, relation, join)
+        associations = join.filter_map do |join_model, _enabled|
+          join_definition(model, join_model.to_s)&.fetch(:association)
+        end
+        return relation if associations.empty? || !relation.respond_to?(:includes)
+
+        relation.includes(*associations)
+      end
+
+      def define_join_associations(model, klass)
+        case model
+        when "session", "account"
+          return unless klass.respond_to?(:belongs_to)
+
+          klass.belongs_to(
+            :user,
+            class_name: model_class("user").name,
+            foreign_key: storage_field(model, "userId"),
+            primary_key: storage_field("user", "id"),
+            optional: true
+          )
+        when "user"
+          return unless klass.respond_to?(:has_many)
+
+          klass.has_many(
+            :accounts,
+            class_name: model_class("account").name,
+            foreign_key: storage_field("account", "userId"),
+            primary_key: storage_field("user", "id")
+          )
+        end
+      end
+
+      def join_definition(model, join_model)
+        case [model.to_s, join_model.to_s]
+        when ["session", "user"], ["account", "user"]
+          {association: :user, collection: false}
+        when ["user", "account"]
+          {association: :accounts, collection: true}
+        end
+      end
+
+      def model_namespace
+        @model_namespace ||= BetterAuth::Rails.const_set("ActiveRecordAdapterModels#{object_id}", Module.new)
+      end
+
+      def class_name_for(model)
+        physical_name(model).split("_").map(&:capitalize).join
       end
 
       def collection_join?(model, join)
