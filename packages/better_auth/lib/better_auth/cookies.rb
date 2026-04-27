@@ -111,13 +111,7 @@ module BetterAuth
 
       cookie = ctx.context.auth_cookies[:session_data]
       max_age = dont_remember_me ? nil : cookie.attributes[:max_age]
-      version = cookie_cache_version(config[:version], session.fetch(:session), session.fetch(:user))
-      data = {
-        "session" => stringify_keys(session.fetch(:session)),
-        "user" => stringify_keys(session.fetch(:user)),
-        "updatedAt" => current_millis,
-        "version" => version
-      }
+      data = filtered_cache_data(ctx, session)
       value = encode_cookie_cache(data, ctx.context.secret, strategy: config[:strategy] || "compact", max_age: max_age || 60 * 5)
       attributes = cookie.attributes.merge(max_age: max_age)
       store = SessionStore.new(cookie.name, attributes, ctx)
@@ -195,8 +189,21 @@ module BetterAuth
         valid = Crypto.verify_hmac_signature(JSON.generate(signed), payload["signature"], secret, encoding: :base64url)
         valid ? payload["session"] : nil
       end
-    rescue JSON::ParserError, KeyError, ArgumentError
+    rescue JSON::ParserError, KeyError, ArgumentError, JWT::DecodeError
       nil
+    end
+
+    def filtered_cache_data(ctx, session)
+      {
+        "session" => stringify_keys(Schema.parse_output(ctx.context.options, "session", stringify_keys(session.fetch(:session)))),
+        "user" => stringify_keys(Schema.parse_output(ctx.context.options, "user", stringify_keys(session.fetch(:user)))),
+        "updatedAt" => current_millis,
+        "version" => cookie_cache_version(
+          ctx.context.session_config.dig(:cookie_cache, :version),
+          session.fetch(:session),
+          session.fetch(:user)
+        )
+      }
     end
 
     def chunked_value(cookies, name)

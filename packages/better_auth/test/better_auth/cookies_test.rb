@@ -88,6 +88,72 @@ class BetterAuthCookiesTest < Minitest::Test
     assert_nil BetterAuth::Cookies.get_cookie_cache(cookie, secret: SECRET, strategy: "compact", version: "3")
   end
 
+  def test_cookie_cache_supports_compact_jwt_and_jwe_strategies
+    %w[compact jwt jwe].each do |strategy|
+      auth = BetterAuth.auth(
+        secret: SECRET,
+        session: {cookie_cache: {enabled: true, strategy: strategy, version: "1"}}
+      )
+      ctx = endpoint_context(auth)
+
+      BetterAuth::Cookies.set_cookie_cache(ctx, {
+        session: {"id" => "session-1", "token" => "token-1", "userId" => "user-1"},
+        user: {"id" => "user-1", "email" => "ada@example.com"}
+      }, false)
+
+      cookie = ctx.response_headers.fetch("set-cookie").lines.find { |line| line.include?("session_data") }.split(";").first
+      payload = BetterAuth::Cookies.get_cookie_cache(cookie, secret: SECRET, strategy: strategy, version: "1")
+
+      assert_equal "token-1", payload.fetch("session").fetch("token")
+      assert_equal "ada@example.com", payload.fetch("user").fetch("email")
+    end
+  end
+
+  def test_cookie_cache_filters_fields_marked_returned_false
+    auth = BetterAuth.auth(
+      secret: SECRET,
+      session: {cookie_cache: {enabled: true, strategy: "jwt"}},
+      plugins: [
+        {
+          id: "private-cache-field",
+          schema: {
+            user: {
+              fields: {
+                secretNote: {type: "string", returned: false}
+              }
+            },
+            session: {
+              fields: {
+                serverOnly: {type: "string", returned: false}
+              }
+            }
+          }
+        }
+      ]
+    )
+    ctx = endpoint_context(auth)
+
+    BetterAuth::Cookies.set_cookie_cache(ctx, {
+      session: {
+        "id" => "session-1",
+        "token" => "token-1",
+        "userId" => "user-1",
+        "serverOnly" => "do-not-cache"
+      },
+      user: {
+        "id" => "user-1",
+        "email" => "ada@example.com",
+        "secretNote" => "do-not-cache"
+      }
+    }, false)
+
+    cookie = ctx.response_headers.fetch("set-cookie").lines.find { |line| line.include?("session_data") }.split(";").first
+    payload = BetterAuth::Cookies.get_cookie_cache(cookie, secret: SECRET, strategy: "jwt")
+
+    refute payload.fetch("session").key?("serverOnly")
+    refute payload.fetch("user").key?("secretNote")
+  end
+
   def test_session_store_chunks_and_reassembles_large_values
     auth = BetterAuth.auth(secret: SECRET)
     ctx = endpoint_context(auth)

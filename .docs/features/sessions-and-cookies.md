@@ -19,9 +19,9 @@ Ruby keeps the same cookie names, prefixes, default attributes, max-age behavior
 - `BetterAuth::Cookies` exposes Ruby `snake_case` option keys while preserving upstream cookie wire names.
 - `BetterAuth::Session.find_current` accepts `disable_cookie_cache`, `disable_refresh`, and `sensitive` flags for route-level behavior.
 
-### Key Differences
+### JWE Strategy
 
-Upstream JWE uses `jose` with `A256CBC-HS512`. The Ruby core currently implements the `jwe` strategy as an authenticated encrypted internal token using AES-256-GCM via `OpenSSL`, because the core gem dependency list intentionally stays limited to `rack`, `json`, `jwt`, and `bcrypt`. This is an internal cookie-cache format, not a public API token contract, and can be swapped later if the project approves a JOSE/JWE dependency.
+Ruby uses the `jwe` gem to encode `session.cookieCache.strategy = "jwe"` as RFC 7516 compact JWE with `alg = "dir"` and `enc = "A256CBC-HS512"`, matching upstream's public cookie-cache strategy. The encryption key is derived from the Better Auth secret and the `better-auth-session` salt using HKDF-SHA256 with the same info string as upstream: `BetterAuth.js Generated Encryption Key`.
 
 ## Implementation
 

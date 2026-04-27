@@ -365,7 +365,7 @@ git commit -m "feat: use standard jwe for encrypted cookie cache"
 - Modify: `packages/better_auth/test/better_auth/cookies_test.rb`
 - Modify: `.docs/features/sessions-and-cookies.md`
 
-- [ ] **Step 1: Write failing tests for `compact`, `jwt`, and `jwe` cache payloads**
+- [x] **Step 1: Write failing tests for `compact`, `jwt`, and `jwe` cache payloads**
 
 Add these tests to `packages/better_auth/test/better_auth/cookies_test.rb`:
 
@@ -437,7 +437,7 @@ def test_cookie_cache_filters_fields_marked_returned_false
 end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -448,7 +448,7 @@ rbenv exec bundle exec rake test TEST=test/better_auth/cookies_test.rb
 
 Expected: FAIL because the current cache writer serializes raw user/session hashes.
 
-- [ ] **Step 3: Add filtered cache helpers**
+- [x] **Step 3: Add filtered cache helpers**
 
 Modify `packages/better_auth/lib/better_auth/cookies.rb`:
 
@@ -473,7 +473,7 @@ Replace the `data = { ... }` block inside `set_cookie_cache` with:
       data = filtered_cache_data(ctx, session)
 ```
 
-- [ ] **Step 4: Harden decode error handling for all strategies**
+- [x] **Step 4: Harden decode error handling for all strategies**
 
 Modify `decode_cookie_cache` rescue clause in `packages/better_auth/lib/better_auth/cookies.rb`:
 
@@ -482,7 +482,7 @@ Modify `decode_cookie_cache` rescue clause in `packages/better_auth/lib/better_a
       nil
 ```
 
-- [ ] **Step 5: Run cookie tests**
+- [x] **Step 5: Run cookie tests**
 
 Run:
 
@@ -493,7 +493,7 @@ rbenv exec bundle exec rake test TEST=test/better_auth/cookies_test.rb
 
 Expected: PASS.
 
-- [ ] **Step 6: Update sessions docs**
+- [x] **Step 6: Update sessions docs**
 
 Modify `.docs/features/sessions-and-cookies.md` so the Key Differences section says:
 
@@ -503,7 +503,7 @@ Modify `.docs/features/sessions-and-cookies.md` so the Key Differences section s
 Ruby uses the `jwe` gem to encode `session.cookieCache.strategy = "jwe"` as RFC 7516 compact JWE with `alg = "dir"` and `enc = "A256CBC-HS512"`, matching upstream's public cookie-cache strategy. The encryption key is derived from the Better Auth secret and the `better-auth-session` salt using HKDF-SHA256 with the same info string as upstream: `BetterAuth.js Generated Encryption Key`.
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/better_auth/lib/better_auth/cookies.rb packages/better_auth/test/better_auth/cookies_test.rb .docs/features/sessions-and-cookies.md
