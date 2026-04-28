@@ -442,6 +442,41 @@ class BetterAuthPluginsStripeTest < Minitest::Test
     assert_equal ["payload", "valid", "whsec_test"], stripe.webhooks.constructed_async_args
   end
 
+  def test_builds_official_stripe_client_adapter_from_api_key
+    plugin = BetterAuth::Plugins.stripe(stripe_api_key: "sk_test_123")
+
+    client = BetterAuth::Plugins.stripe_client(plugin.options)
+
+    assert_instance_of BetterAuth::Stripe::ClientAdapter, client
+    assert client.respond_to?(:customers)
+    assert_same client, BetterAuth::Plugins.stripe_client(plugin.options)
+  end
+
+  def test_builds_official_stripe_client_adapter_from_env_secret
+    previous_secret = ENV["STRIPE_SECRET_KEY"]
+    ENV["STRIPE_SECRET_KEY"] = "sk_test_env"
+    plugin = BetterAuth::Plugins.stripe
+
+    client = BetterAuth::Plugins.stripe_client(plugin.options)
+
+    assert_instance_of BetterAuth::Stripe::ClientAdapter, client
+  ensure
+    previous_secret ? ENV["STRIPE_SECRET_KEY"] = previous_secret : ENV.delete("STRIPE_SECRET_KEY")
+  end
+
+  def test_missing_client_and_api_key_raise_helpful_error
+    previous_secret = ENV.delete("STRIPE_SECRET_KEY")
+    plugin = BetterAuth::Plugins.stripe
+
+    error = assert_raises(BetterAuth::APIError) do
+      BetterAuth::Plugins.stripe_client(plugin.options)
+    end
+
+    assert_includes error.message, "Stripe client is required"
+  ensure
+    ENV["STRIPE_SECRET_KEY"] = previous_secret if previous_secret
+  end
+
   private
 
   def build_auth(options = {})

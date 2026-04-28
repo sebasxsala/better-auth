@@ -17,12 +17,13 @@ Some UI or provider-specific setup from upstream is app-provided in Ruby. The pr
 
 ```ruby title="config/auth.rb"
 require "better_auth"
+require "better_auth/stripe"
 
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
   plugins: [
-    BetterAuth::Plugins.stripe(stripe_client: stripe_client, stripe_webhook_secret: ENV.fetch("STRIPE_WEBHOOK_SECRET"))
+    BetterAuth::Plugins.stripe(stripe_api_key: ENV.fetch("STRIPE_SECRET_KEY"), stripe_webhook_secret: ENV.fetch("STRIPE_WEBHOOK_SECRET"))
   ]
 )
 ```
@@ -50,13 +51,15 @@ portal = auth.api.create_billing_portal(headers: { "cookie" => request.env["HTTP
 Current Ruby options accepted by `BetterAuth::Plugins.stripe`:
 
 - `create_customer_on_sign_up`
+- `stripe_api_key` (defaults to `ENV["STRIPE_SECRET_KEY"]` when omitted)
 - `stripe_webhook_secret`
 - `stripe_client`
 - `client`
 
 ## Support Notes
 
-- The examples above are based on Ruby plugin source and tests in `packages/better_auth`.
+- Install `better_auth-stripe`; core `better_auth` only provides a shim with a helpful install error.
+- The examples above are based on Ruby plugin source and tests in `packages/better_auth-stripe`.
 - If an upstream section is not represented here, treat it as not yet documented or not yet supported by the Ruby port until the matching Ruby implementation exists.
 
 {/* Upstream guide is preserved in upstream/docs/content/docs/plugins/stripe.mdx. */}
