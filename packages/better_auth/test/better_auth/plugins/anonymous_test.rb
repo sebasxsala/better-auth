@@ -42,6 +42,28 @@ class BetterAuthPluginsAnonymousTest < Minitest::Test
     assert_match(/\Atemp-[0-9a-f]{32}@anon\.example\z/, domain_result[:user]["email"])
   end
 
+  def test_anonymous_schema_supports_custom_is_anonymous_field_mapping
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.anonymous(
+          schema: {
+            user: {
+              fields: {
+                isAnonymous: "is_anon"
+              }
+            }
+          }
+        )
+      ]
+    )
+
+    schema = BetterAuth::Schema.auth_tables(auth.context.options)
+    result = auth.api.sign_in_anonymous
+
+    assert_equal "is_anon", schema.fetch("user").fetch(:fields).fetch("isAnonymous").fetch(:field_name)
+    assert_equal true, result[:user]["isAnonymous"]
+  end
+
   def test_anonymous_sign_in_falls_back_when_generators_return_blank_values
     nil_name_auth = build_auth(plugins: [BetterAuth::Plugins.anonymous(generate_name: ->(_ctx) {})])
     empty_name_auth = build_auth(plugins: [BetterAuth::Plugins.anonymous(generate_name: ->(_ctx) { "" })])
@@ -50,6 +72,16 @@ class BetterAuthPluginsAnonymousTest < Minitest::Test
     assert_equal "Anonymous", nil_name_auth.api.sign_in_anonymous[:user]["name"]
     assert_equal "Anonymous", empty_name_auth.api.sign_in_anonymous[:user]["name"]
     assert_match(/\Atemp@[0-9a-f]{32}\.com\z/, empty_email_auth.api.sign_in_anonymous[:user]["email"])
+  end
+
+  def test_anonymous_sign_in_rejects_truthy_non_string_generated_email
+    auth = build_auth(plugins: [BetterAuth::Plugins.anonymous(generate_random_email: -> { true })])
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_in_anonymous
+    end
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::Plugins::ANONYMOUS_ERROR_CODES["INVALID_EMAIL_FORMAT"], error.message
   end
 
   def test_anonymous_sign_in_rejects_invalid_generated_email_and_repeat_anonymous_session
@@ -139,6 +171,58 @@ class BetterAuthPluginsAnonymousTest < Minitest::Test
     assert_equal "linked@example.com", auth.api.get_session(headers: {"cookie" => real_cookie})[:user]["email"]
   end
 
+  def test_linking_keeps_anonymous_user_when_deletion_is_disabled
+    auth = build_auth(plugins: [BetterAuth::Plugins.anonymous(disable_delete_anonymous_user: true)])
+    anon_cookie, anon_user_id = sign_in_anonymous_cookie_and_user_id(auth)
+    new_user = create_real_user(auth, "disabled-link@example.com")
+    new_session = auth.context.internal_adapter.create_session(new_user["id"])
+    ctx = anonymous_link_context(auth, anon_cookie, {session: new_session, user: new_user})
+    set_signed_session_cookie(ctx, new_session["token"])
+
+    BetterAuth::Plugins.link_anonymous_user(ctx, auth.context.options.plugins.first.options)
+
+    assert auth.context.internal_adapter.find_user_by_id(anon_user_id)
+  end
+
+  def test_linking_keeps_anonymous_user_for_same_user_new_session
+    auth = build_auth(plugins: [BetterAuth::Plugins.anonymous])
+    anon_cookie, anon_user_id = sign_in_anonymous_cookie_and_user_id(auth)
+    anon_user = auth.context.internal_adapter.find_user_by_id(anon_user_id)
+    new_session = auth.context.internal_adapter.create_session(anon_user_id)
+    ctx = anonymous_link_context(auth, anon_cookie, {session: new_session, user: anon_user})
+    set_signed_session_cookie(ctx, new_session["token"])
+
+    BetterAuth::Plugins.link_anonymous_user(ctx, auth.context.options.plugins.first.options)
+
+    assert auth.context.internal_adapter.find_user_by_id(anon_user_id)
+  end
+
+  def test_linking_keeps_anonymous_user_when_new_session_is_still_anonymous
+    auth = build_auth(plugins: [BetterAuth::Plugins.anonymous])
+    anon_cookie, anon_user_id = sign_in_anonymous_cookie_and_user_id(auth)
+    new_user = create_anonymous_user(auth, "second-anon@example.com")
+    new_session = auth.context.internal_adapter.create_session(new_user["id"])
+    ctx = anonymous_link_context(auth, anon_cookie, {session: new_session, user: new_user})
+    set_signed_session_cookie(ctx, new_session["token"])
+
+    BetterAuth::Plugins.link_anonymous_user(ctx, auth.context.options.plugins.first.options)
+
+    assert auth.context.internal_adapter.find_user_by_id(anon_user_id)
+  end
+
+  def test_linking_ignores_set_cookie_entries_that_only_contain_session_cookie_name_as_substring
+    auth = build_auth(plugins: [BetterAuth::Plugins.anonymous])
+    anon_cookie, anon_user_id = sign_in_anonymous_cookie_and_user_id(auth)
+    new_user = create_real_user(auth, "substring-cookie@example.com")
+    new_session = auth.context.internal_adapter.create_session(new_user["id"])
+    ctx = anonymous_link_context(auth, anon_cookie, {session: new_session, user: new_user})
+    ctx.set_cookie("not-#{auth.context.auth_cookies[:session_token].name}", "value")
+
+    BetterAuth::Plugins.link_anonymous_user(ctx, auth.context.options.plugins.first.options)
+
+    assert auth.context.internal_adapter.find_user_by_id(anon_user_id)
+  end
+
   def test_social_callback_links_and_deletes_previous_anonymous_user
     link_calls = []
     auth = build_auth(
@@ -209,5 +293,53 @@ class BetterAuthPluginsAnonymousTest < Minitest::Test
 
   def cookie_header(set_cookie)
     set_cookie.lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def sign_in_anonymous_cookie_and_user_id(auth)
+    _status, headers, _body = auth.api.sign_in_anonymous(as_response: true)
+    cookie = cookie_header(headers.fetch("set-cookie"))
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    [cookie, user_id]
+  end
+
+  def create_real_user(auth, email)
+    auth.context.internal_adapter.create_user(
+      email: email,
+      emailVerified: false,
+      isAnonymous: false,
+      name: "Linked User",
+      createdAt: Time.now,
+      updatedAt: Time.now
+    )
+  end
+
+  def create_anonymous_user(auth, email)
+    auth.context.internal_adapter.create_user(
+      email: email,
+      emailVerified: false,
+      isAnonymous: true,
+      name: "Anonymous",
+      createdAt: Time.now,
+      updatedAt: Time.now
+    )
+  end
+
+  def anonymous_link_context(auth, cookie, new_session)
+    auth.context.reset_runtime!
+    auth.context.set_new_session(new_session)
+    BetterAuth::Endpoint::Context.new(
+      path: "/sign-in/email",
+      method: "POST",
+      query: {},
+      body: {},
+      params: {},
+      headers: {"cookie" => cookie},
+      context: auth.context
+    )
+  end
+
+  def set_signed_session_cookie(ctx, token)
+    cookie = ctx.context.auth_cookies[:session_token]
+    ctx.set_signed_cookie(cookie.name, token, ctx.context.secret, cookie.attributes)
   end
 end

@@ -2,17 +2,22 @@
 
 Status: Complete for Ruby server parity.
 
-**Upstream Reference:** `upstream/packages/better-auth/src/plugins/api-key/index.ts`, `upstream/packages/better-auth/src/plugins/api-key/schema.ts`, `upstream/packages/better-auth/src/plugins/api-key/adapter.ts`, `upstream/packages/better-auth/src/plugins/api-key/rate-limit.ts`, `upstream/packages/better-auth/src/plugins/api-key/routes/*.ts`, `upstream/packages/better-auth/src/plugins/api-key/api-key.test.ts`
+**Upstream Reference:** `upstream/packages/api-key/src/index.ts`, `upstream/packages/api-key/src/schema.ts`, `upstream/packages/api-key/src/adapter.ts`, `upstream/packages/api-key/src/rate-limit.ts`, `upstream/packages/api-key/src/routes/*.ts`, `upstream/packages/api-key/src/api-key.test.ts`, `upstream/packages/api-key/src/org-api-key.test.ts`
 
 ## Summary
 
-Adds API key creation, verification, management, quotas, metadata, permissions, storage modes, and optional API-key-backed sessions.
+Adds API key creation, verification, management, quotas, metadata, permissions, storage modes, multi-configuration support, organization-owned keys, and optional API-key-backed sessions.
 
 ## Ruby Adaptation
 
-- Exposed as `BetterAuth::Plugins.api_key`.
+- External package: install `better_auth-api-key` and `require "better_auth/api_key"`.
+- Exposed as `BetterAuth::Plugins.api_key`; core `better_auth` keeps only a compatibility shim.
 - Adds `/api-key/create`, `/api-key/verify`, `/api-key/get`, `/api-key/update`, `/api-key/delete`, `/api-key/list`, and `/api-key/delete-all-expired-api-keys`.
 - Adds `apikey` schema with upstream fields for key identity, ownership, expiration, rate limits, remaining usage, refill settings, permissions, metadata, and timestamps.
+- Supports upstream `configId` and `referenceId`, while continuing to read legacy `userId` records.
+- Supports multiple API key configurations, `default_prefix`, and `references: "user"` or `"organization"`.
+- `/api-key/verify` returns upstream-style `{ valid, error, key }` payloads for verification failures.
+- `/api-key/list` returns upstream-style `{ apiKeys, total, limit, offset }` and supports config filtering, pagination, sorting, and organization filtering.
 - Uses SHA-256/base64url key hashing by default, with `disable_key_hashing` support.
 - Supports database storage and secondary-storage with database fallback.
 - Supports deferred usage updates through `advanced.background_tasks.handler`.
@@ -22,6 +27,6 @@ Adds API key creation, verification, management, quotas, metadata, permissions, 
 ## Testing
 
 ```bash
-cd packages/better_auth
-rbenv exec bundle exec ruby -Itest test/better_auth/plugins/api_key_test.rb
+cd packages/better_auth-api-key
+rbenv exec bundle exec ruby -Itest test/better_auth/api_key_test.rb
 ```

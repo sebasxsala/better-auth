@@ -109,10 +109,12 @@ module BetterAuth
     def anonymous_email(config)
       generator = config[:generate_random_email]
       email = generator.call if generator.respond_to?(:call)
-      if present_string?(email) && !Routes::EMAIL_PATTERN.match?(email)
-        raise APIError.new("BAD_REQUEST", message: ANONYMOUS_ERROR_CODES["INVALID_EMAIL_FORMAT"])
+      if email && email != ""
+        unless email.is_a?(String) && !email.empty? && Routes::EMAIL_PATTERN.match?(email)
+          raise APIError.new("BAD_REQUEST", message: ANONYMOUS_ERROR_CODES["INVALID_EMAIL_FORMAT"])
+        end
+        return email
       end
-      return email if present_string?(email)
 
       id = SecureRandom.hex(16)
       domain = config[:email_domain_name]
@@ -130,7 +132,7 @@ module BetterAuth
     def link_anonymous_user(ctx, config)
       set_cookie = ctx.response_headers["set-cookie"].to_s
       return if set_cookie.empty?
-      return unless set_cookie.include?(ctx.context.auth_cookies[:session_token].name)
+      return unless set_cookie_value(set_cookie, ctx.context.auth_cookies[:session_token].name)
 
       anonymous_session = Session.find_current(ctx, disable_refresh: true)
       return unless anonymous_session&.dig(:user, "isAnonymous")
@@ -153,6 +155,16 @@ module BetterAuth
       return if new_user["isAnonymous"]
 
       ctx.context.internal_adapter.delete_user(anonymous_session[:user]["id"])
+      nil
+    end
+
+    def set_cookie_value(set_cookie, name)
+      set_cookie.to_s.lines.each do |line|
+        cookie_pair = line.split(";", 2).first.to_s.strip
+        cookie_name, value = cookie_pair.split("=", 2)
+        return value if cookie_name == name && !value.nil?
+      end
+
       nil
     end
 

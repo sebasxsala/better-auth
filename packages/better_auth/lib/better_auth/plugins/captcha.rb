@@ -51,15 +51,17 @@ module BetterAuth
       raise CAPTCHA_INTERNAL_ERROR_CODES["MISSING_SECRET_KEY"] if config[:secret_key].to_s.empty?
 
       response_token = request.get_header("HTTP_X_CAPTCHA_RESPONSE")
-      return {response: captcha_response(400, CAPTCHA_EXTERNAL_ERROR_CODES["MISSING_RESPONSE"])} if response_token.to_s.empty?
+      if response_token.to_s.empty?
+        return {response: captcha_response(400, "MISSING_RESPONSE", CAPTCHA_EXTERNAL_ERROR_CODES["MISSING_RESPONSE"])}
+      end
 
-      result = captcha_verify(config, response_token, captcha_remote_ip(request))
+      result = captcha_verify(config, response_token, captcha_remote_ip(request, context))
       return nil if captcha_success?(config, result)
 
-      {response: captcha_response(403, CAPTCHA_EXTERNAL_ERROR_CODES["VERIFICATION_FAILED"])}
+      {response: captcha_response(403, "VERIFICATION_FAILED", CAPTCHA_EXTERNAL_ERROR_CODES["VERIFICATION_FAILED"])}
     rescue => error
       captcha_log(context, error.message)
-      {response: captcha_response(500, CAPTCHA_EXTERNAL_ERROR_CODES["UNKNOWN_ERROR"])}
+      {response: captcha_response(500, "UNKNOWN_ERROR", CAPTCHA_EXTERNAL_ERROR_CODES["UNKNOWN_ERROR"])}
     end
 
     def captcha_verify(config, response_token, remote_ip)
@@ -114,7 +116,7 @@ module BetterAuth
         "secret" => params[:secret_key],
         "response" => params[:captcha_response]
       }
-      payload["sitekey"] = params[:site_key] if params[:site_key]
+      payload["sitekey"] = params[:site_key] if params[:site_key] && ["hcaptcha", "captchafox"].include?(provider)
       if params[:remote_ip]
         payload[(provider == "captchafox") ? "remoteIp" : "remoteip"] = params[:remote_ip]
       end
@@ -137,21 +139,12 @@ module BetterAuth
       {}
     end
 
-    def captcha_response(status, message)
-      [status, {"content-type" => "application/json"}, [JSON.generate({code: status_code_name(status), message: message})]]
+    def captcha_response(status, code, message)
+      [status, {"content-type" => "application/json"}, [JSON.generate({code: code, message: message})]]
     end
 
-    def status_code_name(status)
-      {
-        400 => "BAD_REQUEST",
-        403 => "FORBIDDEN",
-        500 => "INTERNAL_SERVER_ERROR"
-      }.fetch(status, status.to_s)
-    end
-
-    def captcha_remote_ip(request)
-      request.get_header("HTTP_X_FORWARDED_FOR").to_s.split(",").first&.strip.then { |value| value unless value.to_s.empty? } ||
-        request.get_header("REMOTE_ADDR")
+    def captcha_remote_ip(request, context)
+      RequestIP.client_ip(request, context.options)
     end
 
     def captcha_log(context, message)

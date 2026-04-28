@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "../../test_helper"
+require_relative "../test_helper"
 
 class BetterAuthPluginsAPIKeyTest < Minitest::Test
   SECRET = "phase-nine-api-key-secret-with-enough-entropy"
@@ -22,20 +22,24 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
     verified = auth.api.verify_api_key(body: {key: created[:key], permissions: {repo: ["read"]}})
     assert_equal true, verified[:valid]
     assert_equal created[:id], verified[:key][:id]
+    assert_nil verified[:error]
     refute verified[:key].key?("key")
 
     fetched = auth.api.get_api_key(headers: {"cookie" => cookie}, query: {id: created[:id]})
     assert_equal "primary", fetched[:name]
 
     listed = auth.api.list_api_keys(headers: {"cookie" => cookie})
-    assert_equal [created[:id]], listed.map { |entry| entry[:id] || entry["id"] }
+    assert_equal [created[:id]], listed.fetch(:apiKeys).map { |entry| entry[:id] || entry["id"] }
+    assert_equal 1, listed.fetch(:total)
 
     updated = auth.api.update_api_key(headers: {"cookie" => cookie}, body: {keyId: created[:id], name: "renamed", enabled: false})
     assert_equal "renamed", updated[:name]
     assert_equal false, updated[:enabled]
 
-    disabled = assert_raises(BetterAuth::APIError) { auth.api.verify_api_key(body: {key: created[:key]}) }
-    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["KEY_DISABLED"], disabled.message
+    disabled = auth.api.verify_api_key(body: {key: created[:key]})
+    assert_equal false, disabled[:valid]
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["KEY_DISABLED"], disabled[:error][:message]
+    assert_nil disabled[:key]
 
     assert_equal({success: true}, auth.api.delete_api_key(headers: {"cookie" => cookie}, body: {keyId: created[:id]}))
     assert_raises(BetterAuth::APIError) { auth.api.get_api_key(headers: {"cookie" => cookie}, query: {id: created[:id]}) }
@@ -52,21 +56,21 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
 
     expired = auth.api.create_api_key(body: {userId: user_id})
     auth.context.adapter.update(model: "apikey", where: [{field: "id", value: expired[:id]}], update: {expiresAt: Time.now - 10})
-    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["KEY_EXPIRED"], assert_raises(BetterAuth::APIError) {
-      auth.api.verify_api_key(body: {key: expired[:key]})
-    }.message
+    expired_result = auth.api.verify_api_key(body: {key: expired[:key]})
+    assert_equal false, expired_result[:valid]
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["KEY_EXPIRED"], expired_result[:error][:message]
 
     limited = auth.api.create_api_key(body: {userId: user_id, remaining: 1})
     assert_equal true, auth.api.verify_api_key(body: {key: limited[:key]})[:valid]
-    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["USAGE_EXCEEDED"], assert_raises(BetterAuth::APIError) {
-      auth.api.verify_api_key(body: {key: limited[:key]})
-    }.message
+    usage_exceeded = auth.api.verify_api_key(body: {key: limited[:key]})
+    assert_equal false, usage_exceeded[:valid]
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["USAGE_EXCEEDED"], usage_exceeded[:error][:message]
 
     rate_limited = auth.api.create_api_key(body: {userId: user_id, rateLimitEnabled: true, rateLimitMax: 1, rateLimitTimeWindow: 60_000})
     assert_equal true, auth.api.verify_api_key(body: {key: rate_limited[:key]})[:valid]
-    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["RATE_LIMIT_EXCEEDED"], assert_raises(BetterAuth::APIError) {
-      auth.api.verify_api_key(body: {key: rate_limited[:key]})
-    }.message
+    rate_error = auth.api.verify_api_key(body: {key: rate_limited[:key]})
+    assert_equal false, rate_error[:valid]
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["RATE_LIMIT_EXCEEDED"], rate_error[:error][:message]
 
     refill = auth.api.create_api_key(body: {userId: user_id, remaining: 0, refillAmount: 2, refillInterval: 1})
     stored = auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: refill[:id]}])
@@ -80,7 +84,8 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
       storage: "secondary-storage",
       secondary_storage: storage,
       fallback_to_database: true,
-      enable_session_for_api_keys: true
+      enable_session_for_api_keys: true,
+      session: {store_session_in_database: true}
     )
     cookie = sign_up_cookie(auth, email: "storage-key@example.com")
     created = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {name: "storage"})
@@ -105,6 +110,146 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
       auth.api.create_api_key(headers: {"cookie" => cookie}, body: {name: "bad", userId: "someone-else"})
     end
     assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["SERVER_ONLY_PROPERTY"], client_server_only.message
+  end
+
+  def test_multiple_configurations_default_prefix_and_config_filters
+    auth = build_auth([
+      {config_id: "public-api", default_prefix: "pub_", default_key_length: 12},
+      {config_id: "internal-api", default_prefix: "int_", default_key_length: 12},
+      {config_id: "default", default_prefix: "def_", default_key_length: 12}
+    ])
+    cookie = sign_up_cookie(auth, email: "multi-config-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+
+    public_key = auth.api.create_api_key(body: {configId: "public-api", userId: user_id})
+    internal_key = auth.api.create_api_key(body: {configId: "internal-api", userId: user_id})
+    default_key = auth.api.create_api_key(body: {userId: user_id})
+
+    assert_equal "public-api", public_key[:configId]
+    assert_equal "pub_", public_key[:prefix]
+    assert_match(/\Apub_[A-Za-z]+\z/, public_key[:key])
+    assert_equal user_id, public_key[:referenceId]
+    assert_equal "internal-api", internal_key[:configId]
+    assert_equal "int_", internal_key[:prefix]
+    assert_equal "default", default_key[:configId]
+    assert_equal "def_", default_key[:prefix]
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {configId: "public-api"})
+    assert_equal [public_key[:id]], listed.fetch(:apiKeys).map { |entry| entry[:id] }
+    assert_equal 1, listed.fetch(:total)
+
+    verified = auth.api.verify_api_key(body: {configId: "internal-api", key: internal_key[:key]})
+    assert_equal true, verified[:valid]
+    assert_equal "internal-api", verified[:key][:configId]
+  end
+
+  def test_multiple_configuration_validation
+    assert_raises(BetterAuth::Error) do
+      BetterAuth::Plugins.api_key([{config_id: "duplicate"}, {config_id: "duplicate"}])
+    end
+
+    assert_raises(BetterAuth::Error) do
+      BetterAuth::Plugins.api_key([{config_id: "valid"}, {}])
+    end
+  end
+
+  def test_list_paginates_sorts_and_returns_upstream_shape
+    auth = build_auth(default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "list-shape-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    auth.api.create_api_key(body: {userId: user_id, name: "zulu"})
+    auth.api.create_api_key(body: {userId: user_id, name: "alpha"})
+    auth.api.create_api_key(body: {userId: user_id, name: "mike"})
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {limit: 2, offset: 1, sortBy: "name", sortDirection: "asc"})
+
+    assert_equal %w[mike zulu], listed.fetch(:apiKeys).map { |entry| entry[:name] }
+    assert_equal 3, listed.fetch(:total)
+    assert_equal 2, listed.fetch(:limit)
+    assert_equal 1, listed.fetch(:offset)
+  end
+
+  def test_verify_invalid_key_returns_error_payload
+    auth = build_auth(default_key_length: 12)
+
+    result = auth.api.verify_api_key(body: {key: "missing-key"})
+
+    assert_equal false, result[:valid]
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["INVALID_API_KEY"], result[:error][:message]
+    assert_equal "INVALID_API_KEY", result[:error][:code]
+    assert_nil result[:key]
+  end
+
+  def test_default_permissions_callable_and_prefix_validation
+    calls = []
+    auth = build_auth(
+      default_key_length: 12,
+      permissions: {
+        default_permissions: ->(reference_id, ctx) {
+          calls << [reference_id, ctx.path]
+          {repo: ["read"]}
+        }
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "permissions-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+
+    invalid_prefix = assert_raises(BetterAuth::APIError) do
+      auth.api.create_api_key(body: {userId: user_id, prefix: "bad prefix"})
+    end
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["INVALID_PREFIX_LENGTH"], invalid_prefix.message
+
+    created = auth.api.create_api_key(body: {userId: user_id})
+    assert_equal({"repo" => ["read"]}, created[:permissions])
+    assert_equal [[user_id, "/api-key/create"]], calls
+    assert_equal true, auth.api.verify_api_key(body: {key: created[:key], permissions: {repo: ["read"]}})[:valid]
+  end
+
+  def test_organization_owned_api_keys_require_membership_permissions_and_filtering
+    ac = BetterAuth::Plugins.create_access_control(
+      organization: ["update", "delete"],
+      member: ["create", "update", "delete"],
+      invitation: ["create", "cancel"],
+      team: ["create", "update", "delete"],
+      ac: ["create", "read", "update", "delete"],
+      apiKey: ["create", "read", "update", "delete"]
+    )
+    auth = BetterAuth.auth(
+      secret: SECRET,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization(
+          ac: ac,
+          roles: {
+            owner: ac.new_role(member: ["create", "update", "delete"], apiKey: ["create", "read", "update", "delete"]),
+            member: ac.new_role(apiKey: ["read"])
+          }
+        ),
+        BetterAuth::Plugins.api_key([
+          {config_id: "user-keys", default_prefix: "usr_", references: "user", default_key_length: 12},
+          {config_id: "org-keys", default_prefix: "org_", references: "organization", default_key_length: 12}
+        ])
+      ]
+    )
+    owner_cookie = sign_up_cookie(auth, email: "org-owner-key@example.com")
+    member_cookie = sign_up_cookie(auth, email: "org-member-key@example.com")
+    member_id = auth.api.get_session(headers: {"cookie" => member_cookie})[:user]["id"]
+    organization = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "API Org", slug: "api-org"})
+    auth.api.add_member(headers: {"cookie" => owner_cookie}, body: {organizationId: organization.fetch("id"), userId: member_id, role: "member"})
+
+    org_key = auth.api.create_api_key(headers: {"cookie" => owner_cookie}, body: {configId: "org-keys", organizationId: organization.fetch("id")})
+
+    assert_equal "org-keys", org_key[:configId]
+    assert_equal organization.fetch("id"), org_key[:referenceId]
+    assert_equal "org_", org_key[:prefix]
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => member_cookie}, query: {organizationId: organization.fetch("id")})
+    assert_equal [org_key[:id]], listed.fetch(:apiKeys).map { |entry| entry[:id] }
+
+    insufficient = assert_raises(BetterAuth::APIError) do
+      auth.api.update_api_key(headers: {"cookie" => member_cookie}, body: {configId: "org-keys", keyId: org_key[:id], name: "blocked"})
+    end
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["INSUFFICIENT_API_KEY_PERMISSIONS"], insufficient.message
   end
 
   def test_update_auth_boundaries_match_upstream
@@ -179,12 +324,15 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
   end
 
   def build_auth(options = {})
-    advanced = options.delete(:advanced)
+    advanced = options.is_a?(Hash) ? options.delete(:advanced) : nil
+    secondary_storage = options.is_a?(Hash) ? options.delete(:secondary_storage) : nil
+    session = options.is_a?(Hash) ? options.delete(:session) : nil
     BetterAuth.auth({
       secret: SECRET,
       email_and_password: {enabled: true},
       advanced: advanced,
-      secondary_storage: options.delete(:secondary_storage),
+      secondary_storage: secondary_storage,
+      session: session,
       plugins: [BetterAuth::Plugins.api_key(options)]
     }.compact)
   end
