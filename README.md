@@ -32,6 +32,7 @@ This port is active work. Many server-side flows are implemented, but not every 
 | --- | --- | --- |
 | [`better_auth`](packages/better_auth/) | Framework-agnostic Rack core. Auth routes, sessions, cookies, adapters, and core plugin shims live here. | `gem "better_auth"` |
 | [`better_auth-redis-storage`](packages/better_auth-redis-storage/) | External Redis secondary storage package for session payloads, active-session indexes, and secondary-storage-backed rate limiting. | `gem "better_auth-redis-storage"` |
+| [`better_auth-mongo-adapter`](packages/better_auth-mongo-adapter/) | External MongoDB database adapter package backed by the official `mongo` gem. | `gem "better_auth-mongo-adapter"` |
 | [`better_auth-api-key`](packages/better_auth-api-key/) | External API key plugin package with creation, verification, quotas, metadata, permissions, storage modes, and API-key sessions. | `gem "better_auth-api-key"` |
 | [`better_auth-rails`](packages/better_auth-rails/) | Rails adapter with mounting helpers, ActiveRecord adapter, controller helpers, and generators. | `gem "better_auth-rails"` |
 | [`better_auth-sinatra`](packages/better_auth-sinatra/) | Sinatra adapter with Rack mounting, request helpers, and SQL migration Rake tasks. | `gem "better_auth-sinatra"` |
@@ -132,6 +133,7 @@ Plugin support is tracked against Ruby server parity: TypeScript inference, brow
 | Memory adapter | [x] Supported | Default development/test adapter. |
 | PostgreSQL adapter | Partial | Direct SQL adapter and DDL generation exist; full upstream adapter contract coverage is still expanding. |
 | MySQL adapter | Partial | Direct SQL adapter and DDL generation exist; full upstream adapter contract coverage is still expanding. |
+| MongoDB adapter | Partial | External package: install `better_auth-mongo-adapter`. Document storage, ObjectId conversion, joins, transactions, and auth route persistence are implemented. |
 | Rails ActiveRecord adapter | Partial | ActiveRecord persistence, migrations, mounting, helpers, and generators exist; full adapter contract parity is still expanding. |
 | Sinatra adapter | Partial | Rack mounting, helpers, SQL migration Rake tasks, and docs exist. ActiveRecord-backed Sinatra migrations are not supported yet. |
 | Secondary storage | Partial | Session and verification-style storage behavior exists; full edge-case parity remains future work. |
@@ -224,6 +226,9 @@ rbenv exec bundle exec rake
 cd ../better_auth-stripe
 rbenv exec bundle exec rake
 
+cd ../better_auth-mongo-adapter
+rbenv exec bundle exec rake
+
 cd ../better_auth-oauth-provider
 rbenv exec bundle exec rake
 ```
@@ -243,6 +248,7 @@ better-auth/
 ├── packages/
 │   ├── better_auth/            # Core gem, Minitest
 │   ├── better_auth-api-key/    # External API key plugin gem
+│   ├── better_auth-mongo-adapter/ # External MongoDB adapter gem
 │   ├── better_auth-rails/      # Rails adapter, RSpec
 │   ├── better_auth-sinatra/    # Sinatra adapter, RSpec
 │   ├── better_auth-sso/        # External SSO plugin gem
