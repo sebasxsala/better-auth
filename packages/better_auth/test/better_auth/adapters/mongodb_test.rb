@@ -87,8 +87,6 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     assert_equal "MongoDB Direct Update", session[:user]["name"]
   rescue LoadError
     skip "mongo gem is not installed"
-  rescue Mongo::Error::NoServerAvailable
-    skip "MongoDB test service is not available"
   ensure
     client&.close
   end

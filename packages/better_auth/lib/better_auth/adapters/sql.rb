@@ -42,6 +42,7 @@ module BetterAuth
         model = model.to_s
         params = []
         sql = +"SELECT "
+        sql << "TOP (#{Integer(limit)}) " if dialect == :mssql && limit && !offset
         sql << select_sql(model, select, join)
         sql << " FROM "
         sql << quote(table_for(model))
@@ -49,8 +50,7 @@ module BetterAuth
         where_sql = build_where(model, where || [], params)
         sql << " WHERE #{where_sql}" unless where_sql.empty?
         sql << order_sql(model, sort_by) if sort_by
-        sql << " LIMIT #{Integer(limit)}" if limit
-        sql << " OFFSET #{Integer(offset)}" if offset
+        append_pagination_sql(sql, model, sort_by, limit, offset)
 
         records = execute(sql, params).map { |row| normalize_record(model, row, join: join) }
         collection_join?(model, join) ? aggregate_collection_joins(model, records, join) : records
@@ -235,6 +235,21 @@ module BetterAuth
         field = Schema.storage_key(fetch_key(sort_by, :field))
         direction = (fetch_key(sort_by, :direction).to_s.downcase == "desc") ? "DESC" : "ASC"
         " ORDER BY #{quote(table_for(model))}.#{quote(storage_field(model, field))} #{direction}"
+      end
+
+      def append_pagination_sql(sql, model, sort_by, limit, offset)
+        if dialect == :mssql
+          return if limit && !offset
+          return unless offset
+
+          sql << order_sql(model, {field: "id", direction: "asc"}) unless sort_by
+          sql << " OFFSET #{Integer(offset)} ROWS"
+          sql << " FETCH NEXT #{Integer(limit)} ROWS ONLY" if limit
+          return
+        end
+
+        sql << " LIMIT #{Integer(limit)}" if limit
+        sql << " OFFSET #{Integer(offset)}" if offset
       end
 
       def sql_operator(operator)

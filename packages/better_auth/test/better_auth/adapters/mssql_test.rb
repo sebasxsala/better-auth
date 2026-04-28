@@ -18,6 +18,7 @@ class BetterAuthMSSQLAdapterTest < Minitest::Test
     require "sequel"
     require "tiny_tds"
 
+    ensure_database
     connection = Sequel.connect(ENV.fetch("BETTER_AUTH_MSSQL_URL", "tinytds://sa:Password123!@127.0.0.1:1433/better_auth?timeout=30"))
     config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
     reset_schema(connection)
@@ -50,13 +51,18 @@ class BetterAuthMSSQLAdapterTest < Minitest::Test
     assert_equal "MSSQL Direct Update", session[:user]["name"]
   rescue LoadError
     skip "sequel or tiny_tds gem is not installed"
-  rescue Sequel::DatabaseConnectionError, TinyTds::Error
-    skip "MSSQL test service is not available"
   ensure
     connection&.disconnect
   end
 
   private
+
+  def ensure_database
+    master = Sequel.connect(ENV.fetch("BETTER_AUTH_MSSQL_MASTER_URL", "tinytds://sa:Password123!@127.0.0.1:1433/master?timeout=30"))
+    master.run("IF DB_ID(N'better_auth') IS NULL CREATE DATABASE [better_auth]")
+  ensure
+    master&.disconnect
+  end
 
   def reset_schema(connection)
     connection.run("EXEC sp_MSforeachtable 'ALTER TABLE ? NOCHECK CONSTRAINT all'")

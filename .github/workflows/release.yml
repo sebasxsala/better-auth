@@ -26,6 +26,9 @@ concurrency:
 
 env:
   BETTER_AUTH_POSTGRES_URL: postgres://user:password@localhost:5432/better_auth
+  BETTER_AUTH_MONGODB_URL: mongodb://127.0.0.1:27017/better-auth-ruby-test
+  BETTER_AUTH_MSSQL_URL: "tinytds://sa:Password123!@127.0.0.1:1433/better_auth?timeout=30"
+  BETTER_AUTH_MSSQL_MASTER_URL: "tinytds://sa:Password123!@127.0.0.1:1433/master?timeout=30"
   BETTER_AUTH_MYSQL_HOST: 127.0.0.1
   BETTER_AUTH_MYSQL_PORT: 3306
   BETTER_AUTH_MYSQL_USER: user
@@ -231,6 +234,24 @@ jobs:
           --health-timeout 5s
           --health-retries 30
           --health-start-period 30s
+      mongodb:
+        image: mongo:latest
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval \"db.adminCommand('ping').ok\""
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 10s
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: Password123!
+          MSSQL_PID: Developer
+        ports:
+          - 1433:1433
     steps:
       - uses: actions/checkout@v4
 

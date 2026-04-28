@@ -38,7 +38,11 @@ module BetterAuth
         column = quote(attributes[:field_name] || physical_name(logical_field), dialect)
         parts = [column, sql_type(logical_field, attributes, dialect)]
         parts << "PRIMARY KEY" if logical_field == "id"
-        parts << "NOT NULL" if attributes[:required]
+        if attributes[:required]
+          parts << "NOT NULL"
+        elsif dialect == :mssql
+          parts << "NULL"
+        end
         default = default_sql(attributes, dialect)
         parts << "DEFAULT #{default}" if default
         parts.join(" ")

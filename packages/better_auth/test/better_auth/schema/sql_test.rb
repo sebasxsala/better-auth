@@ -55,6 +55,7 @@ class BetterAuthSchemaSQLTest < Minitest::Test
     assert_includes sql, "IF OBJECT_ID(N'[users]', N'U') IS NULL"
     assert_includes sql, "[id] varchar(255) PRIMARY KEY"
     assert_includes sql, "[email_verified] smallint NOT NULL DEFAULT 0"
+    assert_includes sql, "[image] varchar(8000) NULL"
     assert_includes sql, "[created_at] datetime2(3) NOT NULL DEFAULT CURRENT_TIMESTAMP"
     assert_includes sql, "CONSTRAINT [uniq_users_email] UNIQUE ([email])"
     assert_includes sql, "CONSTRAINT [fk_sessions_user_id] FOREIGN KEY ([user_id]) REFERENCES [users] ([id]) ON DELETE CASCADE"

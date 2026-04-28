@@ -32,6 +32,9 @@ concurrency:
 
 env:
   BETTER_AUTH_POSTGRES_URL: postgres://user:password@localhost:5432/better_auth
+  BETTER_AUTH_MONGODB_URL: mongodb://127.0.0.1:27017/better-auth-ruby-test
+  BETTER_AUTH_MSSQL_URL: "tinytds://sa:Password123!@127.0.0.1:1433/better_auth?timeout=30"
+  BETTER_AUTH_MSSQL_MASTER_URL: "tinytds://sa:Password123!@127.0.0.1:1433/master?timeout=30"
   BETTER_AUTH_MYSQL_HOST: 127.0.0.1
   BETTER_AUTH_MYSQL_PORT: 3306
   BETTER_AUTH_MYSQL_USER: user
@@ -71,6 +74,24 @@ jobs:
           --health-timeout 5s
           --health-retries 30
           --health-start-period 30s
+      mongodb:
+        image: mongo:latest
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval \"db.adminCommand('ping').ok\""
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 10s
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: Password123!
+          MSSQL_PID: Developer
+        ports:
+          - 1433:1433
     steps:
       - uses: actions/checkout@v4
 
@@ -191,3 +212,129 @@ jobs:
       - name: Run tests
         working-directory: packages/better_auth-sinatra
         run: bundle exec rspec
+
+  test-hanami:
+    name: Test better_auth-hanami (Hanami Adapter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-hanami
+
+      - name: Run linter
+        working-directory: packages/better_auth-hanami
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-hanami
+        run: bundle exec rspec
+
+  test-oauth-provider:
+    name: Test better_auth-oauth-provider (OAuth Provider Plugin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-oauth-provider
+
+      - name: Run linter
+        working-directory: packages/better_auth-oauth-provider
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-oauth-provider
+        run: bundle exec rake test
+
+  test-redis-storage:
+    name: Test better_auth-redis-storage (Redis Storage Plugin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-redis-storage
+
+      - name: Run linter
+        working-directory: packages/better_auth-redis-storage
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-redis-storage
+        run: bundle exec rake test
+
+  test-scim:
+    name: Test better_auth-scim (SCIM Plugin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-scim
+
+      - name: Run linter
+        working-directory: packages/better_auth-scim
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-scim
+        run: bundle exec rake test
+
+  test-sso:
+    name: Test better_auth-sso (SSO Plugin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-sso
+
+      - name: Run linter
+        working-directory: packages/better_auth-sso
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-sso
+        run: bundle exec rake test
+
+  test-stripe:
+    name: Test better_auth-stripe (Stripe Plugin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-stripe
+
+      - name: Run linter
+        working-directory: packages/better_auth-stripe
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-stripe
+        run: bundle exec rake test

@@ -157,6 +157,17 @@ class BetterAuthSQLAdapterTest < Minitest::Test
     assert_equal [["ada@example.com", "Ada"]], connection.params
   end
 
+  def test_sql_adapter_uses_top_for_mssql_find_one
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+    connection = RecordingConnection.new([])
+    adapter = BetterAuth::Adapters::SQL.new(config, connection: connection, dialect: :mssql)
+
+    adapter.find_one(model: "user", where: [{field: "email", value: "ada@example.com"}])
+
+    assert_includes connection.sql.first, "SELECT TOP (1)"
+    refute_includes connection.sql.first, "LIMIT"
+  end
+
   def test_sql_adapter_rejects_input_false_fields_without_force_allow_id
     config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
     connection = RecordingConnection.new([])
