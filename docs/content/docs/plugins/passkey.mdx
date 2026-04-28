@@ -13,6 +13,7 @@ This page documents the current Ruby port behavior. Ruby uses snake_case option 
 
 ```ruby title="config/auth.rb"
 require "better_auth"
+require "better_auth/passkey"
 
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
@@ -52,10 +53,17 @@ Current Ruby options accepted by `BetterAuth::Plugins.passkey`:
 - `origin`
 - `rp_id`
 - `authenticator_selection`
+- `registration`
+- `authentication`
+
+`registration` supports `require_session`, `resolve_user`, `after_verification`, and `extensions`. Set `require_session: false` for passkey-first registration and provide `resolve_user` when no session is present.
+
+`authentication` supports `extensions` and `after_verification`.
 
 ## Support Notes
 
-- The examples above are based on Ruby plugin source and tests in `packages/better_auth`.
-- If an upstream section is not represented here, treat it as not yet documented or not yet supported by the Ruby port until the matching Ruby implementation exists.
+- Install `better_auth-passkey`; core `better_auth` only ships a compatibility shim for `BetterAuth::Plugins.passkey`.
+- The examples above are based on Ruby plugin source and tests in `packages/better_auth-passkey`.
+- Browser-only helpers from `@better-auth/passkey/client`, including conditional UI, `returnWebAuthnResponse`, and `useAutoRegister`, remain client package behavior. Ruby server parity covers the underlying WebAuthn option/verification routes.
 
 {/* Upstream guide is preserved in upstream/docs/content/docs/plugins/passkey.mdx. */}
