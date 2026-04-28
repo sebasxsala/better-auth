@@ -16,6 +16,8 @@ Do not create separate folders for supported Rails lines. Keep compatibility in 
 2. Bump the relevant gem version file or files:
    - `packages/better_auth/lib/better_auth/version.rb`
    - `packages/better_auth-rails/lib/better_auth/rails/version.rb`
+   - `packages/better_auth-passkey/lib/better_auth/passkey/version.rb`
+   - `packages/better_auth-api-key/lib/better_auth/api_key/version.rb`
    - `packages/better_auth-sinatra/lib/better_auth/sinatra/version.rb`
    - `packages/better_auth-hanami/lib/better_auth/hanami/version.rb`
 3. Let CI pass on `main`.
@@ -30,6 +32,8 @@ The release workflow publishes only the gem named by the tag prefix:
 
 - `better_auth-v0.1.2` publishes `better_auth`.
 - `better_auth-rails-v0.1.2` publishes `better_auth-rails` and the `better_auth_rails` compatibility alias.
+- `better_auth-passkey-v0.1.2` publishes `better_auth-passkey`.
+- `better_auth-api-key-v0.1.2` publishes `better_auth-api-key`.
 - `better_auth-sinatra-v0.1.2` publishes `better_auth-sinatra`.
 - `better_auth-hanami-v0.1.2` publishes `better_auth-hanami`.
 

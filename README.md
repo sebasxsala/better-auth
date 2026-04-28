@@ -31,9 +31,13 @@ This port is active work. Many server-side flows are implemented, but not every 
 | Gem | Description | Install |
 | --- | --- | --- |
 | [`better_auth`](packages/better_auth/) | Framework-agnostic Rack core. Auth routes, sessions, cookies, adapters, and core plugin shims live here. | `gem "better_auth"` |
+| [`better_auth-api-key`](packages/better_auth-api-key/) | External API key plugin package with creation, verification, quotas, metadata, permissions, storage modes, and API-key sessions. | `gem "better_auth-api-key"` |
 | [`better_auth-rails`](packages/better_auth-rails/) | Rails adapter with mounting helpers, ActiveRecord adapter, controller helpers, and generators. | `gem "better_auth-rails"` |
 | [`better_auth-sinatra`](packages/better_auth-sinatra/) | Sinatra adapter with Rack mounting, request helpers, and SQL migration Rake tasks. | `gem "better_auth-sinatra"` |
+| [`better_auth-sso`](packages/better_auth-sso/) | External SSO plugin package with OIDC and SAML SSO route support. | `gem "better_auth-sso"` |
+| [`better_auth-scim`](packages/better_auth-scim/) | External SCIM v2 provisioning plugin package. | `gem "better_auth-scim"` |
 | [`better_auth-stripe`](packages/better_auth-stripe/) | External Stripe billing plugin package with subscription, checkout, portal, and webhook support. | `gem "better_auth-stripe"` |
+| [`better_auth-oauth-provider`](packages/better_auth-oauth-provider/) | External OAuth 2.0 provider plugin package. | `gem "better_auth-oauth-provider"` |
 
 ## Quick Start
 
@@ -155,12 +159,12 @@ Upstream Better Auth exposes many provider factories. The Ruby port currently sh
 | Additional fields | [x] Supported | Schema extension and route integration exist. |
 | Admin | [x] Supported | Ruby server parity covers user management, list/search/filter/sort/count, role validation, bans including social callback rejection and expiry cleanup, impersonation/admin-session restoration, session administration, password setting, destructive endpoints, and permission checks. |
 | Anonymous | [x] Supported | Anonymous sign-in/delete, generator fallbacks, repeat-session rejection, and email/social link cleanup are implemented. |
-| API key | [x] Supported | Creation, verification, hashing, expiration bounds, usage/refill/rate limits, metadata migration, permissions, storage modes, deferred updates, and API-key sessions are implemented. |
+| API key | [x] Supported | External package: install `better_auth-api-key`. Creation, verification, hashing, expiration bounds, usage/refill/rate limits, metadata migration, permissions, storage modes, deferred updates, and API-key sessions are implemented. |
 | Bearer | [x] Supported | Bearer session resolution, signed-token exposure, unsigned-token fallback, signature requirement, list-session auth, and valid-cookie fallback are implemented. |
 | Captcha | [x] Supported | reCAPTCHA, hCaptcha, Turnstile, CaptchaFox, protected endpoint checks, provider payloads, score checks, and failure responses are implemented. |
-| Custom session | [x] Supported | Custom `/get-session` shaping, unauthenticated nil responses, Set-Cookie preservation, and optional multi-session list mutation are implemented. |
-| Device authorization | [x] Supported | Device/user code issuance, option validation, client validation, OAuth error responses, polling/slow-down, approval/denial, token exchange hooks, expiry, and verification URI behavior are implemented. |
-| Email OTP | [x] Supported | Send/check/verify/sign-in/password-reset flows, attempts, latest OTP, no-enumeration sends, override hooks, token storage modes, and plugin rate limits are implemented. Client aliases are outside Ruby server scope. |
+| Custom session | [x] Supported | Custom `/get-session` shaping with parsed/filtered payloads, unauthenticated nil responses, Set-Cookie preservation, OpenAPI metadata, and optional multi-session list mutation are implemented. |
+| Device authorization | [x] Supported | Device/user code issuance, option validation, client validation, OAuth error responses, polling/slow-down, approval/denial, token exchange hooks, expiry, schema overrides, and verification URI behavior are implemented. |
+| Email OTP | [x] Supported | Send/check/verify/sign-in/password-reset/change-email flows, attempts, latest/reused OTP, no-enumeration sends, override hooks, token storage modes, additional sign-up fields, and plugin rate limits are implemented. Client aliases are outside Ruby server scope. |
 | Generic OAuth | [x] Supported | Custom OAuth sign-in/callback/link flows, DB and cookie state strategies with mismatch cleanup, dynamic authorization params, response mode, issuer checks, sign-up controls, custom token/user-info callables, standard HTTP token/userinfo exchange, provider helper factories, account-info/refresh integration, encrypted OAuth tokens, account cookies, and account linking are implemented. |
 | Have I Been Pwned | [x] Supported | SHA-1 k-anonymity range lookup, default password-route protection, custom paths/messages, and injectable lookup tests are implemented. |
 | JWT/JWKS | [x] Supported | EdDSA default signing, RS256/PS256/ES256/ES512 key generation, JWKS publication/custom path, key rotation/grace periods, `kid` selection, token expiry, remote JWKS verification, API-only sign/verify helpers, and `set-auth-jwt` are implemented. Symmetric client-secret algorithms such as HS256 are intentionally outside the JWKS server surface. |
@@ -175,7 +179,7 @@ Upstream Better Auth exposes many provider factories. The Ruby port currently sh
 | One-time token | [x] Supported | Generate/verify, single-use, expiration, expired-session rejection, cookie behavior, storage modes, server-only generation, and `set-ott` session headers are implemented. |
 | OpenAPI | Partial | OpenAPI 3.1.1 metadata, route/model inventory, security schemes, servers, default responses, selected upstream request bodies, path params, disabled paths, reference HTML, theme, nonce, and disabled reference handling exist. Exact upstream snapshot parity remains open: upstream has 30 base paths and roughly 25 still need rich request/response schemas. |
 | Organization | [x] Supported | Organization/member CRUD, invitations including multi-team acceptance, team flows, active org/team session fields, dynamic role CRUD safeguards, hooks, additional fields, permissions, and SQL/Rails plugin schema migrations are implemented. Browser client hooks and TypeScript inference are outside Ruby server scope. |
-| Passkey | [x] Supported | WebAuthn registration/authentication, upstream option shapes, challenge expiration, allow/exclude credential transports, not-found delete behavior, management routes, session creation, and SQL/Rails schema output are implemented through the `webauthn` gem. Browser client package aliases are outside Ruby server scope. |
+| Passkey | [x] Supported | External package: install `better_auth-passkey`. WebAuthn registration/authentication, passkey-first registration, WebAuthn extensions, verification callbacks, upstream option shapes, challenge expiration, allow/exclude credential transports, array origins, not-found delete behavior, management routes, session creation, and SQL/Rails schema output are implemented through the package-owned `webauthn` dependency. Browser client package aliases are outside Ruby server scope. |
 | Phone number | [x] Supported | OTP send/verify, sign-in/sign-up, phone updates, password reset safety, attempt limits, uniqueness, additional fields, custom validation, and custom OTP verification are implemented. |
 | SIWE | [x] Supported | Nonce, wallet sign-in, callback verification, ENS hook, account/session creation, EIP-55 checksum casing, duplicate wallet reuse, multi-chain wallets, and custom schema merging are implemented. |
 | SSO | [x] Supported | External package: install `better_auth-sso`. Supports provider CRUD/access, OIDC discovery/callback, SAML ACS/callback/metadata, RelayState safety, replay protection, domain verification, organization assignment, and real SAML XML validation through the package-owned `ruby-saml` dependency. |
@@ -183,7 +187,7 @@ Upstream Better Auth exposes many provider factories. The Ruby port currently sh
 | Stripe | [x] Supported | External package: install `better_auth-stripe`. Fully supported for Ruby server parity after direct upstream Stripe source/test review: official `stripe` gem client support, injected-client checkout/portal flows, reference authorization, plan/seat/trial abuse protection, trial-start callbacks, billing event webhooks, subscription state transitions, organization subscriptions, metadata helpers, customer callbacks, checkout params/options, lookup keys, and webhook construction. |
 | Two-factor | [x] Supported | TOTP, OTP, backup codes, trusted devices, cookie max-age options, disable/recovery flows, `rememberMe: false` preservation, and post-login verification are implemented. |
 | Username | [x] Supported | Username sign-up/sign-in, availability, normalization, display username, validation order, duplicate/update behavior, and leak-prevention behavior are implemented. |
-| Expo server integration | [x] Supported | Ruby server parity covers authorization proxy cookies, optional OAuth state cookie, `expo-origin` override/preservation, disabled override, trusted `exp://`, wildcard trusted origins, and trusted deep-link cookie transfer. Native Expo secure storage, cookie cache, focus/online managers, browser-opening flow, and React Native behavior tests are client-only. |
+| Expo server integration | [x] Supported | Ruby server parity covers authorization proxy cookies, optional OAuth state cookie, `expo-origin` override/preservation, disabled override, development-only trusted `exp://`, wildcard trusted origins, and full trusted deep-link cookie transfer. Native Expo secure storage, cookie cache, focus/online managers, browser-opening flow, and React Native behavior tests are client-only. |
 
 ## Development
 
@@ -210,7 +214,13 @@ bundle exec rake test
 cd packages/better_auth-sso
 rbenv exec bundle exec rake
 
+cd ../better_auth-api-key
+rbenv exec bundle exec rake
+
 cd ../better_auth-scim
+rbenv exec bundle exec rake
+
+cd ../better_auth-stripe
 rbenv exec bundle exec rake
 
 cd ../better_auth-oauth-provider
@@ -231,10 +241,12 @@ better-auth/
 ├── docs/                       # Adapted upstream docs app
 ├── packages/
 │   ├── better_auth/            # Core gem, Minitest
+│   ├── better_auth-api-key/    # External API key plugin gem
 │   ├── better_auth-rails/      # Rails adapter, RSpec
 │   ├── better_auth-sinatra/    # Sinatra adapter, RSpec
 │   ├── better_auth-sso/        # External SSO plugin gem
 │   ├── better_auth-scim/       # External SCIM plugin gem
+│   ├── better_auth-stripe/     # External Stripe plugin gem
 │   └── better_auth-oauth-provider/ # External OAuth provider plugin gem
 ├── .docs/
 │   ├── features/               # Feature parity notes

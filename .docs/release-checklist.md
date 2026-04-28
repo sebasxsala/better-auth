@@ -8,6 +8,10 @@ Use this checklist before cutting a Ruby gem release.
 - [ ] Run `make release-check`.
 - [ ] Run `cd packages/better_auth && bundle exec rake test`.
 - [ ] Run `cd packages/better_auth && bundle exec standardrb`.
+- [ ] Run `cd packages/better_auth-passkey && bundle exec rake test`.
+- [ ] Run `cd packages/better_auth-passkey && bundle exec standardrb`.
+- [ ] Run `cd packages/better_auth-api-key && bundle exec rake test`.
+- [ ] Run `cd packages/better_auth-api-key && bundle exec standardrb`.
 - [ ] Run `cd packages/better_auth-rails && bundle exec rspec`.
 - [ ] Run `cd packages/better_auth-rails && bundle exec standardrb`.
 - [ ] Run `cd packages/better_auth-sinatra && bundle exec rspec`.
@@ -35,10 +39,12 @@ Use this checklist before cutting a Ruby gem release.
 - [ ] Update gem versions.
 - [ ] Update changelog or release notes.
 - [ ] Confirm `better_auth-rails` and defensive alias `better_auth_rails` publish metadata.
+- [ ] Confirm `better_auth-passkey` publish metadata.
+- [ ] Confirm `better_auth-api-key` publish metadata.
 - [ ] Confirm `better_auth-sinatra` publish metadata.
 - [ ] Confirm `better_auth-hanami` publish metadata.
 - [ ] Confirm each released RubyGems package trusts `.github/workflows/release.yml` for Trusted Publishing.
-- [ ] Confirm the release tag uses the package prefix, for example `better_auth-v0.1.2`, `better_auth-rails-v0.1.2`, `better_auth-sinatra-v0.1.2`, or `better_auth-hanami-v0.1.2`.
+- [ ] Confirm the release tag uses the package prefix, for example `better_auth-v0.1.2`, `better_auth-rails-v0.1.2`, `better_auth-passkey-v0.1.2`, `better_auth-sinatra-v0.1.2`, or `better_auth-hanami-v0.1.2`.
 - [ ] Confirm gemspec files include the intended files and exclude generated caches.
 - [ ] Confirm no `.env`, `.next`, `node_modules`, coverage, or local database files are staged.
 
