@@ -56,10 +56,10 @@ require_relative "better_auth/plugins/two_factor"
 require_relative "better_auth/plugins/captcha"
 require_relative "better_auth/plugins/have_i_been_pwned"
 require_relative "better_auth/plugins/api_key"
+require_relative "better_auth/plugins/sso"
+require_relative "better_auth/plugins/scim"
 require_relative "better_auth/social_providers"
 %w[
-  better_auth/plugins/sso
-  better_auth/plugins/scim
   better_auth/plugins/stripe
   better_auth/plugins/expo
 ].each do |optional_plugin|

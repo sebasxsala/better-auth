@@ -252,7 +252,7 @@ module BetterAuth
         end
 
         client_data = OAuthProtocol.stringify_keys(client)
-        requires_consent = !client_data["skipConsent"] && (prompts.include?("consent") || !oauth_consent_granted?(ctx, client_data["clientId"], session[:user]["id"], scopes))
+        requires_consent = !client_data["skipConsent"] && (prompts.include?("consent") || !oidc_consent_granted?(ctx, client_data["clientId"], session[:user]["id"], scopes))
         if oidc_requires_login?(session, prompts, query)
           ctx.set_signed_cookie("oidc_login_prompt", JSON.generate(query), ctx.context.secret, max_age: 600, path: "/", same_site: "lax")
           raise ctx.redirect(OAuthProtocol.redirect_uri_with_params(config[:login_page], client_id: client_data["clientId"], state: query["state"]))
@@ -321,7 +321,7 @@ module BetterAuth
           next ctx.json({redirectURI: redirect})
         end
 
-        oauth_store_consent(ctx, consent[:client], consent[:session], consent[:scopes])
+        oidc_store_consent(ctx, consent[:client], consent[:session], consent[:scopes])
         code = Crypto.random_string(32)
         OAuthProtocol.store_code(
           config[:store],
@@ -532,6 +532,38 @@ module BetterAuth
           OAuthProtocol.stringify_keys(payload),
           jwt_plugin[:options] || {}
         )
+      end
+    end
+
+    def oidc_consent_granted?(ctx, client_id, user_id, scopes)
+      consent = ctx.context.adapter.find_one(
+        model: "oauthConsent",
+        where: [
+          {field: "clientId", value: client_id},
+          {field: "userId", value: user_id}
+        ]
+      )
+      return false unless consent && consent["consentGiven"]
+
+      granted = OAuthProtocol.parse_scopes(consent["scopes"])
+      scopes.all? { |scope| granted.include?(scope) }
+    end
+
+    def oidc_store_consent(ctx, client, session, scopes)
+      client_id = OAuthProtocol.stringify_keys(client)["clientId"]
+      user_id = session[:user]["id"]
+      existing = ctx.context.adapter.find_one(
+        model: "oauthConsent",
+        where: [
+          {field: "clientId", value: client_id},
+          {field: "userId", value: user_id}
+        ]
+      )
+      data = {clientId: client_id, userId: user_id, scopes: scopes, consentGiven: true}
+      if existing
+        ctx.context.adapter.update(model: "oauthConsent", where: [{field: "id", value: existing.fetch("id")}], update: data)
+      else
+        ctx.context.adapter.create(model: "oauthConsent", data: data)
       end
     end
 

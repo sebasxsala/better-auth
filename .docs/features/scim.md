@@ -6,11 +6,17 @@
 
 Adds `BetterAuth::Plugins.scim` with token generation, Bearer token middleware, SCIM v2 metadata endpoints, and basic user provisioning routes.
 
-Status: Complete for Ruby server parity.
+Status: Extracted to `better_auth-scim`.
+
+## Package Boundary
+
+SCIM is provisioning, not login. It can be used alongside SSO in enterprise deployments, but it does not depend on SSO and SSO does not depend on SCIM.
+
+To match upstream `@better-auth/scim`, Ruby SCIM lives in `better_auth-scim`.
 
 ## Ruby Adaptation
 
-- Implemented inside the core gem as a plugin.
+- Implemented in `packages/better_auth-scim` as a plugin package.
 - Adds `scimProvider` schema fields: `providerId`, `scimToken`, and `organizationId`.
 - Extends user schema with `active` and `externalId` for SCIM provisioning.
 - Adds `/scim/generate-token`, `/scim/v2/Users`, `/scim/v2/Users/:userId`, `/scim/v2/ServiceProviderConfig`, `/scim/v2/Schemas`, `/scim/v2/Schemas/:schemaId`, `/scim/v2/ResourceTypes`, and `/scim/v2/ResourceTypes/:resourceTypeId`.
@@ -28,5 +34,6 @@ Status: Complete for Ruby server parity.
 
 ```bash
 cd packages/better_auth
-rbenv exec bundle exec ruby -Itest test/better_auth/plugins/scim_test.rb
+cd ../better_auth-scim
+rbenv exec bundle exec ruby -Itest test/better_auth/scim_test.rb
 ```

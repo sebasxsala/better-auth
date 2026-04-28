@@ -6,11 +6,17 @@
 
 Adds a Ruby server-side SSO plugin as `BetterAuth::Plugins.sso` with provider CRUD, OIDC sign-in/callback, SAML sign-in/callback/ACS, SP metadata, domain verification, and SAML callback origin bypass paths.
 
-Status: Complete for Ruby server parity when SAML apps opt into `better_auth-saml`.
+Status: Extracted to `better_auth-sso`; SAML XML validation lives inside `better_auth-sso` through its package-owned `ruby-saml` dependency.
+
+## Package Boundary
+
+SSO is the app-facing plugin. SAML is only one protocol inside SSO, and OIDC is another protocol inside SSO. To match upstream `@better-auth/sso`, Ruby SSO lives in `better_auth-sso`.
+
+SAML is protocol support within `better_auth-sso`, not its own package boundary. Ruby uses `ruby-saml` inside the SSO gem for signed XML validation because that maps to upstream's `packages/sso/src/saml/` layout.
 
 ## Ruby Adaptation
 
-- Implemented inside the core gem for provider lifecycle and route handling, with optional real SAML XML validation in `packages/better_auth-saml`.
+- Implemented in `packages/better_auth-sso` for provider lifecycle, route handling, OIDC, and real SAML XML validation.
 - Adds `ssoProvider` schema fields: `issuer`, `oidcConfig`, `samlConfig`, `userId`, `providerId`, `domain`, `domainVerified`, `domainVerificationToken`, and `organizationId`.
 - Adds `/sso/register`, `/sign-in/sso`, `/sso/callback/:providerId`, `/sso/saml2/callback/:providerId`, `/sso/saml2/sp/acs/:providerId`, `/sso/saml2/sp/metadata`, `/sso/providers`, `/sso/providers/:providerId`, `/sso/request-domain-verification`, and `/sso/verify-domain`.
 - Supports injected OIDC token/user callbacks in provider config, a dependency-free SAML test payload format for core coverage, optional SAML AuthnRequest/parser/validation hooks, and verified-domain organization membership assignment when the organization plugin is enabled.
@@ -19,21 +25,21 @@ Status: Complete for Ruby server parity when SAML apps opt into `better_auth-sam
 - Hydrates OIDC discovery documents, validates trusted discovered URLs, resolves relative endpoints, preserves configured values, and selects token endpoint auth methods.
 - Enforces provider access for user-owned providers and organization admin/owner providers.
 - Covers SAML RelayState safety, replay protection, AuthnRequest/parser/validator adapter contracts, XML assertion count validation, and signature-algorithm policy decisions.
-- `better_auth-saml` depends on `ruby-saml >= 1.18.1` and validates signed XML assertions, IdP certificates, forged/tampered responses, assertion count, XSW-style wrapping, destination/recipient/audience/issuer/timestamps, and deprecated/unknown signature algorithms. Encrypted assertion handling is delegated to `ruby-saml` when `spPrivateKey` and `spCertificate` are configured in `samlConfig`.
+- `better_auth-sso` depends on `ruby-saml >= 1.18.1` and validates signed XML assertions, IdP certificates, forged/tampered responses, assertion count, XSW-style wrapping, destination/recipient/audience/issuer/timestamps, and deprecated/unknown signature algorithms. Encrypted assertion handling is delegated to `ruby-saml` when `spPrivateKey` and `spCertificate` are configured in `samlConfig`.
 
 ## Key Differences
 
-- Core SAML cryptographic signature verification and decryption are intentionally not bundled into `better_auth`; apps opt into `better_auth-saml`, which depends on `ruby-saml >= 1.18.1` and plugs into the core `auth_request_url` and `parse_response` hooks.
-- Without `better_auth-saml`, core SSO still exposes the adapter hook contract and remains dependency-free for apps that use only OIDC SSO or custom SAML validators.
+- SAML cryptographic signature verification and decryption are intentionally not bundled into `better_auth`; they live in `better_auth-sso`, matching upstream `@better-auth/sso`.
+- `better_auth-sso` still exposes the adapter hook contract for custom SAML validators, but the package includes the default `ruby-saml` integration.
 - Organization auto-assignment covers verified SSO provider domains with the Ruby organization plugin.
 
 ## Testing
 
 ```bash
 cd packages/better_auth
-rbenv exec bundle exec ruby -Itest test/better_auth/plugins/sso_test.rb
-rbenv exec bundle exec ruby -Itest test/better_auth/plugins/sso_oidc_test.rb
-rbenv exec bundle exec ruby -Itest test/better_auth/plugins/sso_saml_test.rb
-cd ../better_auth-saml
-rbenv exec bundle exec ruby -Itest test/better_auth/saml_test.rb
+cd ../better_auth-sso
+rbenv exec bundle exec ruby -Itest test/better_auth/sso_test.rb
+rbenv exec bundle exec ruby -Itest test/better_auth/sso_oidc_test.rb
+rbenv exec bundle exec ruby -Itest test/better_auth/sso_saml_test.rb
+rbenv exec bundle exec ruby -Itest test/better_auth/sso_ruby_saml_test.rb
 ```
