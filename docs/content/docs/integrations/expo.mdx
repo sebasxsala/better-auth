@@ -3,9 +3,52 @@ title: Expo Integration
 description: Integrate Better Auth with Expo.
 ---
 
-<Callout type="warn">
-This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
-</Callout>
+The Ruby port supports the server-side Expo integration through `BetterAuth::Plugins.expo`.
+The native Expo client remains the upstream JavaScript package, because SecureStore,
+browser sessions, focus/online managers, and React Native fetch hooks run inside the
+Expo app rather than the Ruby server.
+
+## Server Setup
+
+```ruby title="config/initializers/better_auth.rb"
+auth = BetterAuth.auth(
+  base_url: "https://api.example.com",
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  trusted_origins: ["myapp://", "myapp://*"],
+  plugins: [
+    BetterAuth::Plugins.expo
+  ]
+)
+```
+
+The plugin adds `/expo-authorization-proxy`, copies `expo-origin` into `Origin`
+when the regular origin is missing, and injects auth cookies into trusted
+non-HTTP deep-link redirects. In development, it also trusts `exp://`.
+
+## Expo Client
+
+Use the upstream Expo client package inside the Expo app:
+
+```ts title="lib/auth-client.ts"
+import { createAuthClient } from "better-auth/react";
+import { expoClient } from "@better-auth/expo/client";
+import * as SecureStore from "expo-secure-store";
+
+export const authClient = createAuthClient({
+  baseURL: "https://api.example.com/api/auth",
+  plugins: [
+    expoClient({
+      scheme: "myapp",
+      storagePrefix: "myapp",
+      storage: SecureStore,
+    }),
+  ],
+});
+```
+
+Native cookie storage, browser-opening flow, `getCookie`, focus/online managers,
+ID-token client header behavior, and `lastLoginMethodClient` are intentionally
+handled by `@better-auth/expo` rather than by the Ruby gem.
 
 {/*
 Hidden upstream content for Expo Integration.

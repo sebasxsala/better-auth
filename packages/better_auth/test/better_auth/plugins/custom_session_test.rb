@@ -89,15 +89,56 @@ class BetterAuthPluginsCustomSessionTest < Minitest::Test
     assert_equal ["custom-list@example.com"], sessions.map { |session| session[:extra] || session["extra"] }
   end
 
+  def test_custom_session_resolver_receives_filtered_session_payload
+    seen_user_keys = nil
+    auth = build_auth(
+      user: {
+        additional_fields: {
+          secretNote: {type: "string", required: false, returned: false}
+        }
+      },
+      plugins: [
+        BetterAuth::Plugins.custom_session(lambda do |session, _ctx|
+          seen_user_keys = session[:user].keys
+          {user: session[:user], session: session[:session]}
+        end)
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "filtered@example.com", name: "Filtered User", secret_note: "do-not-return")
+
+    result = auth.api.get_session(headers: {"cookie" => cookie}, query: {disableCookieCache: true})
+
+    refute_includes seen_user_keys, "secretNote"
+    refute result[:user].key?("secretNote")
+  end
+
+  def test_custom_session_does_not_mutate_multi_session_list_by_default
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.multi_session(maximum_sessions: 3),
+        BetterAuth::Plugins.custom_session(
+          ->(session, _ctx) { session.merge(extra: "unexpected") }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "custom-default-list@example.com", name: "Default List")
+
+    sessions = auth.api.list_device_sessions(headers: {"cookie" => cookie})
+
+    refute sessions.any? { |session| (session[:extra] || session["extra"]) == "unexpected" }
+  end
+
   private
 
   def build_auth(options = {})
     BetterAuth.auth({base_url: "http://localhost:3000", secret: SECRET, database: :memory}.merge(options))
   end
 
-  def sign_up_cookie(auth, email:, name:)
+  def sign_up_cookie(auth, email:, name:, secret_note: nil)
+    body = {email: email, password: "password123", name: name}
+    body[:secretNote] = secret_note if secret_note
     _status, headers, _body = auth.api.sign_up_email(
-      body: {email: email, password: "password123", name: name},
+      body: body,
       as_response: true
     )
     headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")

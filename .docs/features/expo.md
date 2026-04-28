@@ -15,8 +15,8 @@ Adds server-side Expo/mobile support through `BetterAuth::Plugins.expo`: authori
 - Sets signed `state` cookies or temporary `oauth_state` cookies before redirecting to the provider authorization URL.
 - Uses `expo-origin` as `Origin` when the request lacks a regular origin and `disable_origin_override` is not enabled.
 - Preserves a regular `Origin` header when present.
-- Adds `exp://` to trusted origins through plugin init.
-- Injects `Set-Cookie` into trusted non-HTTP deep-link redirects for callback, OAuth2 callback, magic-link verify, and verify-email paths, including wildcard trusted origins.
+- Adds `exp://` to trusted origins only in development environments.
+- Injects the full `Set-Cookie` value into trusted non-HTTP deep-link redirects for callback, OAuth2 callback, magic-link verify, and verify-email paths, including wildcard trusted origins.
 
 ## Key Differences
 

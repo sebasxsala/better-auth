@@ -13,8 +13,10 @@ Adds OAuth 2.0 device authorization flow support: device/user code issuance, pol
 - Exposed as `BetterAuth::Plugins.device_authorization`.
 - Adds `/device/code`, `/device/token`, `/device`, `/device/approve`, and `/device/deny`.
 - Adds a `deviceCode` schema table with device code, user code, status, expiry, polling interval, client ID, scope, and optional user ID.
-- Supports `generate_device_code`, `generate_user_code`, `validate_client`, `on_device_auth_request`, `verification_uri`, `expires_in`, and `interval`.
+- Supports `generate_device_code`, `generate_user_code`, `validate_client`, `on_device_auth_request`, `verification_uri`, `expires_in`, `interval`, and custom `schema`.
 - Validates plugin options at creation time, returns OAuth-style error codes/descriptions through `APIError#code` and `#message`, and accepts both `userCode` and `user_code` request bodies for approval/denial routes.
+- Uses the upstream default user-code charset and preserves custom generator output.
+- Runs `on_device_auth_request` before code persistence so rejected requests do not leave device-code records behind.
 
 ## Key Differences
 

@@ -6,21 +6,24 @@ Status: Complete for Ruby server parity.
 
 ## Summary
 
-Adds one-time-password email flows for email verification, email OTP sign-in/sign-up, and password reset.
+Adds one-time-password email flows for email verification, email OTP sign-in/sign-up, password reset, and email changes.
 
 ## Ruby Adaptation
 
 - Exposed as `BetterAuth::Plugins.email_otp`.
-- Adds `/email-otp/send-verification-otp`, `/email-otp/check-verification-otp`, `/email-otp/verify-email`, `/sign-in/email-otp`, `/email-otp/request-password-reset`, `/forget-password/email-otp`, and `/email-otp/reset-password`.
+- Adds `/email-otp/send-verification-otp`, `/email-otp/check-verification-otp`, `/email-otp/verify-email`, `/sign-in/email-otp`, `/email-otp/request-password-reset`, `/forget-password/email-otp`, `/email-otp/reset-password`, `/email-otp/request-email-change`, and `/email-otp/change-email`.
 - Exposes server API helpers `create_verification_otp` and `get_verification_otp`; `get_verification_otp` is also mounted at `/email-otp/get-verification-otp`.
 - Stores OTP values in the core `verification` table with identifiers like `email-verification-otp-email@example.com`.
-- Supports `otp_length`, `expires_in`, `generate_otp`, `send_verification_otp`, `send_verification_on_sign_up`, `disable_sign_up`, `allowed_attempts`, and `store_otp`.
+- Supports `otp_length`, `expires_in`, `generate_otp`, `send_verification_otp`, `send_verification_on_sign_up`, `disable_sign_up`, `allowed_attempts`, `store_otp`, `resend_strategy`, `change_email`, and `rate_limit`.
 - Supports plain, hashed, encrypted, custom hasher, and custom encryptor OTP storage.
 - Normalizes email casing for OTP sign-in/sign-up flows.
+- Preserves `name`, `image`, and allowed additional user fields when OTP sign-in creates a new user.
+- Supports recoverable OTP reuse when `resend_strategy: "reuse"` is configured.
+- Supports change-email OTP flows, including optional current-email OTP verification through `change_email: { verify_current_email: true }`.
 - Prevents user enumeration for disabled sign-up OTP requests by returning success without sending for missing users.
 - Verifies the latest issued OTP when multiple OTPs are generated for the same email/type.
 - Covers override-default email verification without double-sending and runs configured email verification hooks after OTP verification.
-- Applies plugin route rate limits to OTP send, check, verify, sign-in, and password-reset endpoints.
+- Applies configurable plugin route rate limits to OTP send, check, verify, sign-in, password-reset, and change-email endpoints.
 
 ## Key Differences
 

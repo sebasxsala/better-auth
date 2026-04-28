@@ -30,7 +30,9 @@ module BetterAuth
           sign_in_email_otp: sign_in_email_otp_endpoint(config),
           request_password_reset_email_otp: request_password_reset_email_otp_endpoint(config),
           forget_password_email_otp: forget_password_email_otp_endpoint(config),
-          reset_password_email_otp: reset_password_email_otp_endpoint(config)
+          reset_password_email_otp: reset_password_email_otp_endpoint(config),
+          request_email_change_email_otp: request_email_change_email_otp_endpoint(config),
+          change_email_email_otp: change_email_email_otp_endpoint(config)
         },
         hooks: {
           after: [
@@ -40,7 +42,7 @@ module BetterAuth
             }
           ]
         },
-        rate_limit: email_otp_rate_limits,
+        rate_limit: email_otp_rate_limits(config),
         error_codes: EMAIL_OTP_ERROR_CODES,
         options: config
       )
@@ -81,6 +83,9 @@ module BetterAuth
         type = body[:type].to_s
         validate_email_otp_type!(type)
         validate_email_otp_email!(email)
+        if type == "change-email"
+          raise APIError.new("BAD_REQUEST", message: "Invalid OTP type")
+        end
 
         sender = config[:send_verification_otp]
         unless sender.respond_to?(:call)
@@ -190,7 +195,7 @@ module BetterAuth
         else
           raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["USER_NOT_FOUND"]) if config[:disable_sign_up]
 
-          ctx.context.internal_adapter.create_user(email: email, emailVerified: true, name: "")
+          ctx.context.internal_adapter.create_user(email_otp_sign_up_user_data(body, email))
         end
 
         unless user["emailVerified"]
@@ -200,6 +205,56 @@ module BetterAuth
         session = ctx.context.internal_adapter.create_session(user["id"])
         Cookies.set_session_cookie(ctx, {session: session, user: user})
         ctx.json({token: session["token"], user: Schema.parse_output(ctx.context.options, "user", user)})
+      end
+    end
+
+    def request_email_change_email_otp_endpoint(config)
+      Endpoint.new(path: "/email-otp/request-email-change", method: "POST") do |ctx|
+        email_otp_change_email_enabled!(config)
+        session = Routes.current_session(ctx)
+        body = normalize_hash(ctx.body)
+        current_email = session[:user]["email"].to_s.downcase
+        new_email = body[:new_email].to_s.downcase
+        validate_email_otp_email!(new_email)
+        raise APIError.new("BAD_REQUEST", message: "Email is the same") if new_email == current_email
+
+        if config.dig(:change_email, :verify_current_email)
+          raise APIError.new("BAD_REQUEST", message: "OTP is required to verify current email") if body[:otp].to_s.empty?
+          email_otp_verify!(ctx, config, email: current_email, type: "email-verification", otp: body[:otp])
+        end
+
+        otp = email_otp_resolve(ctx, config, email: new_email, type: "change-email", identifier_email: "#{current_email}-#{new_email}")
+        if ctx.context.internal_adapter.find_user_by_email(new_email)
+          ctx.context.internal_adapter.delete_verification_by_identifier(email_otp_identifier("#{current_email}-#{new_email}", "change-email"))
+          next ctx.json({success: true})
+        end
+
+        email_otp_deliver(config, {email: new_email, otp: otp, type: "change-email"}, ctx)
+        ctx.json({success: true})
+      end
+    end
+
+    def change_email_email_otp_endpoint(config)
+      Endpoint.new(path: "/email-otp/change-email", method: "POST") do |ctx|
+        email_otp_change_email_enabled!(config)
+        session = Routes.current_session(ctx)
+        body = normalize_hash(ctx.body)
+        current_email = session[:user]["email"].to_s.downcase
+        new_email = body[:new_email].to_s.downcase
+        validate_email_otp_email!(new_email)
+        raise APIError.new("BAD_REQUEST", message: "Email is the same") if new_email == current_email
+
+        email_otp_verify!(ctx, config, email: "#{current_email}-#{new_email}", type: "change-email", otp: body[:otp].to_s)
+        raise APIError.new("BAD_REQUEST", message: "Email already in use") if ctx.context.internal_adapter.find_user_by_email(new_email)
+
+        current = ctx.context.internal_adapter.find_user_by_email(current_email)
+        raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["USER_NOT_FOUND"]) unless current
+
+        call_email_verification_option(ctx, :before_email_verification, current[:user])
+        updated = ctx.context.internal_adapter.update_user(current[:user]["id"], email: new_email, emailVerified: true)
+        call_email_verification_option(ctx, :after_email_verification, updated)
+        Cookies.set_session_cookie(ctx, {session: session[:session], user: updated})
+        ctx.json({success: true})
       end
     end
 
@@ -258,8 +313,7 @@ module BetterAuth
     def email_otp_password_reset_request(ctx, config)
       body = normalize_hash(ctx.body)
       email = body[:email].to_s.downcase
-      otp = email_otp_generate(config, email: email, type: "forget-password", ctx: ctx)
-      email_otp_store(ctx, config, email: email, type: "forget-password", otp: otp)
+      otp = email_otp_resolve(ctx, config, email: email, type: "forget-password")
 
       found = ctx.context.internal_adapter.find_user_by_email(email)
       unless found
@@ -272,8 +326,7 @@ module BetterAuth
     end
 
     def email_otp_send_verification(ctx, config, email:, type:)
-      otp = email_otp_generate(config, email: email, type: type, ctx: ctx)
-      email_otp_store(ctx, config, email: email, type: type, otp: otp)
+      otp = email_otp_resolve(ctx, config, email: email, type: type)
       found = ctx.context.internal_adapter.find_user_by_email(email)
 
       unless found
@@ -299,6 +352,32 @@ module BetterAuth
       )
     end
 
+    def email_otp_resolve(ctx, config, email:, type:, identifier_email: email)
+      if config[:resend_strategy].to_s == "reuse"
+        reused = email_otp_reuse(ctx, config, email: identifier_email, type: type)
+        return reused if reused
+      end
+
+      otp = email_otp_generate(config, email: email, type: type, ctx: ctx)
+      email_otp_store(ctx, config, email: identifier_email, type: type, otp: otp)
+      otp
+    end
+
+    def email_otp_reuse(ctx, config, email:, type:)
+      identifier = email_otp_identifier(email, type)
+      verification = ctx.context.internal_adapter.find_verification_value(identifier)
+      return nil unless verification && !Routes.expired_time?(verification["expiresAt"])
+
+      stored_otp, attempts = email_otp_split(verification["value"])
+      return nil if attempts.to_i >= config[:allowed_attempts].to_i
+
+      plain = email_otp_plain_value(ctx, config, stored_otp)
+      return nil unless plain
+
+      ctx.context.internal_adapter.update_verification_value(verification["id"], expiresAt: Time.now + config[:expires_in].to_i)
+      plain
+    end
+
     def email_otp_verify!(ctx, config, email:, type:, otp:, consume: true)
       verification = ctx.context.internal_adapter.find_verification_value(email_otp_identifier(email, type))
       raise APIError.new("BAD_REQUEST", message: EMAIL_OTP_ERROR_CODES["INVALID_OTP"]) unless verification
@@ -315,12 +394,20 @@ module BetterAuth
         raise APIError.new("FORBIDDEN", message: EMAIL_OTP_ERROR_CODES["TOO_MANY_ATTEMPTS"])
       end
 
+      ctx.context.internal_adapter.delete_verification_value(verification["id"]) if consume
       unless email_otp_matches?(ctx, config, otp_value, otp)
-        ctx.context.internal_adapter.update_verification_value(verification["id"], value: "#{otp_value}:#{attempts_count + 1}")
+        if consume
+          ctx.context.internal_adapter.create_verification_value(
+            identifier: email_otp_identifier(email, type),
+            value: "#{otp_value}:#{attempts_count + 1}",
+            expiresAt: verification["expiresAt"]
+          )
+        else
+          ctx.context.internal_adapter.update_verification_value(verification["id"], value: "#{otp_value}:#{attempts_count + 1}")
+        end
         raise APIError.new("BAD_REQUEST", message: EMAIL_OTP_ERROR_CODES["INVALID_OTP"])
       end
 
-      ctx.context.internal_adapter.delete_verification_value(verification["id"]) if consume
       true
     end
 
@@ -330,6 +417,18 @@ module BetterAuth
       return generated.to_s if generated && !generated.to_s.empty?
 
       Array.new(config[:otp_length].to_i) { SecureRandom.random_number(10).to_s }.join
+    end
+
+    def email_otp_sign_up_user_data(body, email)
+      reserved = %i[email otp name image callback_url callbackURL callbackUrl]
+      additional = body.reject { |key, _value| reserved.include?(key.to_sym) }
+      additional = additional.each_with_object({}) { |(key, value), result| result[Schema.storage_key(key)] = value }
+      additional.merge(
+        "email" => email,
+        "emailVerified" => true,
+        "name" => body[:name].to_s,
+        "image" => body[:image]
+      )
     end
 
     def email_otp_stored_value(ctx, config, otp)
@@ -364,6 +463,15 @@ module BetterAuth
       Crypto.constant_time_compare(actual.to_s, expected.to_s)
     end
 
+    def email_otp_plain_value(ctx, config, stored_otp)
+      storage = config[:store_otp]
+      return stored_otp if storage.to_s == "plain" || storage.nil?
+      return Crypto.symmetric_decrypt(key: ctx.context.secret, data: stored_otp) if storage.to_s == "encrypted"
+      return storage[:decrypt].call(stored_otp) if storage.is_a?(Hash) && storage[:decrypt].respond_to?(:call)
+
+      nil
+    end
+
     def email_otp_deliver(config, data, ctx)
       sender = config[:send_verification_otp]
       sender.call(data, ctx) if sender.respond_to?(:call)
@@ -386,9 +494,15 @@ module BetterAuth
     end
 
     def validate_email_otp_type!(type)
-      return if %w[email-verification sign-in forget-password].include?(type)
+      return if %w[email-verification sign-in forget-password change-email].include?(type)
 
       raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["VALIDATION_ERROR"])
+    end
+
+    def email_otp_change_email_enabled!(config)
+      return if config.dig(:change_email, :enabled)
+
+      raise APIError.new("BAD_REQUEST", message: "Change email with OTP is disabled")
     end
 
     def call_email_verification_option(ctx, key, user)
@@ -396,7 +510,10 @@ module BetterAuth
       callback.call(user, ctx.request) if callback.respond_to?(:call)
     end
 
-    def email_otp_rate_limits
+    def email_otp_rate_limits(config)
+      rate_limit = normalize_hash(config[:rate_limit] || {})
+      window = rate_limit[:window] || 60
+      max = rate_limit[:max] || 3
       %w[
         /email-otp/send-verification-otp
         /email-otp/check-verification-otp
@@ -405,11 +522,13 @@ module BetterAuth
         /email-otp/request-password-reset
         /email-otp/reset-password
         /forget-password/email-otp
+        /email-otp/request-email-change
+        /email-otp/change-email
       ].map do |path|
         {
           path_matcher: ->(request_path) { request_path == path },
-          window: 60,
-          max: 3
+          window: window,
+          max: max
         }
       end
     end

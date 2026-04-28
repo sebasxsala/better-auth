@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "securerandom"
 require "uri"
 
 module BetterAuth
@@ -39,7 +40,7 @@ module BetterAuth
           device_approve: device_approve_endpoint,
           device_deny: device_deny_endpoint
         },
-        schema: device_authorization_schema,
+        schema: device_authorization_schema(config[:schema]),
         error_codes: DEVICE_AUTHORIZATION_ERROR_CODES,
         options: config
       )
@@ -53,8 +54,10 @@ module BetterAuth
           raise device_authorization_error("BAD_REQUEST", "invalid_client", "Invalid client ID")
         end
 
-        device_code = callable_or_random(config[:generate_device_code], config[:device_code_length])
-        user_code = callable_or_random(config[:generate_user_code], config[:user_code_length]).upcase
+        config[:on_device_auth_request].call(client_id, body["scope"]) if config[:on_device_auth_request].respond_to?(:call)
+
+        device_code = generate_device_authorization_device_code(config)
+        user_code = generate_device_authorization_user_code(config)
         expires_in = duration_seconds(config[:expires_in])
         interval = duration_seconds(config[:interval])
         ctx.context.adapter.create(
@@ -69,8 +72,6 @@ module BetterAuth
             "scope" => body["scope"]
           }
         )
-        config[:on_device_auth_request].call(client_id, body["scope"]) if config[:on_device_auth_request].respond_to?(:call)
-
         verification_uri = verification_uri(ctx, config)
         complete = OAuthProtocol.redirect_uri_with_params(verification_uri, user_code: user_code)
         ctx.json({
@@ -147,20 +148,24 @@ module BetterAuth
         record = OAuthProtocol.stringify_keys(record)
         raise device_authorization_error("BAD_REQUEST", "expired_token", DEVICE_AUTHORIZATION_ERROR_CODES["EXPIRED_USER_CODE"]) if device_authorization_time(record["expiresAt"]) <= Time.now
 
-        ctx.json({user_code: code, status: record["status"], client_id: record["clientId"], scope: record["scope"]})
+        ctx.json({user_code: code, status: record["status"]})
       end
     end
 
     def device_approve_endpoint
       Endpoint.new(path: "/device/approve", method: "POST") do |ctx|
-        session = Routes.current_session(ctx)
+        session = Routes.current_session(ctx, allow_nil: true)
+        raise device_authorization_error("UNAUTHORIZED", "unauthorized", DEVICE_AUTHORIZATION_ERROR_CODES["AUTHENTICATION_REQUIRED"]) unless session
+
         process_device_decision(ctx, session, "approved")
       end
     end
 
     def device_deny_endpoint
       Endpoint.new(path: "/device/deny", method: "POST") do |ctx|
-        session = Routes.current_session(ctx)
+        session = Routes.current_session(ctx, allow_nil: true)
+        raise device_authorization_error("UNAUTHORIZED", "unauthorized", DEVICE_AUTHORIZATION_ERROR_CODES["AUTHENTICATION_REQUIRED"]) unless session
+
         process_device_decision(ctx, session, "denied")
       end
     end
@@ -199,11 +204,20 @@ module BetterAuth
     end
 
     def normalize_user_code(value)
-      value.to_s.upcase
+      value.to_s
     end
 
-    def callable_or_random(callable, length)
-      callable.respond_to?(:call) ? callable.call.to_s : Crypto.random_string(length.to_i)
+    def generate_device_authorization_device_code(config)
+      return config[:generate_device_code].call.to_s if config[:generate_device_code].respond_to?(:call)
+
+      SecureRandom.alphanumeric(config[:device_code_length].to_i)
+    end
+
+    def generate_device_authorization_user_code(config)
+      return config[:generate_user_code].call.to_s if config[:generate_user_code].respond_to?(:call)
+
+      charset = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+      Array.new(config[:user_code_length].to_i) { charset[SecureRandom.random_number(charset.length)] }.join
     end
 
     def verification_uri(ctx, config)
@@ -246,10 +260,12 @@ module BetterAuth
     end
 
     def device_authorization_user_code_candidates(value)
-      original = value.to_s.upcase
+      original = value.to_s
+      upper = original.upcase
       clean = original.delete("-")
-      dashed = (clean.length == 8) ? "#{clean[0, 4]}-#{clean[4, 4]}" : clean
-      [original, clean, dashed].uniq
+      upper_clean = upper.delete("-")
+      dashed = (upper_clean.length == 8) ? "#{upper_clean[0, 4]}-#{upper_clean[4, 4]}" : upper_clean
+      [original, upper, clean, upper_clean, dashed].uniq
     end
 
     def device_authorization_error(status, error, description)
@@ -262,8 +278,8 @@ module BetterAuth
       Time.parse(value.to_s)
     end
 
-    def device_authorization_schema
-      {
+    def device_authorization_schema(custom_schema = nil)
+      base = {
         deviceCode: {
           fields: {
             deviceCode: {type: "string", required: true},
@@ -278,6 +294,9 @@ module BetterAuth
           }
         }
       }
+      return base unless custom_schema.is_a?(Hash)
+
+      deep_merge_hashes(base, normalize_hash(custom_schema))
     end
   end
 end

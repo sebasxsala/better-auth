@@ -16,7 +16,25 @@ module BetterAuth
             path: "/get-session",
             method: "GET",
             query_schema: ->(query) { query || {} },
-            metadata: {CUSTOM_SESSION: true}
+            metadata: {
+              CUSTOM_SESSION: true,
+              openapi: {
+                description: "Get custom session data",
+                responses: {
+                  "200" => {
+                    description: "Success",
+                    content: {
+                      "application/json" => {
+                        schema: {
+                          type: "object",
+                          nullable: true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           ) do |ctx|
             session = Session.find_current(
               ctx,
@@ -26,7 +44,7 @@ module BetterAuth
             next ctx.json(nil) unless session
 
             Cookies.set_session_cookie(ctx, session, false) if ctx.response_headers["set-cookie"].to_s.empty?
-            ctx.json(resolver.call(session, ctx))
+            ctx.json(resolver.call(Routes.parsed_session_response(ctx, session), ctx))
           end
         },
         hooks: {

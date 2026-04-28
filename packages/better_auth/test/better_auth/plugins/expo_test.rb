@@ -160,15 +160,59 @@ class BetterAuthPluginsExpoTest < Minitest::Test
     assert_includes ctx.response_headers.fetch("location"), "cookie=better-auth.session_token%3Dabc"
   end
 
+  def test_deep_link_redirect_receives_full_set_cookie_header
+    auth = build_auth(trusted_origins: ["myapp://"])
+    ctx = BetterAuth::Endpoint::Context.new(
+      path: "/verify-email",
+      method: "GET",
+      query: {},
+      body: {},
+      params: {},
+      headers: {},
+      context: auth.context
+    )
+    full_cookie = "better-auth.session_token=abc; Path=/; HttpOnly, better-auth.session_data=xyz; Path=/; Max-Age=300"
+    ctx.set_header("location", "myapp://verified")
+    ctx.set_header("set-cookie", full_cookie)
+    hook = auth.context.options.plugins.first.hooks.fetch(:after).first
+
+    hook.fetch(:handler).call(ctx)
+
+    location = URI.parse(ctx.response_headers.fetch("location"))
+    assert_equal full_cookie, Rack::Utils.parse_query(location.query).fetch("cookie")
+  end
+
+  def test_exp_scheme_is_only_trusted_in_development
+    with_env("RACK_ENV" => "production", "RAILS_ENV" => nil, "APP_ENV" => nil) do
+      auth = build_auth
+      refute_includes auth.context.trusted_origins, "exp://"
+    end
+
+    with_env("RACK_ENV" => "development", "RAILS_ENV" => nil, "APP_ENV" => nil) do
+      auth = build_auth
+      assert_includes auth.context.trusted_origins, "exp://"
+    end
+  end
+
   private
 
   def build_auth(plugin_options = {})
-    BetterAuth.auth(
+    trusted_origins = plugin_options.delete(:trusted_origins)
+    auth_options = {
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
-      trusted_origins: plugin_options.delete(:trusted_origins),
       plugins: [BetterAuth::Plugins.expo(plugin_options)]
-    )
+    }
+    auth_options[:trusted_origins] = trusted_origins if trusted_origins
+    BetterAuth.auth(auth_options)
+  end
+
+  def with_env(values)
+    previous = values.each_with_object({}) { |(key, _value), memo| memo[key] = ENV[key] }
+    values.each { |key, value| value.nil? ? ENV.delete(key) : ENV[key] = value }
+    yield
+  ensure
+    previous.each { |key, value| value.nil? ? ENV.delete(key) : ENV[key] = value }
   end
 end

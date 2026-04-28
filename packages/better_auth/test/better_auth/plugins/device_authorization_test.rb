@@ -230,6 +230,62 @@ class BetterAuthPluginsDeviceAuthorizationTest < Minitest::Test
     assert_equal "http://localhost:3000/api/auth/device?lang=en&user_code=ABC-123", issued[:verification_uri_complete]
   end
 
+  def test_custom_user_code_is_preserved_and_verify_response_matches_upstream_shape
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      plugins: [
+        BetterAuth::Plugins.device_authorization(
+          generate_device_code: -> { "custom-device-code" },
+          generate_user_code: -> { "abc-123xy" }
+        )
+      ]
+    )
+
+    issued = auth.api.device_code(body: {client_id: "cli", scope: "openid"})
+    verified = auth.api.device_verify(query: {user_code: issued[:user_code]})
+
+    assert_equal "abc-123xy", issued[:user_code]
+    assert_equal ["status", "user_code"], verified.transform_keys(&:to_s).keys.sort
+    assert_equal "pending", verified[:status]
+  end
+
+  def test_device_auth_request_hook_runs_before_persistence
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      plugins: [
+        BetterAuth::Plugins.device_authorization(
+          generate_device_code: -> { "should-not-persist" },
+          on_device_auth_request: ->(_client_id, _scope) { raise BetterAuth::APIError.new("BAD_REQUEST", code: "invalid_request", message: "hook rejected") }
+        )
+      ]
+    )
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.device_code(body: {client_id: "cli"})
+    end
+    persisted = auth.context.adapter.find_one(model: "deviceCode", where: [{field: "deviceCode", value: "should-not-persist"}])
+
+    assert_equal "invalid_request", error.code
+    assert_nil persisted
+  end
+
+  def test_unauthenticated_device_decisions_use_oauth_error_shape
+    auth = build_auth
+    issued = auth.api.device_code(body: {client_id: "cli"})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.device_approve(body: {user_code: issued[:user_code]})
+    end
+
+    assert_equal 401, error.status_code
+    assert_equal "unauthorized", error.code
+    assert_equal "Authentication required", error.message
+  end
+
   private
 
   def build_auth

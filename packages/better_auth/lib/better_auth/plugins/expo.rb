@@ -11,7 +11,7 @@ module BetterAuth
       config = normalize_hash(options)
       Plugin.new(
         id: "expo",
-        init: ->(_ctx) { {options: {trusted_origins: ["exp://"]}} },
+        init: ->(_ctx) { expo_development_environment? ? {options: {trusted_origins: ["exp://"]}} : nil },
         on_request: expo_on_request(config),
         hooks: {
           after: [
@@ -74,11 +74,15 @@ module BetterAuth
       return unless ctx.context.trusted_origin?(location)
 
       query = Rack::Utils.parse_query(uri.query)
-      query["cookie"] = cookie.split(";").first
+      query["cookie"] = cookie
       uri.query = URI.encode_www_form(query)
       ctx.set_header("location", uri.to_s)
     rescue URI::InvalidURIError
       nil
+    end
+
+    def expo_development_environment?
+      [ENV["RACK_ENV"], ENV["RAILS_ENV"], ENV["APP_ENV"]].include?("development")
     end
   end
 end
