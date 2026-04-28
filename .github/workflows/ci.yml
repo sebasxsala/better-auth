@@ -74,16 +74,6 @@ jobs:
           --health-timeout 5s
           --health-retries 30
           --health-start-period 30s
-      mongodb:
-        image: mongo:latest
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --quiet --eval \"db.adminCommand('ping').ok\""
-          --health-interval 2s
-          --health-timeout 5s
-          --health-retries 20
-          --health-start-period 10s
       mssql:
         image: mcr.microsoft.com/mssql/server:2022-latest
         env:
@@ -274,6 +264,38 @@ jobs:
 
       - name: Run tests
         working-directory: packages/better_auth-redis-storage
+        run: bundle exec rake test
+
+  test-mongo-adapter:
+    name: Test better_auth-mongo-adapter (MongoDB Adapter)
+    runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:latest
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval \"db.adminCommand('ping').ok\""
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 10s
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-mongo-adapter
+
+      - name: Run linter
+        working-directory: packages/better_auth-mongo-adapter
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-mongo-adapter
         run: bundle exec rake test
 
   test-scim:

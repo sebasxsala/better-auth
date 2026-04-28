@@ -13,6 +13,9 @@ STANDARD_PATHS = [
   "packages/better_auth-redis-storage/Rakefile",
   "packages/better_auth-redis-storage/lib",
   "packages/better_auth-redis-storage/test",
+  "packages/better_auth-mongo-adapter/Rakefile",
+  "packages/better_auth-mongo-adapter/lib",
+  "packages/better_auth-mongo-adapter/test",
   "packages/better_auth-api-key/Rakefile",
   "packages/better_auth-api-key/lib",
   "packages/better_auth-api-key/test",
@@ -50,6 +53,11 @@ task :ci do
 
   puts "\n🧪 Running tests in packages/better_auth-redis-storage..."
   cd "packages/better_auth-redis-storage" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec rake"
+  end
+
+  puts "\n🧪 Running tests in packages/better_auth-mongo-adapter..."
+  cd "packages/better_auth-mongo-adapter" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec rake"
   end
 
@@ -101,6 +109,11 @@ task :install do
     sh "BUNDLE_GEMFILE=Gemfile bundle install"
   end
 
+  puts "\n📦 Installing packages/better_auth-mongo-adapter dependencies..."
+  cd "packages/better_auth-mongo-adapter" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle install"
+  end
+
   puts "\n📦 Installing packages/better_auth-api-key dependencies..."
   cd "packages/better_auth-api-key" do
     sh "BUNDLE_GEMFILE=Gemfile bundle install"
@@ -144,6 +157,10 @@ task :lint do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
   end
 
+  cd "packages/better_auth-mongo-adapter" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
+  end
+
   cd "packages/better_auth-api-key" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
   end
@@ -178,6 +195,10 @@ task "lint:fix" do
   end
 
   cd "packages/better_auth-redis-storage" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb --fix"
+  end
+
+  cd "packages/better_auth-mongo-adapter" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb --fix"
   end
 
@@ -230,6 +251,10 @@ task :clean do
   end
 
   cd "packages/better_auth-redis-storage" do
+    sh "rm -rf Gemfile.lock *.gem coverage/"
+  end
+
+  cd "packages/better_auth-mongo-adapter" do
     sh "rm -rf Gemfile.lock *.gem coverage/"
   end
 

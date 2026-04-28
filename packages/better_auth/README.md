@@ -90,7 +90,7 @@ Custom Better Auth-style password callbacks are still supported through `email_a
 
 ### Database Adapters
 
-The core gem ships framework-agnostic adapters for memory, PostgreSQL, MySQL, SQLite, MongoDB, and MSSQL. Driver gems are loaded only when their adapter is instantiated.
+The core gem ships framework-agnostic adapters for memory, PostgreSQL, MySQL, SQLite, and MSSQL. Driver gems are loaded only when their adapter is instantiated. MongoDB support lives in the external `better_auth-mongo-adapter` package so apps that do not use MongoDB do not install the Mongo driver.
 
 ```ruby
 auth = BetterAuth.auth(
@@ -100,6 +100,8 @@ auth = BetterAuth.auth(
 ```
 
 ```ruby
+require "better_auth/mongo_adapter"
+
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   database: BetterAuth::Adapters::MongoDB.new(

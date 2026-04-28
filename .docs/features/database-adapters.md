@@ -4,7 +4,7 @@
 
 ## Summary
 
-Phase 3 adds the persistence layer used by later auth routes and plugins: the core schema map, a framework-agnostic adapter contract, the default memory adapter, database hooks, and an internal adapter for user/account/session/verification workflows. Phase 4.5 starts real SQL support with direct PostgreSQL/MySQL/SQLite/MSSQL DDL generation and a shared SQL adapter, plus a standalone MongoDB adapter, without introducing Rails or ActiveRecord into the core gem.
+Phase 3 adds the persistence layer used by later auth routes and plugins: the core schema map, a framework-agnostic adapter contract, the default memory adapter, database hooks, and an internal adapter for user/account/session/verification workflows. Phase 4.5 starts real SQL support with direct PostgreSQL/MySQL/SQLite/MSSQL DDL generation and a shared SQL adapter, without introducing Rails or ActiveRecord into the core gem. MongoDB now lives in `better_auth-mongo-adapter`, matching upstream's external adapter package split.
 
 ## Upstream Implementation
 
@@ -28,7 +28,7 @@ Ruby keeps upstream logical and wire field names such as `emailVerified`, `userI
 - The memory adapter implements Better Auth-specific where operators, basic joins for `session -> user`, `account -> user`, and `user -> account`, sorting, pagination, counts, and rollbackable in-memory transactions.
 - The direct SQL layer generates PostgreSQL, MySQL, SQLite, and MSSQL schema DDL from the same `BetterAuth::Schema` metadata. PostgreSQL uses `text`, `boolean`, `timestamptz`, `bigint`, FK constraints, and explicit FK indexes. MySQL uses InnoDB, `utf8mb4`, `varchar(191)` for indexed strings, `text`, `tinyint(1)`, `datetime(6)`, FK constraints, and explicit FK indexes. SQLite uses `text`, `integer`, `date`, FK constraints, and explicit FK indexes. MSSQL uses `varchar(255)`/`varchar(8000)`, `smallint`, `datetime2(3)`, FK constraints, and explicit FK indexes.
 - `BetterAuth::Adapters::SQL` implements parameterized CRUD, count, transactions, logical-to-physical field mapping, current internal-adapter joins for SQL-backed storage, and collection aggregation for `user -> account`. `BetterAuth::Adapters::Postgres`, `BetterAuth::Adapters::MySQL`, `BetterAuth::Adapters::SQLite`, and `BetterAuth::Adapters::MSSQL` are thin wrappers that require `pg`, `mysql2`, `sqlite3`, or `sequel`/`tiny_tds` only when instantiated without an injected connection. MSSQL uses Sequel internally for safer parameter binding; this is not exposed as a public Sequel adapter.
-- `BetterAuth::Adapters::MongoDB` is a standalone adapter, not a SQL wrapper. It stores documents in upstream-style singular collections by default, maps logical `id` to Mongo `_id`, maps configured field names such as `emailVerified` to storage names such as `email_verified`, converts ObjectId-compatible ids when the Mongo driver is available, supports the shared CRUD/where/sort/join contract, and can wrap operations in Mongo client sessions when transactions are enabled.
+- `BetterAuth::Adapters::MongoDB` is provided by the external `better_auth-mongo-adapter` gem, not by core. It stores documents in upstream-style singular collections by default, maps logical `id` to Mongo `_id`, maps configured field names such as `emailVerified` to storage names such as `email_verified`, converts ObjectId-compatible ids with the Mongo driver, supports the shared CRUD/where/sort/join contract, and can wrap operations in Mongo client sessions when transactions are enabled.
 - `BetterAuth::Rails::ActiveRecordAdapter` defines dynamic ActiveRecord associations for supported joins and uses native eager loading for `session -> user`, `account -> user`, and `user -> account`, avoiding per-record manual lookup while preserving the same logical result shape.
 - PostgreSQL output normalization now coerces `pg` string values such as `"f"`/`"t"` and timestamp strings back into Ruby booleans and `Time` values before returning logical Better Auth hashes.
 
@@ -62,6 +62,8 @@ auth = BetterAuth.auth(
 ```
 
 ```ruby
+require "better_auth/mongo_adapter"
+
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   database: BetterAuth::Adapters::MongoDB.new(database: mongo_client.database, client: mongo_client)
@@ -86,7 +88,6 @@ Rails should later put equivalent configuration in `config/initializers/better_a
 - `packages/better_auth/lib/better_auth/adapters/postgres.rb`
 - `packages/better_auth/lib/better_auth/adapters/mysql.rb`
 - `packages/better_auth/lib/better_auth/adapters/sqlite.rb`
-- `packages/better_auth/lib/better_auth/adapters/mongodb.rb`
 - `packages/better_auth/lib/better_auth/adapters/mssql.rb`
 - `packages/better_auth/lib/better_auth/database_hooks.rb`
 - `packages/better_auth/lib/better_auth/adapters/internal_adapter.rb`
@@ -95,6 +96,7 @@ Rails should later put equivalent configuration in `config/initializers/better_a
 - `packages/better_auth/lib/better_auth/context.rb`
 - `packages/better_auth/lib/better_auth/configuration.rb`
 - `packages/better_auth-redis-storage/lib/better_auth/redis_storage.rb`
+- `packages/better_auth-mongo-adapter/lib/better_auth/mongo_adapter.rb`
 
 ## Testing
 
@@ -107,9 +109,11 @@ rbenv exec bundle exec rake test TEST=test/better_auth/adapters/sql_test.rb
 rbenv exec bundle exec rake test TEST=test/better_auth/adapters/postgres_test.rb
 rbenv exec bundle exec rake test TEST=test/better_auth/adapters/mysql_test.rb
 rbenv exec bundle exec rake test TEST=test/better_auth/adapters/sqlite_test.rb
-rbenv exec bundle exec rake test TEST=test/better_auth/adapters/mongodb_test.rb
 rbenv exec bundle exec rake test TEST=test/better_auth/adapters/mssql_test.rb
 rbenv exec bundle exec rake test TEST=test/better_auth/adapters/internal_adapter_test.rb
+
+cd ../better_auth-mongo-adapter
+rbenv exec bundle exec rake test
 ```
 
 Key test files:
@@ -121,10 +125,10 @@ Key test files:
 - `packages/better_auth/test/better_auth/adapters/postgres_test.rb`
 - `packages/better_auth/test/better_auth/adapters/mysql_test.rb`
 - `packages/better_auth/test/better_auth/adapters/sqlite_test.rb`
-- `packages/better_auth/test/better_auth/adapters/mongodb_test.rb`
 - `packages/better_auth/test/better_auth/adapters/mssql_test.rb`
 - `packages/better_auth/test/better_auth/adapters/internal_adapter_test.rb`
+- `packages/better_auth-mongo-adapter/test/better_auth/adapters/mongodb_test.rb`
 
 ## Notes
 
-PostgreSQL and MySQL direct SQL support are exercised against Docker services in CI. SQLite, MongoDB, and MSSQL now have matching adapter tests with real-service coverage that skips cleanly when local driver gems or services are unavailable. The adapter tests cover both raw CRUD and BetterAuth route flows: sign-up creates user/account/session records verified through direct storage reads, and `get_session` returns the authoritative user/session after a direct storage update. ActiveRecord lives in `better_auth-rails` so Rails remains a thin integration layer over the same core route and adapter contracts.
+PostgreSQL and MySQL direct SQL support are exercised against Docker services in CI. SQLite and MSSQL have matching core adapter tests, while MongoDB has package-owned adapter tests with real-service coverage in `better_auth-mongo-adapter`. The adapter tests cover both raw CRUD and BetterAuth route flows: sign-up creates user/account/session records verified through direct storage reads, and `get_session` returns the authoritative user/session after a direct storage update. ActiveRecord lives in `better_auth-rails` so Rails remains a thin integration layer over the same core route and adapter contracts.

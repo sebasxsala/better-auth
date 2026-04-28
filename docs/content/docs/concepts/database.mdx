@@ -15,10 +15,10 @@ adapter.
 | `BetterAuth::Adapters::Memory` | Supported | Tests, local demos, stateless experiments |
 | `BetterAuth::Adapters::Postgres` | Partial | Rack apps using PostgreSQL directly |
 | `BetterAuth::Adapters::MySQL` | Partial | Rack apps using MySQL directly |
+| `BetterAuth::Adapters::MongoDB` | Partial | Rack apps using MongoDB through `better_auth-mongo-adapter` |
 | `BetterAuth::Rails::ActiveRecordAdapter` | Partial | Rails apps using ActiveRecord |
 
-SQLite, Prisma, Drizzle, MongoDB, MSSQL, and other upstream adapters
-are not built-in Ruby adapters yet.
+SQLite and MSSQL direct adapters are available in the core gem but are still documented more lightly than PostgreSQL and MySQL. Prisma, Drizzle, and other TypeScript-specific upstream adapters are not built-in Ruby adapters.
 
 ## Configure A Database
 
@@ -49,6 +49,24 @@ auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   database: BetterAuth::Adapters::MySQL.new(
     url: ENV.fetch("DATABASE_URL")
+  )
+)
+```
+
+MongoDB:
+
+```ruby title="config/auth.rb"
+require "mongo"
+require "better_auth/mongo_adapter"
+
+mongo_client = Mongo::Client.new(ENV.fetch("BETTER_AUTH_MONGODB_URL"))
+
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  database: BetterAuth::Adapters::MongoDB.new(
+    database: mongo_client.database,
+    client: mongo_client,
+    transaction: false
   )
 )
 ```

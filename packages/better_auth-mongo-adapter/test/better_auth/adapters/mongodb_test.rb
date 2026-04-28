@@ -23,6 +23,14 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     assert_equal "ada@example.com", @adapter.find_one(model: "user", where: [{field: "id", value: "user-1"}])["email"]
   end
 
+  def test_mongodb_adapter_generates_object_id_documents_by_default
+    user = @adapter.create(model: "user", data: {name: "Ada", email: "ada@example.com"})
+    stored = @database.collection("user").documents.first
+
+    assert_instance_of BSON::ObjectId, stored.fetch("_id")
+    assert_equal stored.fetch("_id").to_s, user.fetch("id")
+  end
+
   def test_mongodb_adapter_supports_where_connectors_sort_limit_offset_and_count
     @adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
     @adapter.create(model: "user", data: {id: "user-2", name: "Grace", email: "grace@example.com"}, force_allow_id: true)
@@ -87,8 +95,28 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     assert_equal "MongoDB Direct Update", session[:user]["name"]
   rescue LoadError
     skip "mongo gem is not installed"
+  rescue Mongo::Error::NoServerAvailable, Mongo::Error::SocketError
+    skip "MongoDB test service is not available"
   ensure
     client&.close
+  end
+
+  def test_mongodb_adapter_wraps_operations_in_client_transaction_when_enabled
+    database = FakeMongoDatabase.new
+    client = FakeMongoClient.new
+    adapter = BetterAuth::Adapters::MongoDB.new(@config, database: database, client: client)
+
+    adapter.transaction do |transaction_adapter|
+      transaction_adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    end
+
+    assert_equal 1, client.sessions.length
+    session = client.sessions.first
+    assert_equal true, session.started
+    assert_equal true, session.committed
+    assert_equal false, session.aborted
+    assert_equal true, session.ended
+    assert_equal session, database.collection("user").insert_options.first.fetch(:session)
   end
 
   private
@@ -115,12 +143,15 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
 
   class FakeMongoCollection
     attr_reader :documents
+    attr_reader :insert_options
 
     def initialize
       @documents = []
+      @insert_options = []
     end
 
-    def insert_one(document, _options = {})
+    def insert_one(document, options = {})
+      @insert_options << options
       @documents << deep_dup(document)
       InsertResult.new(document.fetch("_id"))
     end
@@ -139,6 +170,45 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
 
     def deep_dup(value)
       Marshal.load(Marshal.dump(value))
+    end
+  end
+
+  class FakeMongoClient
+    attr_reader :sessions
+
+    def initialize
+      @sessions = []
+    end
+
+    def start_session
+      FakeMongoSession.new.tap { |session| sessions << session }
+    end
+  end
+
+  class FakeMongoSession
+    attr_reader :started, :committed, :aborted, :ended
+
+    def initialize
+      @started = false
+      @committed = false
+      @aborted = false
+      @ended = false
+    end
+
+    def start_transaction
+      @started = true
+    end
+
+    def commit_transaction
+      @committed = true
+    end
+
+    def abort_transaction
+      @aborted = true
+    end
+
+    def end_session
+      @ended = true
     end
   end
 end
