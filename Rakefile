@@ -10,6 +10,12 @@ STANDARD_PATHS = [
   "packages/better_auth/Rakefile",
   "packages/better_auth/lib",
   "packages/better_auth/test",
+  "packages/better_auth-api-key/Rakefile",
+  "packages/better_auth-api-key/lib",
+  "packages/better_auth-api-key/test",
+  "packages/better_auth-passkey/Rakefile",
+  "packages/better_auth-passkey/lib",
+  "packages/better_auth-passkey/test",
   "packages/better_auth-stripe/Rakefile",
   "packages/better_auth-stripe/lib",
   "packages/better_auth-stripe/test",
@@ -37,6 +43,16 @@ task :ci do
   puts "\n🧪 Running tests in packages/better_auth..."
   cd "packages/better_auth" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec rake ci"
+  end
+
+  puts "\n🧪 Running tests in packages/better_auth-api-key..."
+  cd "packages/better_auth-api-key" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec rake"
+  end
+
+  puts "\n🧪 Running tests in packages/better_auth-passkey..."
+  cd "packages/better_auth-passkey" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec rake"
   end
 
   puts "\n🧪 Running tests in packages/better_auth-stripe..."
@@ -72,6 +88,16 @@ task :install do
     sh "BUNDLE_GEMFILE=Gemfile bundle install"
   end
 
+  puts "\n📦 Installing packages/better_auth-api-key dependencies..."
+  cd "packages/better_auth-api-key" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle install"
+  end
+
+  puts "\n📦 Installing packages/better_auth-passkey dependencies..."
+  cd "packages/better_auth-passkey" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle install"
+  end
+
   puts "\n📦 Installing packages/better_auth-stripe dependencies..."
   cd "packages/better_auth-stripe" do
     sh "BUNDLE_GEMFILE=Gemfile bundle install"
@@ -101,6 +127,14 @@ task :lint do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
   end
 
+  cd "packages/better_auth-api-key" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
+  end
+
+  cd "packages/better_auth-passkey" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
+  end
+
   cd "packages/better_auth-stripe" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
   end
@@ -123,6 +157,14 @@ task "lint:fix" do
   sh "bundle exec standardrb --fix #{STANDARD_PATHS.join(" ")}"
 
   cd "packages/better_auth" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb --fix"
+  end
+
+  cd "packages/better_auth-api-key" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb --fix"
+  end
+
+  cd "packages/better_auth-passkey" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb --fix"
   end
 
@@ -163,6 +205,14 @@ task :clean do
   sh "rm -rf Gemfile.lock"
 
   cd "packages/better_auth" do
+    sh "rm -rf Gemfile.lock *.gem coverage/"
+  end
+
+  cd "packages/better_auth-api-key" do
+    sh "rm -rf Gemfile.lock *.gem coverage/"
+  end
+
+  cd "packages/better_auth-passkey" do
     sh "rm -rf Gemfile.lock *.gem coverage/"
   end
 

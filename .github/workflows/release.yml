@@ -5,6 +5,7 @@ on:
     tags:
       - 'better_auth-v*'
       - 'better_auth-rails-v*'
+      - 'better_auth-passkey-v*'
       - 'better_auth-sinatra-v*'
       - 'better_auth-hanami-v*'
   workflow_dispatch:
@@ -38,12 +39,14 @@ jobs:
     outputs:
       core_version: ${{ steps.detect.outputs.core_version }}
       rails_version: ${{ steps.detect.outputs.rails_version }}
+      passkey_version: ${{ steps.detect.outputs.passkey_version }}
       sinatra_version: ${{ steps.detect.outputs.sinatra_version }}
       hanami_version: ${{ steps.detect.outputs.hanami_version }}
       tag_version: ${{ steps.detect.outputs.tag_version }}
       target_package: ${{ steps.detect.outputs.target_package }}
       core_releases: ${{ steps.detect.outputs.core_releases }}
       rails_releases: ${{ steps.detect.outputs.rails_releases }}
+      passkey_releases: ${{ steps.detect.outputs.passkey_releases }}
       sinatra_releases: ${{ steps.detect.outputs.sinatra_releases }}
       hanami_releases: ${{ steps.detect.outputs.hanami_releases }}
       should_publish: ${{ steps.detect.outputs.should_publish }}
@@ -62,11 +65,13 @@ jobs:
 
           core_file="packages/better_auth/lib/better_auth/version.rb"
           rails_file="packages/better_auth-rails/lib/better_auth/rails/version.rb"
+          passkey_file="packages/better_auth-passkey/lib/better_auth/passkey/version.rb"
           sinatra_file="packages/better_auth-sinatra/lib/better_auth/sinatra/version.rb"
           hanami_file="packages/better_auth-hanami/lib/better_auth/hanami/version.rb"
 
           core_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$core_file")
           rails_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$rails_file")
+          passkey_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$passkey_file")
           sinatra_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$sinatra_file")
           hanami_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$hanami_file")
 
@@ -75,6 +80,7 @@ jobs:
           target_package=""
           core_releases=false
           rails_releases=false
+          passkey_releases=false
           sinatra_releases=false
           hanami_releases=false
           should_publish=false
@@ -95,6 +101,12 @@ jobs:
                 expected_version="$rails_version"
                 rails_releases=true
                 ;;
+              better_auth-passkey-v*)
+                target_package="better_auth-passkey"
+                tag_version="${tag_name#better_auth-passkey-v}"
+                expected_version="$passkey_version"
+                passkey_releases=true
+                ;;
               better_auth-sinatra-v*)
                 target_package="better_auth-sinatra"
                 tag_version="${tag_name#better_auth-sinatra-v}"
@@ -108,7 +120,7 @@ jobs:
                 hanami_releases=true
                 ;;
               *)
-                echo "::error ::Release tags must use a package prefix: better_auth-vX.Y.Z, better_auth-rails-vX.Y.Z, better_auth-sinatra-vX.Y.Z, or better_auth-hanami-vX.Y.Z."
+                echo "::error ::Release tags must use a package prefix: better_auth-vX.Y.Z, better_auth-rails-vX.Y.Z, better_auth-passkey-vX.Y.Z, better_auth-sinatra-vX.Y.Z, or better_auth-hanami-vX.Y.Z."
                 exit 1
                 ;;
             esac
@@ -157,12 +169,14 @@ jobs:
 
           echo "core_version=$core_version" >> "$GITHUB_OUTPUT"
           echo "rails_version=$rails_version" >> "$GITHUB_OUTPUT"
+          echo "passkey_version=$passkey_version" >> "$GITHUB_OUTPUT"
           echo "sinatra_version=$sinatra_version" >> "$GITHUB_OUTPUT"
           echo "hanami_version=$hanami_version" >> "$GITHUB_OUTPUT"
           echo "tag_version=$tag_version" >> "$GITHUB_OUTPUT"
           echo "target_package=$target_package" >> "$GITHUB_OUTPUT"
           echo "core_releases=$core_releases" >> "$GITHUB_OUTPUT"
           echo "rails_releases=$rails_releases" >> "$GITHUB_OUTPUT"
+          echo "passkey_releases=$passkey_releases" >> "$GITHUB_OUTPUT"
           echo "sinatra_releases=$sinatra_releases" >> "$GITHUB_OUTPUT"
           echo "hanami_releases=$hanami_releases" >> "$GITHUB_OUTPUT"
           echo "should_publish=$should_publish" >> "$GITHUB_OUTPUT"
@@ -170,12 +184,14 @@ jobs:
 
           echo "core_version=$core_version"
           echo "rails_version=$rails_version"
+          echo "passkey_version=$passkey_version"
           echo "sinatra_version=$sinatra_version"
           echo "hanami_version=$hanami_version"
           echo "tag_version=${tag_version:-manual-dry-run}"
           echo "target_package=${target_package:-manual-dry-run}"
           echo "core_releases=$core_releases"
           echo "rails_releases=$rails_releases"
+          echo "passkey_releases=$passkey_releases"
           echo "sinatra_releases=$sinatra_releases"
           echo "hanami_releases=$hanami_releases"
           echo "should_publish=$should_publish"
@@ -236,6 +252,29 @@ jobs:
 
       - name: Run tests
         working-directory: packages/better_auth
+        run: bundle exec rake test
+
+  test-passkey:
+    name: Test better_auth-passkey (Passkey Plugin)
+    needs: [prepare-release]
+    if: needs.prepare-release.outputs.passkey_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-passkey
+
+      - name: Run linter
+        working-directory: packages/better_auth-passkey
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-passkey
         run: bundle exec rake test
 
   test-rails:
@@ -368,6 +407,54 @@ jobs:
           fi
 
           gem push better_auth-*.gem
+
+  publish-passkey:
+    name: Build and publish better_auth-passkey
+    needs: [prepare-release, test-passkey]
+    if: needs.prepare-release.outputs.passkey_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-passkey
+
+      - name: Configure RubyGems credentials
+        if: needs.prepare-release.outputs.passkey_releases == 'true' && needs.prepare-release.outputs.dry_run != 'true'
+        uses: rubygems/configure-rubygems-credentials@v1.0.0
+
+      - name: Build better_auth-passkey gem
+        working-directory: packages/better_auth-passkey
+        run: |
+          set -euo pipefail
+          rm -f better_auth-passkey-*.gem
+          gem build better_auth-passkey.gemspec
+
+      - name: Publish better_auth-passkey gem
+        if: needs.prepare-release.outputs.passkey_releases == 'true'
+        working-directory: packages/better_auth-passkey
+        env:
+          TARGET_VERSION: ${{ needs.prepare-release.outputs.passkey_version }}
+          DRY_RUN: ${{ needs.prepare-release.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run enabled, skipping gem push for better_auth-passkey"
+            exit 0
+          fi
+
+          already_exists=$(ruby -rjson -ropen-uri -e 'gem_name = "better_auth-passkey"; version = ENV.fetch("TARGET_VERSION"); begin; body = URI.open("https://rubygems.org/api/v1/versions/#{gem_name}.json").read; versions = JSON.parse(body).map { |v| v["number"] }; print versions.include?(version) ? "true" : "false"; rescue StandardError; print "false"; end')
+
+          if [ "$already_exists" = "true" ]; then
+            echo "better_auth-passkey $TARGET_VERSION already exists on RubyGems, skipping push"
+            exit 0
+          fi
+
+          gem push better_auth-passkey-*.gem
 
   publish-rails:
     name: Build and publish better_auth-rails
@@ -538,13 +625,14 @@ jobs:
 
   create-release:
     name: Create GitHub release
-    needs: [prepare-release, publish-core, publish-rails, publish-sinatra, publish-hanami]
+    needs: [prepare-release, publish-core, publish-passkey, publish-rails, publish-sinatra, publish-hanami]
     if: |
       always() &&
       needs.prepare-release.outputs.should_publish == 'true' &&
       needs.prepare-release.outputs.dry_run != 'true' &&
       (
         needs.publish-core.result == 'success' ||
+        needs.publish-passkey.result == 'success' ||
         needs.publish-rails.result == 'success' ||
         needs.publish-sinatra.result == 'success' ||
         needs.publish-hanami.result == 'success'
@@ -561,6 +649,7 @@ jobs:
             ## Published packages
 
             - `better_auth` version `${{ needs.prepare-release.outputs.core_version }}` (released: `${{ needs.prepare-release.outputs.core_releases }}`)
+            - `better_auth-passkey` version `${{ needs.prepare-release.outputs.passkey_version }}` (released: `${{ needs.prepare-release.outputs.passkey_releases }}`)
             - `better_auth-rails` version `${{ needs.prepare-release.outputs.rails_version }}` (released: `${{ needs.prepare-release.outputs.rails_releases }}`)
             - `better_auth_rails` version `${{ needs.prepare-release.outputs.rails_version }}` (released: `${{ needs.prepare-release.outputs.rails_releases }}`)
             - `better_auth-sinatra` version `${{ needs.prepare-release.outputs.sinatra_version }}` (released: `${{ needs.prepare-release.outputs.sinatra_releases }}`)

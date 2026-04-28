@@ -94,6 +94,48 @@ jobs:
         working-directory: packages/better_auth
         run: bundle exec rake test
 
+  test-passkey:
+    name: Test better_auth-passkey (Passkey Plugin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-passkey
+
+      - name: Run linter
+        working-directory: packages/better_auth-passkey
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-passkey
+        run: bundle exec rake test
+
+  test-api-key:
+    name: Test better_auth-api-key (API Key Plugin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-api-key
+
+      - name: Run linter
+        working-directory: packages/better_auth-api-key
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-api-key
+        run: bundle exec rake test
+
   test-rails:
     name: Test better_auth-rails (Rails Adapter)
     runs-on: ubuntu-latest
