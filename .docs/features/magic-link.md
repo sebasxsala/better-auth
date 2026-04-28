@@ -14,16 +14,18 @@ The demo-level Rack flow is covered end to end through `/sign-in/magic-link` and
 - Exposed as `BetterAuth::Plugins.magic_link`.
 - Adds `/sign-in/magic-link` and `/magic-link/verify`.
 - Stores magic-link tokens through the core verification table.
-- Supports `expires_in`, `send_magic_link`, `disable_sign_up`, `generate_token`, `store_token: "plain"`, `store_token: "hashed"`, and custom hasher storage.
+- Supports `expires_in`, `allowed_attempts`, `send_magic_link`, `disable_sign_up`, `generate_token`, `store_token: "plain"`, `store_token: "hashed"`, and custom hasher storage.
+- Forwards request `metadata` to `send_magic_link`.
 - Uses core origin/trusted-origin checks for verify callback URLs.
 - Supports verifying the latest issued token when multiple magic links exist for the same user.
-- Sets session cookies for both redirect and JSON verification responses.
+- Sets session cookies for both redirect and JSON verification responses, and includes parsed `session` data in JSON verification responses.
 
 ## Key Differences
 
 - The Ruby implementation keeps token hashing dependency-free using `BetterAuth::Crypto.sha256(..., encoding: :base64url)`, matching upstream's SHA-256/base64url storage shape.
 - Ruby options use snake_case equivalents of upstream camelCase options.
 - Direct API verification returns JSON when no callback URL is supplied, and Rack/API response mode returns redirects for callback and error flows.
+- Ruby keeps relative callback redirects as provided when they pass trusted-origin validation.
 
 ## Testing
 

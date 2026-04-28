@@ -6,21 +6,22 @@ Status: Complete for Ruby server parity.
 
 ## Summary
 
-Adds MCP OAuth metadata, protected-resource metadata, dynamic public client registration, authorization-code flow with PKCE, token refresh, userinfo, JWKS route, and Rack helper behavior for unauthenticated MCP resource requests.
+Adds MCP OAuth metadata, protected-resource metadata, dynamic client registration, authorization-code flow with PKCE, token refresh, token-backed session lookup, userinfo, JWKS route, consent redirects, and Rack helper behavior for protected MCP resource requests.
 
 ## Ruby Adaptation
 
 - Exposed as `BetterAuth::Plugins.mcp`.
-- Adds `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource`, `/mcp/authorize`, `/mcp/token`, `/mcp/userinfo`, `/mcp/register`, and `/mcp/jwks`.
+- Adds `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource`, `/mcp/authorize`, `/mcp/token`, `/mcp/userinfo`, `/mcp/register`, `/mcp/get-session`, and `/mcp/jwks`.
 - Reuses OIDC/OAuth schema entries and shared protocol helpers.
-- Adds `BetterAuth::Plugins::MCP.with_mcp_auth` to return a `401` with the expected `WWW-Authenticate` bearer metadata challenge when a request has no bearer token.
+- Adds `BetterAuth::Plugins::MCP.with_mcp_auth` to validate bearer tokens through `auth.api.get_mcp_session` and return a `401` with the expected `WWW-Authenticate` bearer metadata challenge for missing or invalid tokens.
 - Persists unauthenticated authorization queries in an `oidc_login_prompt` signed cookie and resumes the MCP authorization redirect after email sign-in.
+- Validates response type, redirect URI, client status, requested scopes, PKCE requirements, and confidential-client secrets before issuing tokens.
 
 ## Key Differences
 
 - Ruby options use snake_case equivalents of upstream camelCase.
 - `/mcp/jwks` publishes public signing keys from the shared `jwks` store used by the JWT plugin.
-- Consent UI/client package helpers remain outside the Ruby server surface; the server redirect/token/helper behavior is covered.
+- TypeScript client package helpers remain outside the Ruby server surface; the server redirect/token/helper behavior is covered.
 
 ## Testing
 

@@ -8,7 +8,7 @@ module BetterAuth
     module_function
 
     def magic_link(options = {})
-      config = {store_token: "plain"}.merge(normalize_hash(options))
+      config = {store_token: "plain", allowed_attempts: 1}.merge(normalize_hash(options))
 
       Plugin.new(
         id: "magic-link",
@@ -37,13 +37,15 @@ module BetterAuth
         stored_token = store_magic_link_token(token, config)
         ctx.context.internal_adapter.create_verification_value(
           identifier: stored_token,
-          value: JSON.generate({"email" => email, "name" => body[:name]}),
+          value: JSON.generate({"email" => email, "name" => body[:name], "attempt" => 0}),
           expiresAt: Time.now + (config[:expires_in] || 60 * 5).to_i
         )
 
         link = magic_link_url(ctx, token, body)
         sender = config[:send_magic_link]
-        sender.call({email: email, url: link, token: token}, ctx) if sender.respond_to?(:call)
+        data = {email: email, url: link, token: token}
+        data[:metadata] = body[:metadata] if body.key?(:metadata)
+        sender.call(data, ctx) if sender.respond_to?(:call)
         ctx.json({status: true})
       end
     end
@@ -73,10 +75,18 @@ module BetterAuth
           redirect_with_error.call("EXPIRED_TOKEN")
         end
 
-        ctx.context.internal_adapter.delete_verification_value(verification["id"])
         payload = JSON.parse(verification["value"])
         email = payload.fetch("email").to_s.downcase
         name = payload["name"]
+        attempt = payload["attempt"].to_i
+        if magic_link_attempts_exceeded?(attempt, config)
+          ctx.context.internal_adapter.delete_verification_value(verification["id"])
+          redirect_with_error.call("ATTEMPTS_EXCEEDED")
+        end
+        ctx.context.internal_adapter.update_verification_value(
+          verification["id"],
+          value: JSON.generate(payload.merge("attempt" => attempt + 1))
+        )
         found = ctx.context.internal_adapter.find_user_by_email(email)
         user = found && found[:user]
         new_user = false
@@ -102,7 +112,11 @@ module BetterAuth
 
         Cookies.set_session_cookie(ctx, {session: session, user: user})
         unless query.key?(:callback_url)
-          next ctx.json({token: session["token"], user: Schema.parse_output(ctx.context.options, "user", user)})
+          next ctx.json({
+            token: session["token"],
+            user: Schema.parse_output(ctx.context.options, "user", user),
+            session: Schema.parse_output(ctx.context.options, "session", session)
+          })
         end
 
         raise ctx.redirect(new_user ? new_user_callback_url : callback_url)
@@ -116,6 +130,13 @@ module BetterAuth
       return generator.call(email) if generator.respond_to?(:call)
 
       Array.new(32) { [*"a".."z", *"A".."Z"].sample }.join
+    end
+
+    def magic_link_attempts_exceeded?(attempt, config)
+      allowed = config[:allowed_attempts]
+      return false if allowed.respond_to?(:infinite?) && allowed.infinite?
+
+      attempt >= allowed.to_i
     end
 
     def store_magic_link_token(token, config)

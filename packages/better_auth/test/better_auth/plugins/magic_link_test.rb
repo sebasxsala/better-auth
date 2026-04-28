@@ -33,7 +33,7 @@ class BetterAuthPluginsMagicLinkTest < Minitest::Test
 
     reused = auth.api.magic_link_verify(query: {token: sent.first[:token]}, as_response: true)
     assert_equal 302, reused.first
-    assert_includes reused[1].fetch("location"), "error=INVALID_TOKEN"
+    assert_includes reused[1].fetch("location"), "error=ATTEMPTS_EXCEEDED"
   end
 
   def test_magic_link_signs_up_new_user_and_verifies_email
@@ -119,7 +119,63 @@ class BetterAuthPluginsMagicLinkTest < Minitest::Test
     assert_includes headers.fetch("set-cookie"), "better-auth.session_token="
     parsed = JSON.parse(body.join)
     assert_match(/\A[0-9a-f]{32}\z/, parsed.fetch("token"))
+    assert_match(/\A[0-9a-f]{32}\z/, parsed.fetch("session").fetch("token"))
     assert_equal "latest-magic@example.com", parsed.fetch("user").fetch("email")
+  end
+
+  def test_magic_link_forwards_metadata_to_sender
+    sent = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.magic_link(send_magic_link: ->(data, _ctx = nil) { sent << data })
+      ]
+    )
+
+    auth.api.sign_in_magic_link(body: {email: "metadata@example.com", metadata: {source: "cli", nested: {plan: "parity"}}})
+
+    assert_equal({source: "cli", nested: {plan: "parity"}}, sent.first.fetch(:metadata))
+  end
+
+  def test_magic_link_respects_allowed_attempts
+    sent = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.magic_link(
+          allowed_attempts: 3,
+          send_magic_link: ->(data, _ctx = nil) { sent << data }
+        )
+      ]
+    )
+    auth.api.sign_up_email(body: {email: "attempts@example.com", password: "password123", name: "Attempts"})
+    auth.api.sign_in_magic_link(body: {email: "attempts@example.com"})
+
+    3.times do
+      status, _headers, _body = auth.api.magic_link_verify(query: {token: sent.first[:token]}, as_response: true)
+      assert_equal 200, status
+    end
+    exceeded = auth.api.magic_link_verify(query: {token: sent.first[:token], errorCallbackURL: "/error"}, as_response: true)
+
+    assert_equal 302, exceeded.first
+    assert_includes exceeded[1].fetch("location"), "error=ATTEMPTS_EXCEEDED"
+  end
+
+  def test_magic_link_allows_unlimited_attempts
+    sent = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.magic_link(
+          allowed_attempts: Float::INFINITY,
+          send_magic_link: ->(data, _ctx = nil) { sent << data }
+        )
+      ]
+    )
+    auth.api.sign_up_email(body: {email: "infinite@example.com", password: "password123", name: "Infinite"})
+    auth.api.sign_in_magic_link(body: {email: "infinite@example.com"})
+
+    4.times do
+      status, _headers, _body = auth.api.magic_link_verify(query: {token: sent.first[:token]}, as_response: true)
+      assert_equal 200, status
+    end
   end
 
   def test_magic_link_redirects_for_expired_invalid_and_disabled_signup

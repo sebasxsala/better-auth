@@ -41,7 +41,7 @@ class BetterAuthPluginsMultiSessionTest < Minitest::Test
     assert_nil auth.context.internal_adapter.find_session(token)
   end
 
-  def test_set_active_and_revoke_require_an_active_session_cookie
+  def test_set_active_allows_only_multi_session_cookie_but_revoke_requires_active_session
     auth = build_auth(plugins: [BetterAuth::Plugins.multi_session(maximum_sessions: 3)])
     cookie = merge_cookie("", sign_up_response(auth, email: "active-required-one@example.com"))
     cookie = merge_cookie(cookie, sign_up_response(auth, email: "active-required-two@example.com"))
@@ -49,10 +49,8 @@ class BetterAuthPluginsMultiSessionTest < Minitest::Test
     token = sessions.first[:session]["token"]
     only_multi_session_cookies = cookie.split("; ").reject { |part| part.start_with?("better-auth.session_token=") }.join("; ")
 
-    set_active = assert_raises(BetterAuth::APIError) do
-      auth.api.set_active_session(headers: {"cookie" => only_multi_session_cookies}, body: {sessionToken: token})
-    end
-    assert_equal 401, set_active.status_code
+    switched = auth.api.set_active_session(headers: {"cookie" => only_multi_session_cookies}, body: {sessionToken: token})
+    assert_equal token, switched[:session]["token"]
 
     revoke = assert_raises(BetterAuth::APIError) do
       auth.api.revoke_device_session(headers: {"cookie" => only_multi_session_cookies}, body: {sessionToken: token})
@@ -101,6 +99,25 @@ class BetterAuthPluginsMultiSessionTest < Minitest::Test
 
     assert_equal 200, final_status
     assert_includes final_headers.fetch("set-cookie"), "better-auth.session_token=;"
+  end
+
+  def test_revoking_active_session_ignores_expired_remaining_sessions
+    auth = build_auth(plugins: [BetterAuth::Plugins.multi_session(maximum_sessions: 3)])
+    cookie = merge_cookie("", sign_up_response(auth, email: "expired-next-one@example.com"))
+    cookie = merge_cookie(cookie, sign_up_response(auth, email: "expired-next-two@example.com"))
+    sessions = auth.api.list_device_sessions(headers: {"cookie" => cookie})
+    active_token = auth.api.get_session(headers: {"cookie" => cookie})[:session]["token"]
+    expired_token = sessions.map { |entry| entry[:session]["token"] }.find { |token| token != active_token }
+    auth.context.internal_adapter.update_session(expired_token, expiresAt: Time.now - 60)
+
+    status, headers, _body = auth.api.revoke_device_session(
+      headers: {"cookie" => cookie},
+      body: {sessionToken: active_token},
+      as_response: true
+    )
+
+    assert_equal 200, status
+    assert_includes headers.fetch("set-cookie"), "better-auth.session_token=;"
   end
 
   private

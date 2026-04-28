@@ -48,7 +48,6 @@ module BetterAuth
 
     def set_active_session_endpoint
       Endpoint.new(path: "/multi-session/set-active", method: "POST") do |ctx|
-        Routes.current_session(ctx)
         token = fetch_value(ctx.body, "sessionToken").to_s
         cookie_name = multi_session_cookie_name(ctx, token)
         unless !token.empty? && ctx.get_signed_cookie(cookie_name, ctx.context.secret)
@@ -79,7 +78,9 @@ module BetterAuth
         expire_cookie(ctx, cookie_name)
 
         if current && current[:session]["token"] == token
-          next_session = ctx.context.internal_adapter.find_sessions(verified_multi_session_tokens(ctx).reject { |entry| entry == token }).first
+          next_session = ctx.context.internal_adapter
+            .find_sessions(verified_multi_session_tokens(ctx).reject { |entry| entry == token })
+            .find { |entry| !entry[:session]["expiresAt"] || entry[:session]["expiresAt"] > Time.now }
           if next_session
             Cookies.set_session_cookie(ctx, next_session)
           else
@@ -94,11 +95,13 @@ module BetterAuth
     def set_multi_session_cookie(ctx, config)
       new_session = ctx.context.new_session
       return unless new_session && new_session[:session]
+      set_cookie = ctx.response_headers["set-cookie"].to_s
 
       token = new_session[:session]["token"]
       cookie_config = ctx.context.auth_cookies[:session_token]
       cookie_name = multi_session_cookie_name(ctx, token)
       cookies = ctx.cookies
+      return unless set_cookie.include?(cookie_config.name)
       return if cookies.key?(cookie_name)
 
       deleted_count = 0
@@ -126,8 +129,10 @@ module BetterAuth
       tokens = []
       multi_cookie_names(ctx).each do |name|
         token = ctx.get_signed_cookie(name, ctx.context.secret)
+        next unless token
+
         tokens << token if token
-        expire_cookie(ctx, name)
+        expire_cookie(ctx, canonical_multi_session_cookie_name(name))
       end
       ctx.context.internal_adapter.delete_sessions(tokens) unless tokens.empty?
       nil
@@ -158,6 +163,11 @@ module BetterAuth
 
     def expire_cookie(ctx, name)
       ctx.set_cookie(name, "", ctx.context.auth_cookies[:session_token].attributes.merge(max_age: 0))
+    end
+
+    def canonical_multi_session_cookie_name(name)
+      prefix = "__Secure-"
+      name.to_s.sub(/\A#{Regexp.escape(prefix)}/i, prefix)
     end
   end
 end

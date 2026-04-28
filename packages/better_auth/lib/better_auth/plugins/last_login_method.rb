@@ -28,7 +28,7 @@ module BetterAuth
     def last_login_method_schema(config)
       return {} unless config[:store_in_database]
 
-      field_name = config.dig(:schema, :user, :last_login_method) || "last_loginMethod"
+      field_name = config.dig(:schema, :user, :last_login_method) || "lastLoginMethod"
       {
         user: {
           fields: {
@@ -62,10 +62,16 @@ module BetterAuth
 
     def resolve_login_method(ctx, config)
       custom = config[:custom_resolve_method]
-      resolved = custom.call(ctx) if custom.respond_to?(:call)
+      resolve_context = ctx
+      unless ctx.path
+        resolve_context = ctx.dup
+        resolve_context.path = ""
+      end
+      resolved = custom.call(resolve_context) if custom.respond_to?(:call)
       return resolved if resolved
 
-      case ctx.path
+      path = resolve_context.path.to_s
+      case path
       when "/sign-in/email", "/sign-up/email"
         "email"
       when "/callback/:providerId"
@@ -73,10 +79,11 @@ module BetterAuth
       when "/oauth2/callback/:providerId"
         fetch_value(ctx.params, "providerId")
       else
-        return Regexp.last_match(1) if ctx.path.to_s =~ %r{\A/callback/([^/]+)\z}
-        return Regexp.last_match(1) if ctx.path.to_s =~ %r{\A/oauth2/callback/([^/]+)\z}
-        return "siwe" if ctx.path.to_s.include?("siwe")
-        return "passkey" if ctx.path.to_s.include?("/passkey/verify-authentication")
+        return Regexp.last_match(1) if path =~ %r{\A/callback/([^/]+)\z}
+        return Regexp.last_match(1) if path =~ %r{\A/oauth2/callback/([^/]+)\z}
+        return "siwe" if path.include?("siwe")
+        return "passkey" if path.include?("/passkey/verify-authentication")
+        return "magic-link" if path.start_with?("/magic-link/verify")
 
         nil
       end

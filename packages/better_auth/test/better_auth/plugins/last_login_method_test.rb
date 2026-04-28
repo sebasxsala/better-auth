@@ -45,6 +45,60 @@ class BetterAuthPluginsLastLoginMethodTest < Minitest::Test
     assert_equal "email", session[:user]["lastLoginMethod"]
   end
 
+  def test_last_login_method_sets_magic_link_cookie_and_database_value
+    sent = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.last_login_method(store_in_database: true),
+        BetterAuth::Plugins.magic_link(send_magic_link: ->(data, _ctx = nil) { sent << data })
+      ]
+    )
+
+    auth.api.sign_in_magic_link(body: {email: "magic-last@example.com", callbackURL: "/dashboard"})
+    _status, headers, _body = auth.api.magic_link_verify(
+      query: {token: sent.first.fetch(:token), callbackURL: "/dashboard"},
+      as_response: true
+    )
+    cookie = cookie_header(headers.fetch("set-cookie"))
+    session = auth.api.get_session(headers: {"cookie" => cookie}, query: {disableCookieCache: true})
+
+    assert_includes headers.fetch("set-cookie"), "better-auth.last_used_login_method=magic-link"
+    assert_equal "magic-link", session[:user]["lastLoginMethod"]
+  end
+
+  def test_last_login_method_schema_uses_upstream_default_field_name
+    plugin = BetterAuth::Plugins.last_login_method(store_in_database: true)
+    fields = plugin.schema.fetch(:user).fetch(:fields)
+    last_login_method = fields[:lastLoginMethod] || fields["lastLoginMethod"] || fields[:last_login_method] || fields["last_login_method"]
+
+    assert_equal "lastLoginMethod", last_login_method.fetch(:field_name)
+  end
+
+  def test_last_login_method_custom_resolver_tolerates_missing_path
+    calls = []
+    plugin = BetterAuth::Plugins.last_login_method(
+      custom_resolve_method: ->(ctx) {
+        calls << ctx.path
+        ctx.path.start_with?("/custom-login") ? "custom" : nil
+      }
+    )
+    auth = build_auth(
+      plugins: [plugin]
+    )
+    ctx = BetterAuth::Endpoint::Context.new(
+      path: nil,
+      method: "GET",
+      query: {},
+      body: {},
+      params: {},
+      headers: {},
+      context: auth.context
+    )
+
+    assert_nil BetterAuth::Plugins.resolve_login_method(ctx, plugin.options)
+    assert_equal [""], calls
+  end
+
   def test_last_login_method_sets_cookie_and_database_value_for_siwe
     auth = build_auth(
       plugins: [

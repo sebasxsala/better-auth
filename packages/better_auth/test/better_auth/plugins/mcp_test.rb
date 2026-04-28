@@ -73,6 +73,22 @@ class BetterAuthPluginsMCPTest < Minitest::Test
 
     userinfo = auth.api.mcp_o_auth_user_info(headers: {"authorization" => "Bearer #{refreshed[:access_token]}"})
     assert_equal "mcp@example.com", userinfo[:email]
+
+    session = auth.api.get_mcp_session(headers: {"authorization" => "Bearer #{refreshed[:access_token]}"})
+    assert_equal client[:client_id], session["clientId"]
+
+    app = BetterAuth::Plugins::MCP.with_mcp_auth(
+      ->(env) { [200, {}, [env.fetch("better_auth.mcp_session").fetch("userId")]] },
+      auth: auth,
+      resource_metadata_url: "http://localhost:3000/.well-known/oauth-protected-resource"
+    )
+    status, _headers, body = app.call({"HTTP_AUTHORIZATION" => "Bearer #{refreshed[:access_token]}"})
+    assert_equal 200, status
+    assert_equal [auth.context.internal_adapter.find_user_by_email("mcp@example.com")[:user]["id"]], body
+
+    invalid_status, invalid_headers, _invalid_body = app.call({"HTTP_AUTHORIZATION" => "Bearer invalid-token"})
+    assert_equal 401, invalid_status
+    assert_includes invalid_headers.fetch("www-authenticate"), "Bearer"
   end
 
   def test_with_mcp_auth_returns_www_authenticate_for_missing_bearer_token
@@ -160,14 +176,132 @@ class BetterAuthPluginsMCPTest < Minitest::Test
     assert_includes sign_in["set-cookie"], "oidc_login_prompt=;"
   end
 
+  def test_mcp_confidential_client_requires_secret_and_supports_basic_auth
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    client = auth.api.mcp_register(
+      body: {
+        redirect_uris: ["https://mcp.example/confidential"],
+        token_endpoint_auth_method: "client_secret_basic",
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        client_name: "Confidential MCP Client"
+      }
+    )
+    status, headers, _body = auth.api.mcp_o_auth_authorize(
+      headers: {"cookie" => cookie},
+      query: {
+        response_type: "code",
+        client_id: client[:client_id],
+        redirect_uri: "https://mcp.example/confidential",
+        scope: "openid email"
+      },
+      as_response: true
+    )
+    assert_equal 302, status
+    code = Rack::Utils.parse_query(URI.parse(headers.fetch("location")).query).fetch("code")
+
+    missing_secret = assert_raises(BetterAuth::APIError) do
+      auth.api.mcp_o_auth_token(
+        body: {
+          grant_type: "authorization_code",
+          code: code,
+          redirect_uri: "https://mcp.example/confidential",
+          client_id: client[:client_id]
+        }
+      )
+    end
+    assert_equal 401, missing_secret.status_code
+
+    _status, headers, _body = auth.api.mcp_o_auth_authorize(
+      headers: {"cookie" => cookie},
+      query: {
+        response_type: "code",
+        client_id: client[:client_id],
+        redirect_uri: "https://mcp.example/confidential",
+        scope: "openid email"
+      },
+      as_response: true
+    )
+    code = Rack::Utils.parse_query(URI.parse(headers.fetch("location")).query).fetch("code")
+    basic = Base64.strict_encode64("#{client[:client_id]}:#{client[:client_secret]}")
+    tokens = auth.api.mcp_o_auth_token(
+      headers: {"authorization" => "Basic #{basic}"},
+      body: {
+        grant_type: "authorization_code",
+        code: code,
+        redirect_uri: "https://mcp.example/confidential"
+      }
+    )
+
+    assert tokens[:access_token]
+    assert_nil tokens[:refresh_token]
+  end
+
+  def test_mcp_rejects_invalid_authorize_requests
+    auth = build_auth(require_pkce: true, oidc_config: {scopes: %w[openid email]})
+    cookie = sign_up_cookie(auth)
+    client = auth.api.mcp_register(
+      body: {
+        redirect_uris: ["https://mcp.example/reject"],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        client_name: "Reject Client"
+      }
+    )
+
+    unsupported = auth.api.mcp_o_auth_authorize(
+      headers: {"cookie" => cookie},
+      query: {
+        response_type: "token",
+        client_id: client[:client_id],
+        redirect_uri: "https://mcp.example/reject",
+        scope: "openid"
+      },
+      as_response: true
+    )
+    assert_equal 302, unsupported.first
+    assert_includes unsupported[1].fetch("location"), "error=unsupported_response_type"
+
+    invalid_scope = auth.api.mcp_o_auth_authorize(
+      headers: {"cookie" => cookie},
+      query: {
+        response_type: "code",
+        client_id: client[:client_id],
+        redirect_uri: "https://mcp.example/reject",
+        scope: "openid missing"
+      },
+      as_response: true
+    )
+    assert_equal 302, invalid_scope.first
+    assert_includes invalid_scope[1].fetch("location"), "error=invalid_scope"
+
+    missing_pkce = auth.api.mcp_o_auth_authorize(
+      headers: {"cookie" => cookie},
+      query: {
+        response_type: "code",
+        client_id: client[:client_id],
+        redirect_uri: "https://mcp.example/reject",
+        scope: "openid"
+      },
+      as_response: true
+    )
+    assert_equal 302, missing_pkce.first
+    assert_includes missing_pkce[1].fetch("location"), "error=invalid_request"
+    assert_includes missing_pkce[1].fetch("location"), "pkce+is+required"
+  end
+
   private
 
-  def build_auth
+  def build_auth(options = {})
     BetterAuth.auth(
-      base_url: "http://localhost:3000",
-      secret: SECRET,
-      database: :memory,
-      plugins: [BetterAuth::Plugins.mcp(login_page: "/login")]
+      {
+        base_url: "http://localhost:3000",
+        secret: SECRET,
+        database: :memory,
+        plugins: [BetterAuth::Plugins.mcp({login_page: "/login"}.merge(options))]
+      }
     )
   end
 

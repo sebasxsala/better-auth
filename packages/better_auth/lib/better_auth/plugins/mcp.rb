@@ -7,22 +7,33 @@ module BetterAuth
     module MCP
       module_function
 
-      def with_mcp_auth(app, resource_metadata_url:)
+      def with_mcp_auth(app, resource_metadata_url:, auth: nil)
         lambda do |env|
           authorization = env["HTTP_AUTHORIZATION"].to_s
           unless authorization.start_with?("Bearer ")
-            return [
-              401,
-              {
-                "www-authenticate" => %(Bearer resource_metadata="#{resource_metadata_url}"),
-                "access-control-expose-headers" => "WWW-Authenticate"
-              },
-              ["unauthorized"]
-            ]
+            return unauthorized(resource_metadata_url)
           end
 
+          session = auth&.api&.get_mcp_session(headers: {"authorization" => authorization})
+          return unauthorized(resource_metadata_url) unless session
+
+          env["better_auth.mcp_session"] = session
+
           app.call(env)
+        rescue APIError
+          unauthorized(resource_metadata_url)
         end
+      end
+
+      def unauthorized(resource_metadata_url)
+        [
+          401,
+          {
+            "www-authenticate" => %(Bearer resource_metadata="#{resource_metadata_url}"),
+            "access-control-expose-headers" => "WWW-Authenticate"
+          },
+          ["unauthorized"]
+        ]
       end
     end
 
@@ -31,11 +42,18 @@ module BetterAuth
     def mcp(options = {})
       config = {
         login_page: "/login",
+        consent_page: "/oauth/consent",
         resource: nil,
         oidc_config: {},
+        code_expires_in: 600,
+        default_scope: "openid",
+        access_token_expires_in: 3600,
+        refresh_token_expires_in: 604_800,
+        allow_plain_code_challenge_method: true,
         scopes: %w[openid profile email offline_access],
         store: OAuthProtocol.stores
       }.merge(normalize_hash(options))
+      config = mcp_normalize_config(config)
 
       Plugin.new(
         id: "mcp",
@@ -61,6 +79,8 @@ module BetterAuth
         mcp_o_auth_token: mcp_token_endpoint(config),
         mcp_o_auth_user_info: mcp_userinfo_endpoint(config),
         mcp_register: mcp_register_endpoint(config),
+        get_mcp_session: mcp_get_session_endpoint(config),
+        o_auth_consent: oidc_consent_endpoint(config),
         mcp_jwks: mcp_jwks_endpoint(config)
       }
     end
@@ -103,9 +123,20 @@ module BetterAuth
       end
     end
 
-    def mcp_register_endpoint(_config)
+    def mcp_register_endpoint(config)
       Endpoint.new(path: "/mcp/register", method: "POST") do |ctx|
-        ctx.json(OAuthProtocol.create_client(ctx, model: "oauthApplication", body: ctx.body, default_auth_method: "none"))
+        mcp_set_cors_headers(ctx)
+        ctx.json(
+          OAuthProtocol.create_client(
+            ctx,
+            model: "oauthApplication",
+            body: ctx.body,
+            default_auth_method: "none",
+            store_client_secret: config[:store_client_secret] || "plain"
+          ),
+          status: 201,
+          headers: {"Cache-Control" => "no-store", "Pragma" => "no-cache"}
+        )
       end
     end
 
@@ -140,9 +171,51 @@ module BetterAuth
     def mcp_authorization_redirect(ctx, config, query, session)
       query = OAuthProtocol.stringify_keys(query)
       query["prompt"] = mcp_prompt_without_login(query["prompt"]) if query.key?("prompt")
+      prompts = OIDCProvider.parse_prompt(query["prompt"])
+      unless query["client_id"]
+        raise ctx.redirect("#{ctx.context.base_url}/error?error=invalid_client")
+      end
+      unless query["response_type"]
+        raise ctx.redirect(OAuthProtocol.redirect_uri_with_params(ctx.context.base_url + "/error", error: "invalid_request", error_description: "response_type is required"))
+      end
       client = OAuthProtocol.find_client(ctx, "oauthApplication", query["client_id"])
-      raise APIError.new("BAD_REQUEST", message: "invalid_client") unless client
+      raise ctx.redirect("#{ctx.context.base_url}/error?error=invalid_client") unless client
       OAuthProtocol.validate_redirect_uri!(client, query["redirect_uri"])
+      client_data = OAuthProtocol.stringify_keys(client)
+      raise ctx.redirect("#{ctx.context.base_url}/error?error=client_disabled") if client_data["disabled"]
+      unless query["response_type"] == "code"
+        raise ctx.redirect("#{ctx.context.base_url}/error?error=unsupported_response_type")
+      end
+
+      scopes = OAuthProtocol.parse_scopes(query["scope"] || config[:default_scope])
+      invalid_scopes = scopes.reject { |scope| config[:scopes].include?(scope) }
+      unless invalid_scopes.empty?
+        redirect = OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], error: "invalid_scope", error_description: "The following scopes are invalid: #{invalid_scopes.join(", ")}", state: query["state"])
+        raise ctx.redirect(redirect)
+      end
+      if config[:require_pkce] && (query["code_challenge"].to_s.empty? || query["code_challenge_method"].to_s.empty?)
+        redirect = OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], error: "invalid_request", error_description: "pkce is required", state: query["state"])
+        raise ctx.redirect(redirect)
+      end
+      challenge_method = query["code_challenge_method"].to_s
+      if challenge_method.empty?
+        query["code_challenge_method"] = "plain" if query["code_challenge"]
+      elsif !valid_code_challenge_method?(challenge_method, config)
+        redirect = OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], error: "invalid_request", error_description: "invalid code_challenge method", state: query["state"])
+        raise ctx.redirect(redirect)
+      end
+
+      if prompts.include?("consent")
+        consent_code = Crypto.random_string(32)
+        config[:store][:consents][consent_code] = {
+          query: query,
+          session: session,
+          client: client,
+          scopes: scopes,
+          expires_at: Time.now + config[:code_expires_in].to_i
+        }
+        raise ctx.redirect(OAuthProtocol.redirect_uri_with_params(config[:consent_page], consent_code: consent_code, client_id: client_data["clientId"], scope: OAuthProtocol.scope_string(scopes)))
+      end
 
       code = Crypto.random_string(32)
       OAuthProtocol.store_code(
@@ -151,7 +224,7 @@ module BetterAuth
         client_id: query["client_id"],
         redirect_uri: query["redirect_uri"],
         session: session,
-        scopes: query["scope"] || "openid",
+        scopes: scopes,
         code_challenge: query["code_challenge"],
         code_challenge_method: query["code_challenge_method"]
       )
@@ -173,23 +246,21 @@ module BetterAuth
 
     def mcp_token_endpoint(config)
       Endpoint.new(path: "/mcp/token", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
-        ctx.set_header("Access-Control-Allow-Origin", "*")
-        ctx.set_header("Access-Control-Allow-Methods", "POST, OPTIONS")
-        ctx.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        mcp_set_cors_headers(ctx)
         body = OAuthProtocol.stringify_keys(ctx.body)
-        client = if body["client_id"]
-          OAuthProtocol.find_client(ctx, "oauthApplication", body["client_id"])
-        else
-          OAuthProtocol.authenticate_client!(ctx, "oauthApplication")
-        end
+        client = mcp_authenticate_token_client!(ctx, body, config)
         raise APIError.new("UNAUTHORIZED", message: "invalid_client") unless client
 
         response = case body["grant_type"]
         when OAuthProtocol::AUTH_CODE_GRANT
+          client_data = OAuthProtocol.stringify_keys(client)
+          if client_data["type"] == "public" && body["code_verifier"].to_s.empty?
+            raise APIError.new("BAD_REQUEST", message: "invalid_request")
+          end
           code = OAuthProtocol.consume_code!(
             config[:store],
             body["code"],
-            client_id: body["client_id"],
+            client_id: client_data["clientId"],
             redirect_uri: body["redirect_uri"],
             code_verifier: body["code_verifier"]
           )
@@ -201,14 +272,15 @@ module BetterAuth
             session: code[:session],
             scopes: code[:scopes],
             include_refresh: code[:scopes].include?("offline_access"),
-            issuer: OAuthProtocol.issuer(ctx)
+            issuer: OAuthProtocol.issuer(ctx),
+            access_token_expires_in: config[:access_token_expires_in]
           )
         when OAuthProtocol::REFRESH_GRANT
-          OAuthProtocol.refresh_tokens(ctx, config[:store], model: "oauthAccessToken", client: client, refresh_token: body["refresh_token"], scopes: body["scope"], issuer: OAuthProtocol.issuer(ctx))
+          OAuthProtocol.refresh_tokens(ctx, config[:store], model: "oauthAccessToken", client: client, refresh_token: body["refresh_token"], scopes: body["scope"], issuer: OAuthProtocol.issuer(ctx), access_token_expires_in: config[:access_token_expires_in])
         else
           raise APIError.new("BAD_REQUEST", message: "unsupported_grant_type")
         end
-        ctx.json(response)
+        ctx.json(response, headers: {"Cache-Control" => "no-store", "Pragma" => "no-cache"})
       end
     end
 
@@ -218,12 +290,53 @@ module BetterAuth
       end
     end
 
+    def mcp_get_session_endpoint(config)
+      Endpoint.new(path: "/mcp/get-session", method: "GET") do |ctx|
+        authorization = ctx.headers["authorization"].to_s
+        token = authorization.start_with?("Bearer ") ? authorization.delete_prefix("Bearer ").strip : ""
+        next ctx.json(nil) if token.empty?
+
+        ctx.json(OAuthProtocol.token_record(config[:store], token))
+      end
+    end
+
     def mcp_jwks_endpoint(config)
       Endpoint.new(path: "/mcp/jwks", method: "GET") do |ctx|
         jwt_config = config[:jwt] || {}
         create_jwk(ctx, jwt_config) if all_jwks(ctx, jwt_config).empty?
         ctx.json({keys: public_jwks(ctx, jwt_config).map { |key| public_jwk(key, jwt_config) }})
       end
+    end
+
+    def mcp_normalize_config(config)
+      oidc = normalize_hash(config[:oidc_config] || {})
+      merged = config.merge(oidc.except(:metadata))
+      merged[:scopes] = (Array(config[:scopes]) + Array(oidc[:scopes])).compact.map(&:to_s).uniq
+      merged
+    end
+
+    def mcp_set_cors_headers(ctx)
+      ctx.set_header("Access-Control-Allow-Origin", "*")
+      ctx.set_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+      ctx.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+      ctx.set_header("Access-Control-Max-Age", "86400")
+    end
+
+    def mcp_authenticate_token_client!(ctx, body, config)
+      authorization = ctx.headers["authorization"].to_s
+      if authorization.start_with?("Basic ") && body["client_id"].to_s.empty?
+        return OAuthProtocol.authenticate_client!(ctx, "oauthApplication", store_client_secret: config[:store_client_secret] || "plain")
+      end
+
+      client = OAuthProtocol.find_client(ctx, "oauthApplication", body["client_id"])
+      raise APIError.new("UNAUTHORIZED", message: "invalid_client") unless client
+
+      data = OAuthProtocol.stringify_keys(client)
+      method = data["tokenEndpointAuthMethod"] || "client_secret_basic"
+      if method != "none" && !OAuthProtocol.verify_client_secret(ctx, data["clientSecret"], body["client_secret"], config[:store_client_secret] || "plain")
+        raise APIError.new("UNAUTHORIZED", message: "invalid_client")
+      end
+      client
     end
   end
 end
