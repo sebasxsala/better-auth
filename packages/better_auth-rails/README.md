@@ -139,6 +139,8 @@ export const authClient = createAuthClient({
 Plugin schemas are included in generated migrations through the same configuration:
 
 ```ruby
+require "better_auth/api_key"
+
 BetterAuth::Rails.configure do |config|
   config.plugins = [
     BetterAuth::Plugins.api_key

@@ -13,6 +13,7 @@ This page documents the current Ruby port behavior. Ruby uses snake_case option 
 
 ```ruby title="config/auth.rb"
 require "better_auth"
+require "better_auth/api_key"
 
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
@@ -69,7 +70,8 @@ Current Ruby options accepted by `BetterAuth::Plugins.api_key`:
 
 ## Support Notes
 
-- The examples above are based on Ruby plugin source and tests in `packages/better_auth`.
+- Install `gem "better_auth-api-key"` before requiring `better_auth/api_key`.
+- The examples above are based on Ruby plugin source and tests in `packages/better_auth-api-key`.
 - If an upstream section is not represented here, treat it as not yet documented or not yet supported by the Ruby port until the matching Ruby implementation exists.
 
 {/* Upstream guide is preserved in upstream/docs/content/docs/plugins/api-key.mdx. */}
