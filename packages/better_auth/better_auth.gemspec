@@ -27,6 +27,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   # Core runtime dependencies
+  spec.add_dependency "base64", ">= 0.2", "< 1.0"
   spec.add_dependency "rack", "~> 3.0"
   spec.add_dependency "json", "~> 2.0"
   spec.add_dependency "jwt", "~> 2.8"

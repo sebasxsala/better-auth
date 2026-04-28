@@ -24,6 +24,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_dependency "better_auth", "~> 0.1"
+  spec.add_dependency "base64", ">= 0.2", "< 1.0"
   spec.add_dependency "ruby-saml", "~> 1.18", ">= 1.18.1"
 
   spec.add_development_dependency "bundler", "~> 2.5"

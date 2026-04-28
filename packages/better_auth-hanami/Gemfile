@@ -2,6 +2,8 @@
 
 source "https://rubygems.org"
 
+ruby file: "../better_auth/.ruby-version"
+
 gemspec
 
 gem "better_auth", path: "../better_auth"
