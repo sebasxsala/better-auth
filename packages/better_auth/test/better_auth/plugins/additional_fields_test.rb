@@ -32,17 +32,122 @@ class BetterAuthPluginsAdditionalFieldsTest < Minitest::Test
     assert_equal "Fieldy", updated[:user]["nickname"]
   end
 
+  def test_additional_fields_validate_input_and_refresh_user_cookie
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.additional_fields(
+          user: {
+            requiredField: {type: "string", required: true},
+            lockedField: {type: "string", required: false, input: false},
+            nickname: {type: "string", required: false}
+          }
+        )
+      ]
+    )
+
+    missing = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_up_email(body: {email: "missing@example.com", password: "password123", name: "Missing"})
+    end
+    assert_equal 400, missing.status_code
+    assert_equal "requiredField is required", missing.message
+
+    locked = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_up_email(body: {email: "locked@example.com", password: "password123", name: "Locked", requiredField: "ok", lockedField: "nope"})
+    end
+    assert_equal 400, locked.status_code
+    assert_equal "lockedField is not allowed to be set", locked.message
+
+    result = auth.api.sign_up_email(
+      body: {email: "refresh@example.com", password: "password123", name: "Refresh", requiredField: "ok"},
+      return_headers: true
+    )
+    cookie = cookie_header(result.fetch(:headers).fetch("set-cookie"))
+    update = auth.api.update_user(headers: {"cookie" => cookie}, body: {nickname: "Fresh"}, return_headers: true)
+    refreshed_cookie = [cookie, cookie_header(update.fetch(:headers).fetch("set-cookie"))].join("; ")
+
+    session = auth.api.get_session(headers: {"cookie" => refreshed_cookie})
+    assert_equal "Fresh", session.fetch(:user).fetch("nickname")
+
+    empty = assert_raises(BetterAuth::APIError) do
+      auth.api.update_user(headers: {"cookie" => refreshed_cookie}, body: {unknownField: "ignored"})
+    end
+    assert_equal 400, empty.status_code
+    assert_equal "No fields to update", empty.message
+  end
+
+  def test_session_additional_fields_update_and_secondary_storage_defaults
+    storage = MemoryStorage.new
+    auth = build_auth(
+      secondary_storage: storage,
+      database_hooks: {
+        session: {
+          create: {
+            before: ->(_session, _ctx) { {data: {hookField: "from-hook"}} }
+          }
+        }
+      },
+      plugins: [
+        BetterAuth::Plugins.additional_fields(
+          session: {
+            deviceName: {type: "string", required: false, default_value: "web"},
+            hookField: {type: "string", required: false},
+            lockedSessionField: {type: "string", required: false, input: false}
+          }
+        )
+      ]
+    )
+
+    cookie = sign_up_cookie(auth, email: "session-fields@example.com")
+    session = auth.api.get_session(headers: {"cookie" => cookie})
+    assert_equal "web", session.fetch(:session).fetch("deviceName")
+    assert_equal "from-hook", session.fetch(:session).fetch("hookField")
+
+    locked = assert_raises(BetterAuth::APIError) do
+      auth.api.update_session(headers: {"cookie" => cookie}, body: {lockedSessionField: "nope"})
+    end
+    assert_equal 400, locked.status_code
+
+    update = auth.api.update_session(headers: {"cookie" => cookie}, body: {deviceName: "mobile"}, return_headers: true)
+    updated_cookie = [cookie, cookie_header(update.fetch(:headers).fetch("set-cookie"))].join("; ")
+    updated = auth.api.get_session(headers: {"cookie" => updated_cookie})
+    assert_equal "mobile", updated.fetch(:session).fetch("deviceName")
+  end
+
   private
 
   def build_auth(options = {})
     BetterAuth.auth({base_url: "http://localhost:3000", secret: SECRET, database: :memory}.merge(options))
   end
 
-  def sign_up_cookie(auth, email:, favorite_color:)
+  def sign_up_cookie(auth, email:, favorite_color: nil)
+    body = {email: email, password: "password123", name: "Fields User"}
+    body[:favoriteColor] = favorite_color if favorite_color
     _status, headers, _body = auth.api.sign_up_email(
-      body: {email: email, password: "password123", name: "Fields User", favoriteColor: favorite_color},
+      body: body,
       as_response: true
     )
-    headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")
+    cookie_header(headers.fetch("set-cookie"))
+  end
+
+  def cookie_header(set_cookie)
+    set_cookie.to_s.lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  class MemoryStorage
+    def initialize
+      @store = {}
+    end
+
+    def set(key, value, _ttl = nil)
+      @store[key] = value
+    end
+
+    def get(key)
+      @store[key]
+    end
+
+    def delete(key)
+      @store.delete(key)
+    end
   end
 end

@@ -18,8 +18,13 @@ class BetterAuthPluginsOrganizationTest < Minitest::Test
     assert_equal "Acme Inc", created.fetch("name")
     assert_equal "acme", created.fetch("slug")
     assert_equal({"plan" => "pro"}, created.fetch("metadata"))
+    assert_equal 1, created.fetch(:members).length
 
-    assert_equal false, auth.api.check_organization_slug(body: {slug: "acme"}).fetch(:available)
+    assert_equal true, auth.api.check_organization_slug(body: {slug: "acme-open"}).fetch(:status)
+    taken = assert_raises(BetterAuth::APIError) do
+      auth.api.check_organization_slug(body: {slug: "acme"})
+    end
+    assert_equal 400, taken.status_code
     assert_equal ["acme"], auth.api.list_organizations(headers: {"cookie" => cookie}).map { |org| org.fetch("slug") }
 
     updated = auth.api.update_organization(
@@ -77,6 +82,66 @@ class BetterAuthPluginsOrganizationTest < Minitest::Test
     assert_equal({status: true}, removed)
   end
 
+  def test_create_organization_sets_active_and_supports_internal_user_id
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "active-owner@example.com")
+    owner = auth.api.get_session(headers: {"cookie" => cookie}).fetch(:user)
+
+    created = auth.api.create_organization(
+      headers: {"cookie" => cookie},
+      body: {name: "Active Org", slug: "active-org"},
+      return_headers: true
+    )
+    created_cookie = [cookie, cookie_header(created.fetch(:headers).fetch("set-cookie"))].join("; ")
+    session = auth.api.get_session(headers: {"cookie" => created_cookie})
+    assert_equal created.fetch(:response).fetch("id"), session.fetch(:session).fetch("activeOrganizationId")
+    assert created.fetch(:response).fetch(:members).any? { |member| member.fetch("userId") == owner.fetch("id") }
+
+    internal = auth.api.create_organization(body: {name: "Internal Org", slug: "internal-org", userId: owner.fetch("id")})
+    assert_equal "internal-org", internal.fetch("slug")
+    assert internal.fetch(:members).any? { |member| member.fetch("userId") == owner.fetch("id") }
+
+    kept = auth.api.create_organization(
+      headers: {"cookie" => created_cookie},
+      body: {name: "Kept Org", slug: "kept-org", keepCurrentActiveOrganization: true},
+      return_headers: true
+    )
+    refute kept.fetch(:headers).key?("set-cookie")
+    unchanged = auth.api.get_session(headers: {"cookie" => created_cookie})
+    assert_equal created.fetch(:response).fetch("id"), unchanged.fetch(:session).fetch("activeOrganizationId")
+  end
+
+  def test_invitation_security_edges_and_limits
+    auth = build_auth(plugins: [BetterAuth::Plugins.organization(invitation_limit: 1)])
+    owner_cookie = sign_up_cookie(auth, email: "invite-owner@example.com")
+    invitee_cookie = sign_up_cookie(auth, email: "invitee@example.com")
+    other_cookie = sign_up_cookie(auth, email: "other-invitee@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Invites", slug: "invites"})
+
+    invalid_email = assert_raises(BetterAuth::APIError) do
+      auth.api.create_invitation(headers: {"cookie" => owner_cookie}, body: {organizationId: organization.fetch("id"), email: "bad-email", role: "member"})
+    end
+    assert_equal 400, invalid_email.status_code
+
+    invitation = auth.api.create_invitation(headers: {"cookie" => owner_cookie}, body: {organizationId: organization.fetch("id"), email: "invitee@example.com", role: "member"})
+
+    duplicate = assert_raises(BetterAuth::APIError) do
+      auth.api.create_invitation(headers: {"cookie" => owner_cookie}, body: {organizationId: organization.fetch("id"), email: "INVITEE@example.com", role: "member"})
+    end
+    assert_equal 409, duplicate.status_code
+
+    wrong_recipient = assert_raises(BetterAuth::APIError) do
+      auth.api.accept_invitation(headers: {"cookie" => other_cookie}, body: {invitationId: invitation.fetch("id")})
+    end
+    assert_equal 403, wrong_recipient.status_code
+
+    auth.context.adapter.update(model: "invitation", where: [{field: "id", value: invitation.fetch("id")}], update: {expiresAt: Time.now - 60})
+    expired = assert_raises(BetterAuth::APIError) do
+      auth.api.accept_invitation(headers: {"cookie" => invitee_cookie}, body: {invitationId: invitation.fetch("id")})
+    end
+    assert_equal 400, expired.status_code
+  end
+
   def test_teams_and_dynamic_roles
     ac = BetterAuth::Plugins.create_access_control(
       organization: ["update", "delete"],
@@ -107,6 +172,28 @@ class BetterAuthPluginsOrganizationTest < Minitest::Test
       headers: {"cookie" => cookie},
       body: {organizationId: organization.fetch("id"), permissions: {organization: ["delete"]}}
     ).fetch(:success)
+  end
+
+  def test_team_limits_membership_checks_and_active_team_clear
+    auth = build_auth(plugins: [BetterAuth::Plugins.organization(teams: {enabled: true, maximum_teams: 1, maximum_members_per_team: 1, default_team: {enabled: false}})])
+    owner_cookie = sign_up_cookie(auth, email: "team-limit-owner@example.com")
+    other_cookie = sign_up_cookie(auth, email: "team-limit-other@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Team Limit", slug: "team-limit"})
+    team = auth.api.create_team(headers: {"cookie" => owner_cookie}, body: {organizationId: organization.fetch("id"), name: "One"})
+
+    too_many = assert_raises(BetterAuth::APIError) do
+      auth.api.create_team(headers: {"cookie" => owner_cookie}, body: {organizationId: organization.fetch("id"), name: "Two"})
+    end
+    assert_equal 403, too_many.status_code
+
+    not_member = assert_raises(BetterAuth::APIError) do
+      auth.api.set_active_team(headers: {"cookie" => other_cookie}, body: {teamId: team.fetch("id")})
+    end
+    assert_equal 403, not_member.status_code
+
+    cleared = auth.api.set_active_team(headers: {"cookie" => owner_cookie}, body: {teamId: nil}, return_headers: true)
+    cleared_cookie = [owner_cookie, cookie_header(cleared.fetch(:headers).fetch("set-cookie"))].join("; ")
+    assert_nil auth.api.get_session(headers: {"cookie" => cleared_cookie}).fetch(:session)["activeTeamId"]
   end
 
   def test_dynamic_access_control_rejects_invalid_and_assigned_roles
@@ -166,6 +253,27 @@ class BetterAuthPluginsOrganizationTest < Minitest::Test
     end
     assert_equal 400, assigned.status_code
     assert_equal BetterAuth::Plugins::ORGANIZATION_ERROR_CODES.fetch("ROLE_IS_ASSIGNED_TO_MEMBERS"), assigned.message
+  end
+
+  def test_dynamic_access_control_merges_database_permissions_with_builtin_roles
+    ac = BetterAuth::Plugins.create_access_control(
+      organization: ["update", "delete"],
+      member: ["create", "update", "delete"],
+      invitation: ["create", "cancel"],
+      team: ["create", "update", "delete"],
+      ac: ["create", "read", "update", "delete"],
+      project: ["read"]
+    )
+    auth = build_auth(plugins: [BetterAuth::Plugins.organization(dynamic_access_control: {enabled: true}, ac: ac)])
+    cookie = sign_up_cookie(auth, email: "merge-owner@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Merge", slug: "merge"})
+
+    auth.context.adapter.create(model: "organizationRole", data: {organizationId: organization.fetch("id"), role: "owner", permission: JSON.generate(project: ["read"])})
+
+    assert_equal true, auth.api.has_permission(
+      headers: {"cookie" => cookie},
+      body: {organizationId: organization.fetch("id"), permissions: {organization: ["delete"], project: ["read"]}}
+    ).fetch(:success)
   end
 
   def test_additional_fields_and_organization_hooks

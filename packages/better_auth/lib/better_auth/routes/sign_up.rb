@@ -95,7 +95,7 @@ module BetterAuth
 
     def self.create_sign_up_user(ctx, body, email, name, image)
       reserved = %w[email password name image callbackURL callbackUrl callback_url rememberMe remember_me]
-      additional = body.except(*reserved)
+      additional = parse_declared_input(ctx, "user", body.except(*reserved), allowed_base: [])
       ctx.context.internal_adapter.create_user(
         additional.merge(
           "email" => email.downcase,

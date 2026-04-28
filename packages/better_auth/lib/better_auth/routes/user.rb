@@ -8,9 +8,11 @@ module BetterAuth
         body = normalize_hash(ctx.body)
         raise APIError.new("BAD_REQUEST", message: "Body must be an object") unless body.is_a?(Hash)
         raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["EMAIL_CAN_NOT_BE_UPDATED"]) if body.key?("email")
-        raise APIError.new("BAD_REQUEST", message: "No fields to update") if body.empty?
+        update = parse_declared_input(ctx, "user", body, allowed_base: ["name", "image"])
+        raise APIError.new("BAD_REQUEST", message: "No fields to update") if update.empty?
 
-        ctx.context.internal_adapter.update_user(session[:user]["id"], body)
+        updated = ctx.context.internal_adapter.update_user(session[:user]["id"], update)
+        Cookies.set_session_cookie(ctx, {session: session[:session], user: updated}, Cookies.dont_remember?(ctx))
         ctx.json({status: true})
       end
     end
@@ -146,6 +148,46 @@ module BetterAuth
       ctx.context.internal_adapter.delete_sessions(session[:user]["id"])
       Cookies.delete_session_cookie(ctx)
       call_option(config[:after_delete], session[:user], ctx.request)
+    end
+
+    def self.parse_declared_input(ctx, model, data, allowed_base: [])
+      input = normalize_hash(data || {})
+      table = Schema.auth_tables(ctx.context.options)[model.to_s]
+      fields = table ? table.fetch(:fields) : {}
+      additional = ctx.context.options.public_send(model.to_sym)[:additional_fields] || {}
+      fields = fields.merge(additional.each_with_object({}) { |(key, value), result| result[Schema.storage_key(key)] = value }) if model.to_s == "session"
+      declared_fields = fields.keys - core_model_fields(model)
+      allowed = (Array(allowed_base).map { |field| Schema.storage_key(field) } + declared_fields).uniq
+
+      input.each_with_object({}) do |(field, value), result|
+        next unless fields.key?(field)
+        next unless allowed.include?(field)
+
+        attributes = fields.fetch(field)
+        if attributes[:input] == false
+          raise APIError.new("BAD_REQUEST", message: "#{field} is not allowed to be set")
+        end
+
+        result[field] = coerce_input_value(value, attributes)
+      end
+    end
+
+    def self.coerce_input_value(value, attributes)
+      return value if value.nil?
+      return Time.parse(value) if attributes[:type] == "date" && value.is_a?(String)
+
+      value
+    end
+
+    def self.core_model_fields(model)
+      case model.to_s
+      when "user"
+        %w[id name email emailVerified image createdAt updatedAt]
+      when "session"
+        %w[id expiresAt token ipAddress userAgent userId createdAt updatedAt]
+      else
+        %w[id createdAt updatedAt]
+      end
     end
   end
 end

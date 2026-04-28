@@ -28,6 +28,19 @@ module BetterAuth
       end
     end
 
+    def self.update_session
+      Endpoint.new(path: "/update-session", method: "POST") do |ctx|
+        session = current_session(ctx, sensitive: true)
+        body = Routes.parse_declared_input(ctx, "session", ctx.body, allowed_base: [])
+        raise APIError.new("BAD_REQUEST", message: "No fields to update") if body.empty?
+
+        updated = ctx.context.internal_adapter.update_session(session[:session]["token"], body)
+        merged = session[:session].merge(updated || body)
+        Cookies.set_session_cookie(ctx, {session: merged, user: session[:user]}, Cookies.dont_remember?(ctx))
+        ctx.json({status: true})
+      end
+    end
+
     def self.revoke_session
       Endpoint.new(path: "/revoke-session", method: "POST") do |ctx|
         session = current_session(ctx, sensitive: true)

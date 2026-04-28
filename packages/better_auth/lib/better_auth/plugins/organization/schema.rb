@@ -11,7 +11,7 @@ module BetterAuth
             model_name: "organizations",
             fields: {
               name: {type: "string", required: true, sortable: true},
-              slug: {type: "string", required: true, unique: true, sortable: true},
+              slug: {type: "string", required: true, unique: true, sortable: true, index: true},
               logo: {type: "string", required: false},
               metadata: {type: "string", required: false},
               createdAt: {type: "date", required: true, default_value: -> { Time.now }},
@@ -23,7 +23,7 @@ module BetterAuth
             fields: {
               organizationId: {type: "string", required: true, references: {model: "organization", field: "id"}, index: true},
               userId: {type: "string", required: true, references: {model: "user", field: "id"}, index: true},
-              role: {type: "string", required: true, default_value: "member"},
+              role: {type: "string", required: true, default_value: "member", sortable: true},
               createdAt: {type: "date", required: true, default_value: -> { Time.now }}
             }
           },
@@ -31,13 +31,12 @@ module BetterAuth
             model_name: "invitations",
             fields: {
               organizationId: {type: "string", required: true, references: {model: "organization", field: "id"}, index: true},
-              email: {type: "string", required: true, sortable: true},
+              email: {type: "string", required: true, sortable: true, index: true},
               role: {type: "string", required: true, sortable: true},
               status: {type: "string", required: true, sortable: true, default_value: "pending"},
-              expiresAt: {type: "date", required: false},
+              expiresAt: {type: "date", required: true},
               createdAt: {type: "date", required: true, default_value: -> { Time.now }},
-              inviterId: {type: "string", required: true, references: {model: "user", field: "id"}},
-              teamId: {type: "string", required: false, sortable: true}
+              inviterId: {type: "string", required: true, references: {model: "user", field: "id"}}
             }
           },
           session: {
@@ -65,6 +64,7 @@ module BetterAuth
               createdAt: {type: "date", required: false, default_value: -> { Time.now }}
             }
           }
+          schema[:invitation][:fields][:teamId] = {type: "string", required: false, sortable: true}
           schema[:session][:fields][:activeTeamId] = {type: "string", required: false}
         end
 
@@ -73,7 +73,7 @@ module BetterAuth
             model_name: "organization_roles",
             fields: {
               organizationId: {type: "string", required: true, references: {model: "organization", field: "id"}, index: true},
-              role: {type: "string", required: true},
+              role: {type: "string", required: true, index: true},
               permission: {type: "string", required: true},
               createdAt: {type: "date", required: true, default_value: -> { Time.now }},
               updatedAt: {type: "date", required: false, on_update: -> { Time.now }}

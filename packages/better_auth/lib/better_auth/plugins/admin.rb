@@ -29,6 +29,10 @@ module BetterAuth
     }.freeze
 
     ADMIN_DEFAULT_STATEMENTS = {
+      user: ["create", "list", "set-role", "ban", "impersonate", "impersonate-admins", "delete", "set-password", "get", "update"],
+      session: ["list", "revoke", "delete"]
+    }.freeze
+    ADMIN_DEFAULT_ROLE_STATEMENTS = {
       user: ["create", "list", "set-role", "ban", "impersonate", "delete", "set-password", "get", "update"],
       session: ["list", "revoke", "delete"]
     }.freeze
@@ -73,13 +77,15 @@ module BetterAuth
 
     def admin_config(options)
       config = normalize_hash(options)
+      config[:roles_configured] = config.key?(:roles)
       config[:default_role] ||= "user"
       config[:admin_roles] = Array(config[:admin_roles] || ["admin"]).flat_map { |role| role.to_s.split(",") }
       config[:banned_user_message] ||= "You have been banned from this application. Please contact support if you believe this is an error."
       config[:impersonation_session_duration] ||= 60 * 60
       config[:ac] ||= create_access_control(ADMIN_DEFAULT_STATEMENTS)
       config[:roles] ||= admin_default_roles(config)
-      invalid = config[:admin_roles].reject { |role| config[:roles].key?(role) || config[:roles].key?(role.to_sym) }
+      valid_roles = config[:roles].keys.map { |role| role.to_s.downcase }
+      invalid = config[:admin_roles].reject { |role| valid_roles.include?(role.to_s.downcase) }
       raise Error, "Invalid admin roles: #{invalid.join(", ")}. Admin roles must be defined in the 'roles' configuration." if invalid.any?
 
       config
@@ -88,7 +94,7 @@ module BetterAuth
     def admin_default_roles(config = {})
       ac = config[:ac] || create_access_control(ADMIN_DEFAULT_STATEMENTS)
       {
-        "admin" => ac.new_role(ADMIN_DEFAULT_STATEMENTS),
+        "admin" => ac.new_role(ADMIN_DEFAULT_ROLE_STATEMENTS),
         "user" => ac.new_role(user: [], session: [])
       }
     end
@@ -111,12 +117,13 @@ module BetterAuth
               next unless user && user["banned"]
 
               if user["banExpires"] && Time.parse(user["banExpires"].to_s) < Time.now
-                ctx.context.internal_adapter.update_user(user["id"], banned: false, banReason: nil, banExpires: nil)
+                ctx.context.internal_adapter.update_user(user["id"], banned: false, banReason: nil, banExpires: nil, updatedAt: Time.now)
                 next
               end
 
               if ctx.path.to_s.start_with?("/callback", "/oauth2/callback")
-                url = "#{ctx.context.base_url}/error?error=banned&error_description=#{URI.encode_www_form_component(config[:banned_user_message])}"
+                error_url = ctx.context.options.on_api_error[:error_url] || "#{ctx.context.base_url}/error"
+                url = "#{error_url}?error=banned&error_description=#{URI.encode_www_form_component(config[:banned_user_message])}"
                 raise ctx.redirect(url)
               end
 
@@ -135,7 +142,7 @@ module BetterAuth
         raise APIError.new("BAD_REQUEST", message: "userId is required") if user_id.empty?
         update = {role: admin_validate_roles!(body[:role], config)}
         user = ctx.context.internal_adapter.update_user(user_id, update)
-        ctx.json(Schema.parse_output(ctx.context.options, "user", user || {}))
+        ctx.json({user: Schema.parse_output(ctx.context.options, "user", user || {})})
       end
     end
 
@@ -236,7 +243,7 @@ module BetterAuth
         raise APIError.new("NOT_FOUND", message: BASE_ERROR_CODES.fetch("USER_NOT_FOUND")) unless found
         raise APIError.new("BAD_REQUEST", message: ADMIN_ERROR_CODES.fetch("YOU_CANNOT_BAN_YOURSELF")) if body[:user_id] == session[:user]["id"]
         expires_in = body[:ban_expires_in] || config[:default_ban_expires_in]
-        user = ctx.context.internal_adapter.update_user(body[:user_id], banned: true, banReason: body[:ban_reason] || config[:default_ban_reason] || "No reason", banExpires: expires_in ? Time.now + expires_in.to_i : nil)
+        user = ctx.context.internal_adapter.update_user(body[:user_id], banned: true, banReason: body[:ban_reason] || config[:default_ban_reason] || "No reason", banExpires: expires_in ? Time.now + expires_in.to_i : nil, updatedAt: Time.now)
         ctx.context.internal_adapter.delete_sessions(body[:user_id])
         ctx.json({user: Schema.parse_output(ctx.context.options, "user", user)})
       end
@@ -245,7 +252,7 @@ module BetterAuth
     def admin_unban_user_endpoint(config)
       Endpoint.new(path: "/admin/unban-user", method: "POST") do |ctx|
         admin_require_permission!(ctx, config, {user: ["ban"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_BAN_USERS"))
-        user = ctx.context.internal_adapter.update_user(normalize_hash(ctx.body)[:user_id], banned: false, banReason: nil, banExpires: nil)
+        user = ctx.context.internal_adapter.update_user(normalize_hash(ctx.body)[:user_id], banned: false, banReason: nil, banExpires: nil, updatedAt: Time.now)
         ctx.json({user: Schema.parse_output(ctx.context.options, "user", user)})
       end
     end
@@ -256,7 +263,9 @@ module BetterAuth
         body = normalize_hash(ctx.body)
         target = ctx.context.internal_adapter.find_user_by_id(body[:user_id])
         raise APIError.new("NOT_FOUND", message: "User not found") unless target
-        if !config[:allow_impersonating_admins] && admin_user?(target, config)
+        can_impersonate_admins = config[:allow_impersonating_admins] ||
+          admin_permission?(session[:user], session[:user]["role"], {user: ["impersonate-admins"]}, config)
+        if !can_impersonate_admins && admin_user?(target, config)
           raise APIError.new("FORBIDDEN", message: ADMIN_ERROR_CODES.fetch("YOU_CANNOT_IMPERSONATE_ADMINS"))
         end
         impersonated = ctx.context.internal_adapter.create_session(target["id"], true, {impersonatedBy: session[:user]["id"], expiresAt: Time.now + config[:impersonation_session_duration].to_i}, true, ctx)
@@ -389,15 +398,17 @@ module BetterAuth
       return false unless permissions
 
       roles = (config[:roles] || admin_default_roles(config)).transform_keys(&:to_s)
-      role_string.to_s.split(",").any? do |role|
-        roles[role]&.authorize(permissions || {})&.fetch(:success, false)
+      selected_roles = role_string.to_s.empty? ? [config[:default_role].to_s] : role_string.to_s.split(",")
+      selected_roles.any? do |role|
+        admin_role_for(roles, role)&.authorize(permissions || {})&.fetch(:success, false)
       end
     end
 
     def admin_user?(user, config)
       return true if Array(config[:admin_user_ids]).map(&:to_s).include?(user["id"].to_s)
 
-      user["role"].to_s.split(",").any? { |role| config[:admin_roles].map(&:to_s).include?(role) }
+      admin_roles = config[:admin_roles].map { |role| role.to_s.downcase }
+      user["role"].to_s.split(",").any? { |role| admin_roles.include?(role.to_s.downcase) }
     end
 
     def admin_parse_roles(roles)
@@ -410,13 +421,19 @@ module BetterAuth
       end
 
       parsed = admin_parse_roles(roles)
-      defined_roles = (config[:roles] || {}).transform_keys(&:to_s)
-      invalid = parsed.split(",", -1).reject { |role| defined_roles.key?(role) }
-      if invalid.any?
-        raise APIError.new("BAD_REQUEST", message: ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_SET_NON_EXISTENT_VALUE"))
+      if config[:roles_configured]
+        defined_roles = (config[:roles] || {}).transform_keys(&:to_s)
+        invalid = parsed.split(",", -1).reject { |role| admin_role_for(defined_roles, role) }
+        if invalid.any?
+          raise APIError.new("BAD_REQUEST", message: ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_SET_NON_EXISTENT_VALUE"))
+        end
       end
 
       parsed
+    end
+
+    def admin_role_for(roles, role)
+      roles[role.to_s] || roles.find { |key, _value| key.to_s.downcase == role.to_s.downcase }&.last
     end
 
     def admin_user_where(query)

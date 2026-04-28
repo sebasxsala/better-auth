@@ -15,6 +15,7 @@ module BetterAuth
         sign_out: Routes.sign_out,
         get_session: Routes.get_session,
         list_sessions: Routes.list_sessions,
+        update_session: Routes.update_session,
         revoke_session: Routes.revoke_session,
         revoke_sessions: Routes.revoke_sessions,
         revoke_other_sessions: Routes.revoke_other_sessions,

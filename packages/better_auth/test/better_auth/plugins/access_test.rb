@@ -79,4 +79,30 @@ class BetterAuthPluginsAccessTest < Minitest::Test
     assert_equal false, failed.fetch(:success)
     assert_match(/billing/, failed.fetch(:error))
   end
+
+  def test_rejects_malformed_resource_requests
+    assert_raises(BetterAuth::Error) do
+      @role.authorize(project: {})
+    end
+
+    assert_raises(BetterAuth::Error) do
+      @role.authorize(project: {connector: "AND"})
+    end
+
+    assert_raises(BetterAuth::Error) do
+      @role.authorize(project: {actions: nil})
+    end
+  end
+
+  def test_accepts_lowercase_connectors_as_ruby_adaptation
+    response = @role.authorize({project: {connector: "or", actions: ["create", "delete-many"]}}, "and")
+
+    assert_equal true, response.fetch(:success)
+  end
+
+  def test_create_access_control_has_camel_case_alias
+    ac = BetterAuth::Plugins.createAccessControl(project: ["read"])
+
+    assert_equal true, ac.newRole(project: ["read"]).authorize(project: ["read"]).fetch(:success)
+  end
 end

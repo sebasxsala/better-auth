@@ -20,7 +20,14 @@ module BetterAuth
           success = if requested_actions.is_a?(Array)
             requested_actions.all? { |action| allowed_actions.include?(action.to_s) }
           elsif requested_actions.is_a?(Hash)
-            actions = Array(requested_actions["actions"] || requested_actions[:actions]).map(&:to_s)
+            unless requested_actions.key?("actions") || requested_actions.key?(:actions)
+              raise Error, "Invalid access control request"
+            end
+
+            raw_actions = requested_actions["actions"] || requested_actions[:actions]
+            raise Error, "Invalid access control request" if raw_actions.nil?
+
+            actions = Array(raw_actions).map(&:to_s)
             action_connector = (requested_actions["connector"] || requested_actions[:connector] || "AND").to_s.upcase
             if action_connector == "OR"
               actions.any? { |action| allowed_actions.include?(action) }
@@ -74,5 +81,7 @@ module BetterAuth
     def create_access_control(statements)
       AccessControl.new(statements)
     end
+
+    singleton_class.alias_method :createAccessControl, :create_access_control
   end
 end

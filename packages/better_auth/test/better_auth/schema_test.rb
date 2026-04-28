@@ -98,6 +98,31 @@ class BetterAuthSchemaTest < Minitest::Test
     assert_equal "string", schema["organization"][:fields]["name"][:type]
   end
 
+  def test_organization_schema_matches_upstream_conditionals
+    without_teams = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [BetterAuth::Plugins.organization]
+    )
+    base_schema = BetterAuth::Schema.auth_tables(without_teams)
+
+    refute base_schema["invitation"][:fields].key?("teamId")
+    assert_equal true, base_schema["invitation"][:fields]["expiresAt"][:required]
+    assert_equal true, base_schema["member"][:fields]["role"][:sortable]
+    assert_equal true, base_schema["organization"][:fields]["slug"][:index]
+    assert_equal true, base_schema["invitation"][:fields]["email"][:index]
+
+    with_teams = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [BetterAuth::Plugins.organization(teams: {enabled: true}, dynamic_access_control: {enabled: true})]
+    )
+    full_schema = BetterAuth::Schema.auth_tables(with_teams)
+
+    assert full_schema["invitation"][:fields].key?("teamId")
+    assert_equal true, full_schema["organizationRole"][:fields]["role"][:index]
+  end
+
   def test_plugin_schema_defaults_physical_table_names_to_snake_case
     config = BetterAuth::Configuration.new(
       secret: SECRET,

@@ -77,8 +77,9 @@ module BetterAuth
         data = override_all ? base.merge(override) : override.merge(base)
 
         custom = secondary_storage && lambda do |session_data|
-          store_session(session_data)
-          session_data
+          actual_session = apply_schema_create("session", session_data)
+          store_session(actual_session)
+          actual_session
         end
         execute_main = !secondary_storage || options.session[:store_session_in_database]
         created = hooks.create(data, "session", custom: custom, context: context)
@@ -288,6 +289,40 @@ module BetterAuth
         data.each_with_object({}) do |(key, value), result|
           result[Schema.storage_key(key)] = value
         end
+      end
+
+      def apply_schema_create(model, data)
+        fields = Schema.auth_tables(options)[model]&.fetch(:fields)
+        fields ||= session_additional_fields if model == "session"
+        output = stringify_keys(data)
+        fields.each do |field, attributes|
+          unless output.key?(field)
+            if attributes.key?(:default_value)
+              output[field] = resolve_default(attributes[:default_value])
+            elsif attributes[:required] && field != "id"
+              raise APIError.new("BAD_REQUEST", message: "#{field} is required")
+            end
+          end
+          output[field] = coerce_value(output[field], attributes) if output.key?(field)
+        end
+        output
+      end
+
+      def session_additional_fields
+        (options.session[:additional_fields] || {}).each_with_object({}) do |(key, value), result|
+          result[Schema.storage_key(key)] = value
+        end
+      end
+
+      def resolve_default(default)
+        default.respond_to?(:call) ? default.call : default
+      end
+
+      def coerce_value(value, attributes)
+        return value if value.nil?
+        return Time.parse(value) if attributes[:type] == "date" && value.is_a?(String)
+
+        value
       end
 
       def store_session(session)
