@@ -15,7 +15,7 @@ Status: Partial. Ruby now matches several server-visible pieces of upstream Open
 - Generates model schemas from `BetterAuth::Schema.auth_tables`.
 - Emits route entries from base and plugin endpoints, excluding hidden/server-only endpoints and the OpenAPI plugin's own private endpoints from the generated public document.
 - Emits upstream-compatible OpenAPI 3.1.1 document metadata, security schemes, global security, server URL, default tag metadata, default error responses, and `:param` to `{param}` path conversion.
-- Represents upstream Zod-derived request-body behavior through the generated Ruby schema contract for server-relevant routes, including nested `idToken`, OpenAPI 3.1 nullable arrays, defaulted `rememberMe`, and boolean optional fields.
+- Represents upstream Zod-derived request-body behavior through the generated Ruby schema contract for selected server-relevant routes, including nested `idToken`, OpenAPI 3.1 nullable arrays, defaulted `rememberMe`, boolean optional fields, and richer `/change-email` plus `/change-password` schemas.
 - Preserves model field defaults, generated-at-runtime defaults, `readOnly` fields, date-time formats, required fields, and additional user fields.
 
 ## Notes
@@ -30,6 +30,8 @@ Remaining parity gaps:
 - Exact Scalar reference HTML/configuration parity, including the upstream embedded configuration and favicon payload.
 
 2026-04-28 correction: previous wording overstated this as complete. The improved generator and tests should stay, but the status remains partial until the gaps above are closed.
+
+2026-04-28 progress: upstream `open-api.test.ts.snap` includes 30 base paths. Ruby now has richer upstream-style OpenAPI schemas for 5 of them (`/sign-in/email`, `/sign-in/social`, `/sign-up/email`, `/change-email`, `/change-password`) plus global document metadata, model metadata, security schemes, default errors, path-param conversion, disabled paths, and reference-page options. Roughly 25 base paths still need rich request/response schemas before exact snapshot parity is plausible.
 
 ## Testing
 

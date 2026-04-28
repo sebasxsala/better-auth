@@ -98,6 +98,65 @@ class BetterAuthPluginsOpenAPITest < Minitest::Test
     refute sign_up.fetch(:rememberMe).key?(:default)
   end
 
+  def test_open_api_matches_upstream_change_email_schema
+    auth = build_auth(plugins: [BetterAuth::Plugins.open_api])
+
+    schema = auth.api.generate_open_api_schema
+    operation = schema.dig(:paths, "/change-email", :post)
+    body_schema = operation.dig(:requestBody, :content, "application/json", :schema)
+
+    assert_nil operation[:description]
+    assert_equal "changeEmail", operation[:operationId]
+    assert_equal true, operation.dig(:requestBody, :required)
+    assert_equal ["newEmail"], body_schema[:required]
+    assert_equal(
+      {type: "string", description: "The new email address to set must be a valid email address"},
+      body_schema.dig(:properties, :newEmail)
+    )
+    assert_equal(
+      {type: ["string", "null"], description: "The URL to redirect to after email verification"},
+      body_schema.dig(:properties, :callbackURL)
+    )
+    assert_equal "Email change request processed successfully", operation.dig(:responses, "200", :description)
+    assert_equal "Unprocessable Entity. Email already exists", operation.dig(:responses, "422", :description)
+    assert_equal ["status"], operation.dig(:responses, "200", :content, "application/json", :schema, :required)
+    assert_equal(
+      {type: "boolean", description: "Indicates if the request was successful"},
+      operation.dig(:responses, "200", :content, "application/json", :schema, :properties, :status)
+    )
+  end
+
+  def test_open_api_matches_upstream_change_password_schema
+    auth = build_auth(plugins: [BetterAuth::Plugins.open_api])
+
+    schema = auth.api.generate_open_api_schema
+    operation = schema.dig(:paths, "/change-password", :post)
+    body_schema = operation.dig(:requestBody, :content, "application/json", :schema)
+    response_schema = operation.dig(:responses, "200", :content, "application/json", :schema)
+
+    assert_equal "Change the password of the user", operation[:description]
+    assert_equal "changePassword", operation[:operationId]
+    assert_equal true, operation.dig(:requestBody, :required)
+    assert_equal ["newPassword", "currentPassword"], body_schema[:required]
+    assert_equal(
+      {type: "string", description: "The new password to set"},
+      body_schema.dig(:properties, :newPassword)
+    )
+    assert_equal(
+      {type: ["boolean", "null"], description: "Must be a boolean value"},
+      body_schema.dig(:properties, :revokeOtherSessions)
+    )
+    assert_equal "Password successfully changed", operation.dig(:responses, "200", :description)
+    assert_equal ["user"], response_schema[:required]
+    assert_equal(
+      {type: "string", nullable: true, description: "New session token if other sessions were revoked"},
+      response_schema.dig(:properties, :token)
+    )
+    assert_equal "email", response_schema.dig(:properties, :user, :properties, :email, :format)
+    assert_equal "uri", response_schema.dig(:properties, :user, :properties, :image, :format)
+    assert_equal ["id", "email", "name", "emailVerified", "createdAt", "updatedAt"], response_schema.dig(:properties, :user, :required)
+  end
+
   def test_open_api_adds_default_operation_metadata_and_path_parameters
     auth = build_auth(plugins: [BetterAuth::Plugins.open_api])
 

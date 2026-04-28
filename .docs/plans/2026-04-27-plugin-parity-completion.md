@@ -79,7 +79,7 @@ These rows should stay `Partial` until the tasks below pass:
 | Plugin | Main upstream parity gaps |
 | --- | --- |
 | OIDC provider | Supported. Ruby server parity covers consent page and HTML consent behavior, prompt/max-age matrix, JWT plugin algorithm negotiation, plain/hashed/encrypted client-secret variants, dynamic registration auth/validation/RFC7591 metadata, token exchange, refresh, introspection, revocation, userinfo, and RP logout. |
-| OpenAPI | Partial. Ruby now covers OpenAPI 3.1.1 metadata, model fields, route inventory, security schemes, default responses, selected nullable/default request bodies, path params, disabled paths, reference HTML, theme, nonce, and disable-reference behavior. Exact upstream snapshot parity is still open: full request/response schemas, query/body extraction, operation metadata, custom response codes/enums/formats/object strictness/`$ref` usage, and exact Scalar HTML/configuration are not all ported. |
+| OpenAPI | Partial. Ruby now covers OpenAPI 3.1.1 metadata, model fields, route inventory, security schemes, default responses, selected nullable/default request bodies, path params, disabled paths, reference HTML, theme, nonce, and disable-reference behavior. Exact upstream snapshot parity is still open: upstream has 30 base paths, Ruby has richer schemas for 5 of them, and the remaining paths still need full request/response schemas, query/body extraction, operation metadata, custom response codes/enums/formats/object strictness/`$ref` usage, and exact Scalar HTML/configuration. |
 | SSO/SAML full XML security | Supported. Core SSO stays dependency-free; optional `better_auth-saml` now covers signed XML validation, forged/tampered/XSW rejection, no/multiple assertion rejection, replay protection, condition validation, deprecated algorithm rejection, and encrypted assertion decryption settings via `spPrivateKey`/`spCertificate`. |
 | Expo server integration | Supported. README/docs are narrowed to the Ruby server surface; authorization proxy cookies, optional OAuth state cookie, origin override/preservation, disabled override, trusted `exp://`, trusted deep-link cookie injection, wildcard trusted origins, and native client scope decisions are covered. React Native secure storage, cookie cache, focus/online managers, browser-opening flow, and React Native behavior tests are client-only and intentionally out of Ruby scope. |
 
@@ -611,7 +611,7 @@ Status target: Ruby OpenAPI is considered complete when generated route paths, m
 
 - [x] **Step 2: Add partial snapshot-style tests.**
 
-Added tests for OpenAPI version/info, security schemes, servers, route/model inventory, selected request-body hints, path params, disabled paths, reference HTML, theme, nonce, and disable-reference behavior. Full upstream snapshot coverage remains open.
+Added tests for OpenAPI version/info, security schemes, servers, route/model inventory, selected request-body hints, richer `/change-email` and `/change-password` schemas, path params, disabled paths, reference HTML, theme, nonce, and disable-reference behavior. Full upstream snapshot coverage remains open.
 
 - [ ] **Step 3: Implement exact upstream snapshot schema output.**
 
@@ -623,6 +623,8 @@ Remaining work:
 - Extract query/body schema metadata from Ruby endpoint declarations instead of relying on a small hard-coded route table.
 - Add exact operation metadata, custom response codes, enums, formats, object strictness, nullable handling, and `$ref` usage across all documented endpoints.
 - Match upstream Scalar reference HTML/configuration exactly enough for a snapshot-style assertion.
+
+Current progress: `upstream/packages/better-auth/src/plugins/open-api/__snapshots__/open-api.test.ts.snap` has 30 base paths. Rich Ruby schemas are started for 5 paths: `/sign-in/email`, `/sign-in/social`, `/sign-up/email`, `/change-email`, and `/change-password`.
 
 - [x] **Step 4: Run current OpenAPI tests.**
 
@@ -641,7 +643,7 @@ Expected: pass.
 rbenv exec bundle exec ruby -Itest test/better_auth/plugins/open_api_test.rb
 ```
 
-Result: `8 runs, 53 assertions, 0 failures, 0 errors, 0 skips`.
+Result after starting the next parity slice: `10 runs, 75 assertions, 0 failures, 0 errors, 0 skips`.
 
 ### Task 10: Final Verification And Promotion
 

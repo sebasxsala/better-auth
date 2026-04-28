@@ -141,6 +141,83 @@ module BetterAuth
 
     def route_open_api_metadata(path, method)
       case [path, method.to_s.upcase]
+      when ["/change-email", "POST"]
+        {
+          operationId: "changeEmail",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json" => {
+                schema: object_schema(
+                  {
+                    callbackURL: {type: ["string", "null"], description: "The URL to redirect to after email verification"},
+                    newEmail: {type: "string", description: "The new email address to set must be a valid email address"}
+                  },
+                  required: ["newEmail"]
+                )
+              }
+            }
+          },
+          responses: {
+            "200" => {
+              description: "Email change request processed successfully",
+              content: {
+                "application/json" => {
+                  schema: object_schema(
+                    {
+                      message: {
+                        type: "string",
+                        nullable: true,
+                        enum: ["Email updated", "Verification email sent"],
+                        description: "Status message of the email change process"
+                      },
+                      status: {type: "boolean", description: "Indicates if the request was successful"},
+                      user: {type: "object", "$ref": "#/components/schemas/User"}
+                    },
+                    required: ["status"]
+                  )
+                }
+              }
+            },
+            "422" => error_response("Unprocessable Entity. Email already exists")
+          }
+        }
+      when ["/change-password", "POST"]
+        {
+          description: "Change the password of the user",
+          operationId: "changePassword",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json" => {
+                schema: object_schema(
+                  {
+                    newPassword: {type: "string", description: "The new password to set"},
+                    currentPassword: {type: "string", description: "The current password is required"},
+                    revokeOtherSessions: {type: ["boolean", "null"], description: "Must be a boolean value"}
+                  },
+                  required: ["newPassword", "currentPassword"]
+                )
+              }
+            }
+          },
+          responses: {
+            "200" => {
+              description: "Password successfully changed",
+              content: {
+                "application/json" => {
+                  schema: object_schema(
+                    {
+                      token: {type: "string", nullable: true, description: "New session token if other sessions were revoked"},
+                      user: open_api_user_response_schema
+                    },
+                    required: ["user"]
+                  )
+                }
+              }
+            }
+          }
+        }
       when ["/sign-in/email", "POST"]
         {
           description: "Sign in with email and password",
@@ -281,6 +358,21 @@ module BetterAuth
         },
         required: ["redirect", "token", "user"]
       ).merge(description: description)
+    end
+
+    def open_api_user_response_schema
+      object_schema(
+        {
+          id: {type: "string", description: "The unique identifier of the user"},
+          email: {type: "string", format: "email", description: "The email address of the user"},
+          name: {type: "string", description: "The name of the user"},
+          image: {type: "string", format: "uri", nullable: true, description: "The profile image URL of the user"},
+          emailVerified: {type: "boolean", description: "Whether the email has been verified"},
+          createdAt: {type: "string", format: "date-time", description: "When the user was created"},
+          updatedAt: {type: "string", format: "date-time", description: "When the user was last updated"}
+        },
+        required: ["id", "email", "name", "emailVerified", "createdAt", "updatedAt"]
+      )
     end
 
     def empty_request_body
