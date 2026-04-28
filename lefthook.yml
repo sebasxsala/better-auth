@@ -1,0 +1,15 @@
+# frozen_string_literal: true
+# Lefthook configuration - runs before every commit
+# Install with: bundle exec lefthook install
+
+output:
+  - success
+  - failure
+
+pre-commit:
+  parallel: true
+  commands:
+    standardrb:
+      glob: "*.rb"
+      run: bundle exec standardrb --fix {staged_files}
+      stage_fixed: true

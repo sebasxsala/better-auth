@@ -36,6 +36,9 @@ group :development, :test do
   gem "rom-sql", ">= 3.7", "< 4"
   gem "tiny_tds", "~> 2.1"
 
+  # Git hooks
+  gem "lefthook", "~> 1.11", require: false
+
   # Build tasks
   gem "rake", "~> 13.2"
 
