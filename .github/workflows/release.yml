@@ -8,6 +8,12 @@ on:
       - 'better_auth-passkey-v*'
       - 'better_auth-sinatra-v*'
       - 'better_auth-hanami-v*'
+      - 'better_auth-api-key-v*'
+      - 'better_auth-oauth-provider-v*'
+      - 'better_auth-redis-storage-v*'
+      - 'better_auth-scim-v*'
+      - 'better_auth-sso-v*'
+      - 'better_auth-stripe-v*'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -45,6 +51,12 @@ jobs:
       passkey_version: ${{ steps.detect.outputs.passkey_version }}
       sinatra_version: ${{ steps.detect.outputs.sinatra_version }}
       hanami_version: ${{ steps.detect.outputs.hanami_version }}
+      api_key_version: ${{ steps.detect.outputs.api_key_version }}
+      oauth_provider_version: ${{ steps.detect.outputs.oauth_provider_version }}
+      redis_storage_version: ${{ steps.detect.outputs.redis_storage_version }}
+      scim_version: ${{ steps.detect.outputs.scim_version }}
+      sso_version: ${{ steps.detect.outputs.sso_version }}
+      stripe_version: ${{ steps.detect.outputs.stripe_version }}
       tag_version: ${{ steps.detect.outputs.tag_version }}
       target_package: ${{ steps.detect.outputs.target_package }}
       core_releases: ${{ steps.detect.outputs.core_releases }}
@@ -52,6 +64,12 @@ jobs:
       passkey_releases: ${{ steps.detect.outputs.passkey_releases }}
       sinatra_releases: ${{ steps.detect.outputs.sinatra_releases }}
       hanami_releases: ${{ steps.detect.outputs.hanami_releases }}
+      api_key_releases: ${{ steps.detect.outputs.api_key_releases }}
+      oauth_provider_releases: ${{ steps.detect.outputs.oauth_provider_releases }}
+      redis_storage_releases: ${{ steps.detect.outputs.redis_storage_releases }}
+      scim_releases: ${{ steps.detect.outputs.scim_releases }}
+      sso_releases: ${{ steps.detect.outputs.sso_releases }}
+      stripe_releases: ${{ steps.detect.outputs.stripe_releases }}
       should_publish: ${{ steps.detect.outputs.should_publish }}
       dry_run: ${{ steps.detect.outputs.dry_run }}
     steps:
@@ -71,12 +89,24 @@ jobs:
           passkey_file="packages/better_auth-passkey/lib/better_auth/passkey/version.rb"
           sinatra_file="packages/better_auth-sinatra/lib/better_auth/sinatra/version.rb"
           hanami_file="packages/better_auth-hanami/lib/better_auth/hanami/version.rb"
+          api_key_file="packages/better_auth-api-key/lib/better_auth/api_key/version.rb"
+          oauth_provider_file="packages/better_auth-oauth-provider/lib/better_auth/oauth_provider/version.rb"
+          redis_storage_file="packages/better_auth-redis-storage/lib/better_auth/redis_storage/version.rb"
+          scim_file="packages/better_auth-scim/lib/better_auth/scim/version.rb"
+          sso_file="packages/better_auth-sso/lib/better_auth/sso/version.rb"
+          stripe_file="packages/better_auth-stripe/lib/better_auth/stripe/version.rb"
 
           core_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$core_file")
           rails_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$rails_file")
           passkey_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$passkey_file")
           sinatra_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$sinatra_file")
           hanami_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$hanami_file")
+          api_key_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$api_key_file")
+          oauth_provider_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$oauth_provider_file")
+          redis_storage_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$redis_storage_file")
+          scim_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$scim_file")
+          sso_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$sso_file")
+          stripe_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$stripe_file")
 
           tag_name=""
           tag_version=""
@@ -86,6 +116,12 @@ jobs:
           passkey_releases=false
           sinatra_releases=false
           hanami_releases=false
+          api_key_releases=false
+          oauth_provider_releases=false
+          redis_storage_releases=false
+          scim_releases=false
+          sso_releases=false
+          stripe_releases=false
           should_publish=false
 
           if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
@@ -122,8 +158,44 @@ jobs:
                 expected_version="$hanami_version"
                 hanami_releases=true
                 ;;
+              better_auth-api-key-v*)
+                target_package="better_auth-api-key"
+                tag_version="${tag_name#better_auth-api-key-v}"
+                expected_version="$api_key_version"
+                api_key_releases=true
+                ;;
+              better_auth-oauth-provider-v*)
+                target_package="better_auth-oauth-provider"
+                tag_version="${tag_name#better_auth-oauth-provider-v}"
+                expected_version="$oauth_provider_version"
+                oauth_provider_releases=true
+                ;;
+              better_auth-redis-storage-v*)
+                target_package="better_auth-redis-storage"
+                tag_version="${tag_name#better_auth-redis-storage-v}"
+                expected_version="$redis_storage_version"
+                redis_storage_releases=true
+                ;;
+              better_auth-scim-v*)
+                target_package="better_auth-scim"
+                tag_version="${tag_name#better_auth-scim-v}"
+                expected_version="$scim_version"
+                scim_releases=true
+                ;;
+              better_auth-sso-v*)
+                target_package="better_auth-sso"
+                tag_version="${tag_name#better_auth-sso-v}"
+                expected_version="$sso_version"
+                sso_releases=true
+                ;;
+              better_auth-stripe-v*)
+                target_package="better_auth-stripe"
+                tag_version="${tag_name#better_auth-stripe-v}"
+                expected_version="$stripe_version"
+                stripe_releases=true
+                ;;
               *)
-                echo "::error ::Release tags must use a package prefix: better_auth-vX.Y.Z, better_auth-rails-vX.Y.Z, better_auth-passkey-vX.Y.Z, better_auth-sinatra-vX.Y.Z, or better_auth-hanami-vX.Y.Z."
+                echo "::error ::Release tags must use a package prefix: better_auth-vX.Y.Z, better_auth-rails-vX.Y.Z, better_auth-passkey-vX.Y.Z, better_auth-sinatra-vX.Y.Z, better_auth-hanami-vX.Y.Z, better_auth-api-key-vX.Y.Z, better_auth-oauth-provider-vX.Y.Z, better_auth-redis-storage-vX.Y.Z, better_auth-scim-vX.Y.Z, better_auth-sso-vX.Y.Z, or better_auth-stripe-vX.Y.Z."
                 exit 1
                 ;;
             esac
@@ -175,6 +247,12 @@ jobs:
           echo "passkey_version=$passkey_version" >> "$GITHUB_OUTPUT"
           echo "sinatra_version=$sinatra_version" >> "$GITHUB_OUTPUT"
           echo "hanami_version=$hanami_version" >> "$GITHUB_OUTPUT"
+          echo "api_key_version=$api_key_version" >> "$GITHUB_OUTPUT"
+          echo "oauth_provider_version=$oauth_provider_version" >> "$GITHUB_OUTPUT"
+          echo "redis_storage_version=$redis_storage_version" >> "$GITHUB_OUTPUT"
+          echo "scim_version=$scim_version" >> "$GITHUB_OUTPUT"
+          echo "sso_version=$sso_version" >> "$GITHUB_OUTPUT"
+          echo "stripe_version=$stripe_version" >> "$GITHUB_OUTPUT"
           echo "tag_version=$tag_version" >> "$GITHUB_OUTPUT"
           echo "target_package=$target_package" >> "$GITHUB_OUTPUT"
           echo "core_releases=$core_releases" >> "$GITHUB_OUTPUT"
@@ -182,6 +260,12 @@ jobs:
           echo "passkey_releases=$passkey_releases" >> "$GITHUB_OUTPUT"
           echo "sinatra_releases=$sinatra_releases" >> "$GITHUB_OUTPUT"
           echo "hanami_releases=$hanami_releases" >> "$GITHUB_OUTPUT"
+          echo "api_key_releases=$api_key_releases" >> "$GITHUB_OUTPUT"
+          echo "oauth_provider_releases=$oauth_provider_releases" >> "$GITHUB_OUTPUT"
+          echo "redis_storage_releases=$redis_storage_releases" >> "$GITHUB_OUTPUT"
+          echo "scim_releases=$scim_releases" >> "$GITHUB_OUTPUT"
+          echo "sso_releases=$sso_releases" >> "$GITHUB_OUTPUT"
+          echo "stripe_releases=$stripe_releases" >> "$GITHUB_OUTPUT"
           echo "should_publish=$should_publish" >> "$GITHUB_OUTPUT"
           echo "dry_run=$DRY_RUN_INPUT" >> "$GITHUB_OUTPUT"
 
@@ -190,6 +274,12 @@ jobs:
           echo "passkey_version=$passkey_version"
           echo "sinatra_version=$sinatra_version"
           echo "hanami_version=$hanami_version"
+          echo "api_key_version=$api_key_version"
+          echo "oauth_provider_version=$oauth_provider_version"
+          echo "redis_storage_version=$redis_storage_version"
+          echo "scim_version=$scim_version"
+          echo "sso_version=$sso_version"
+          echo "stripe_version=$stripe_version"
           echo "tag_version=${tag_version:-manual-dry-run}"
           echo "target_package=${target_package:-manual-dry-run}"
           echo "core_releases=$core_releases"
@@ -197,6 +287,12 @@ jobs:
           echo "passkey_releases=$passkey_releases"
           echo "sinatra_releases=$sinatra_releases"
           echo "hanami_releases=$hanami_releases"
+          echo "api_key_releases=$api_key_releases"
+          echo "oauth_provider_releases=$oauth_provider_releases"
+          echo "redis_storage_releases=$redis_storage_releases"
+          echo "scim_releases=$scim_releases"
+          echo "sso_releases=$sso_releases"
+          echo "stripe_releases=$stripe_releases"
           echo "should_publish=$should_publish"
           echo "dry_run=$DRY_RUN_INPUT"
 
@@ -380,6 +476,144 @@ jobs:
       - name: Run tests
         working-directory: packages/better_auth-hanami
         run: bundle exec rspec
+
+  test-api-key:
+    name: Test better_auth-api-key (API Key Plugin)
+    needs: [prepare-release]
+    if: needs.prepare-release.outputs.api_key_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-api-key
+
+      - name: Run linter
+        working-directory: packages/better_auth-api-key
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-api-key
+        run: bundle exec rake test
+
+  test-oauth-provider:
+    name: Test better_auth-oauth-provider (OAuth Provider Plugin)
+    needs: [prepare-release]
+    if: needs.prepare-release.outputs.oauth_provider_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-oauth-provider
+
+      - name: Run linter
+        working-directory: packages/better_auth-oauth-provider
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-oauth-provider
+        run: bundle exec rake test
+
+  test-redis-storage:
+    name: Test better_auth-redis-storage (Redis Storage Plugin)
+    needs: [prepare-release]
+    if: needs.prepare-release.outputs.redis_storage_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-redis-storage
+
+      - name: Run linter
+        working-directory: packages/better_auth-redis-storage
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-redis-storage
+        run: bundle exec rake test
+
+  test-scim:
+    name: Test better_auth-scim (SCIM Plugin)
+    needs: [prepare-release]
+    if: needs.prepare-release.outputs.scim_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-scim
+
+      - name: Run linter
+        working-directory: packages/better_auth-scim
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-scim
+        run: bundle exec rake test
+
+  test-sso:
+    name: Test better_auth-sso (SSO Plugin)
+    needs: [prepare-release]
+    if: needs.prepare-release.outputs.sso_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-sso
+
+      - name: Run linter
+        working-directory: packages/better_auth-sso
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-sso
+        run: bundle exec rake test
+
+  test-stripe:
+    name: Test better_auth-stripe (Stripe Plugin)
+    needs: [prepare-release]
+    if: needs.prepare-release.outputs.stripe_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-stripe
+
+      - name: Run linter
+        working-directory: packages/better_auth-stripe
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-stripe
+        run: bundle exec rake test
 
   publish-core:
     name: Build and publish better_auth
@@ -644,9 +878,297 @@ jobs:
 
           gem push better_auth-hanami-*.gem
 
+  publish-api-key:
+    name: Build and publish better_auth-api-key
+    needs: [prepare-release, test-api-key]
+    if: needs.prepare-release.outputs.api_key_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-api-key
+
+      - name: Configure RubyGems credentials
+        if: needs.prepare-release.outputs.api_key_releases == 'true' && needs.prepare-release.outputs.dry_run != 'true'
+        uses: rubygems/configure-rubygems-credentials@v1.0.0
+
+      - name: Build better_auth-api-key gem
+        working-directory: packages/better_auth-api-key
+        run: |
+          set -euo pipefail
+          rm -f better_auth-api-key-*.gem
+          gem build better_auth-api-key.gemspec
+
+      - name: Publish better_auth-api-key gem
+        if: needs.prepare-release.outputs.api_key_releases == 'true'
+        working-directory: packages/better_auth-api-key
+        env:
+          TARGET_VERSION: ${{ needs.prepare-release.outputs.api_key_version }}
+          DRY_RUN: ${{ needs.prepare-release.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run enabled, skipping gem push for better_auth-api-key"
+            exit 0
+          fi
+
+          already_exists=$(ruby -rjson -ropen-uri -e 'gem_name = "better_auth-api-key"; version = ENV.fetch("TARGET_VERSION"); begin; body = URI.open("https://rubygems.org/api/v1/versions/#{gem_name}.json").read; versions = JSON.parse(body).map { |v| v["number"] }; print versions.include?(version) ? "true" : "false"; rescue StandardError; print "false"; end')
+
+          if [ "$already_exists" = "true" ]; then
+            echo "better_auth-api-key $TARGET_VERSION already exists on RubyGems, skipping push"
+            exit 0
+          fi
+
+          gem push better_auth-api-key-*.gem
+
+  publish-oauth-provider:
+    name: Build and publish better_auth-oauth-provider
+    needs: [prepare-release, test-oauth-provider]
+    if: needs.prepare-release.outputs.oauth_provider_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-oauth-provider
+
+      - name: Configure RubyGems credentials
+        if: needs.prepare-release.outputs.oauth_provider_releases == 'true' && needs.prepare-release.outputs.dry_run != 'true'
+        uses: rubygems/configure-rubygems-credentials@v1.0.0
+
+      - name: Build better_auth-oauth-provider gem
+        working-directory: packages/better_auth-oauth-provider
+        run: |
+          set -euo pipefail
+          rm -f better_auth-oauth-provider-*.gem
+          gem build better_auth-oauth-provider.gemspec
+
+      - name: Publish better_auth-oauth-provider gem
+        if: needs.prepare-release.outputs.oauth_provider_releases == 'true'
+        working-directory: packages/better_auth-oauth-provider
+        env:
+          TARGET_VERSION: ${{ needs.prepare-release.outputs.oauth_provider_version }}
+          DRY_RUN: ${{ needs.prepare-release.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run enabled, skipping gem push for better_auth-oauth-provider"
+            exit 0
+          fi
+
+          already_exists=$(ruby -rjson -ropen-uri -e 'gem_name = "better_auth-oauth-provider"; version = ENV.fetch("TARGET_VERSION"); begin; body = URI.open("https://rubygems.org/api/v1/versions/#{gem_name}.json").read; versions = JSON.parse(body).map { |v| v["number"] }; print versions.include?(version) ? "true" : "false"; rescue StandardError; print "false"; end')
+
+          if [ "$already_exists" = "true" ]; then
+            echo "better_auth-oauth-provider $TARGET_VERSION already exists on RubyGems, skipping push"
+            exit 0
+          fi
+
+          gem push better_auth-oauth-provider-*.gem
+
+  publish-redis-storage:
+    name: Build and publish better_auth-redis-storage
+    needs: [prepare-release, test-redis-storage]
+    if: needs.prepare-release.outputs.redis_storage_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-redis-storage
+
+      - name: Configure RubyGems credentials
+        if: needs.prepare-release.outputs.redis_storage_releases == 'true' && needs.prepare-release.outputs.dry_run != 'true'
+        uses: rubygems/configure-rubygems-credentials@v1.0.0
+
+      - name: Build better_auth-redis-storage gem
+        working-directory: packages/better_auth-redis-storage
+        run: |
+          set -euo pipefail
+          rm -f better_auth-redis-storage-*.gem
+          gem build better_auth-redis-storage.gemspec
+
+      - name: Publish better_auth-redis-storage gem
+        if: needs.prepare-release.outputs.redis_storage_releases == 'true'
+        working-directory: packages/better_auth-redis-storage
+        env:
+          TARGET_VERSION: ${{ needs.prepare-release.outputs.redis_storage_version }}
+          DRY_RUN: ${{ needs.prepare-release.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run enabled, skipping gem push for better_auth-redis-storage"
+            exit 0
+          fi
+
+          already_exists=$(ruby -rjson -ropen-uri -e 'gem_name = "better_auth-redis-storage"; version = ENV.fetch("TARGET_VERSION"); begin; body = URI.open("https://rubygems.org/api/v1/versions/#{gem_name}.json").read; versions = JSON.parse(body).map { |v| v["number"] }; print versions.include?(version) ? "true" : "false"; rescue StandardError; print "false"; end')
+
+          if [ "$already_exists" = "true" ]; then
+            echo "better_auth-redis-storage $TARGET_VERSION already exists on RubyGems, skipping push"
+            exit 0
+          fi
+
+          gem push better_auth-redis-storage-*.gem
+
+  publish-scim:
+    name: Build and publish better_auth-scim
+    needs: [prepare-release, test-scim]
+    if: needs.prepare-release.outputs.scim_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-scim
+
+      - name: Configure RubyGems credentials
+        if: needs.prepare-release.outputs.scim_releases == 'true' && needs.prepare-release.outputs.dry_run != 'true'
+        uses: rubygems/configure-rubygems-credentials@v1.0.0
+
+      - name: Build better_auth-scim gem
+        working-directory: packages/better_auth-scim
+        run: |
+          set -euo pipefail
+          rm -f better_auth-scim-*.gem
+          gem build better_auth-scim.gemspec
+
+      - name: Publish better_auth-scim gem
+        if: needs.prepare-release.outputs.scim_releases == 'true'
+        working-directory: packages/better_auth-scim
+        env:
+          TARGET_VERSION: ${{ needs.prepare-release.outputs.scim_version }}
+          DRY_RUN: ${{ needs.prepare-release.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run enabled, skipping gem push for better_auth-scim"
+            exit 0
+          fi
+
+          already_exists=$(ruby -rjson -ropen-uri -e 'gem_name = "better_auth-scim"; version = ENV.fetch("TARGET_VERSION"); begin; body = URI.open("https://rubygems.org/api/v1/versions/#{gem_name}.json").read; versions = JSON.parse(body).map { |v| v["number"] }; print versions.include?(version) ? "true" : "false"; rescue StandardError; print "false"; end')
+
+          if [ "$already_exists" = "true" ]; then
+            echo "better_auth-scim $TARGET_VERSION already exists on RubyGems, skipping push"
+            exit 0
+          fi
+
+          gem push better_auth-scim-*.gem
+
+  publish-sso:
+    name: Build and publish better_auth-sso
+    needs: [prepare-release, test-sso]
+    if: needs.prepare-release.outputs.sso_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-sso
+
+      - name: Configure RubyGems credentials
+        if: needs.prepare-release.outputs.sso_releases == 'true' && needs.prepare-release.outputs.dry_run != 'true'
+        uses: rubygems/configure-rubygems-credentials@v1.0.0
+
+      - name: Build better_auth-sso gem
+        working-directory: packages/better_auth-sso
+        run: |
+          set -euo pipefail
+          rm -f better_auth-sso-*.gem
+          gem build better_auth-sso.gemspec
+
+      - name: Publish better_auth-sso gem
+        if: needs.prepare-release.outputs.sso_releases == 'true'
+        working-directory: packages/better_auth-sso
+        env:
+          TARGET_VERSION: ${{ needs.prepare-release.outputs.sso_version }}
+          DRY_RUN: ${{ needs.prepare-release.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run enabled, skipping gem push for better_auth-sso"
+            exit 0
+          fi
+
+          already_exists=$(ruby -rjson -ropen-uri -e 'gem_name = "better_auth-sso"; version = ENV.fetch("TARGET_VERSION"); begin; body = URI.open("https://rubygems.org/api/v1/versions/#{gem_name}.json").read; versions = JSON.parse(body).map { |v| v["number"] }; print versions.include?(version) ? "true" : "false"; rescue StandardError; print "false"; end')
+
+          if [ "$already_exists" = "true" ]; then
+            echo "better_auth-sso $TARGET_VERSION already exists on RubyGems, skipping push"
+            exit 0
+          fi
+
+          gem push better_auth-sso-*.gem
+
+  publish-stripe:
+    name: Build and publish better_auth-stripe
+    needs: [prepare-release, test-stripe]
+    if: needs.prepare-release.outputs.stripe_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-stripe
+
+      - name: Configure RubyGems credentials
+        if: needs.prepare-release.outputs.stripe_releases == 'true' && needs.prepare-release.outputs.dry_run != 'true'
+        uses: rubygems/configure-rubygems-credentials@v1.0.0
+
+      - name: Build better_auth-stripe gem
+        working-directory: packages/better_auth-stripe
+        run: |
+          set -euo pipefail
+          rm -f better_auth-stripe-*.gem
+          gem build better_auth-stripe.gemspec
+
+      - name: Publish better_auth-stripe gem
+        if: needs.prepare-release.outputs.stripe_releases == 'true'
+        working-directory: packages/better_auth-stripe
+        env:
+          TARGET_VERSION: ${{ needs.prepare-release.outputs.stripe_version }}
+          DRY_RUN: ${{ needs.prepare-release.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run enabled, skipping gem push for better_auth-stripe"
+            exit 0
+          fi
+
+          already_exists=$(ruby -rjson -ropen-uri -e 'gem_name = "better_auth-stripe"; version = ENV.fetch("TARGET_VERSION"); begin; body = URI.open("https://rubygems.org/api/v1/versions/#{gem_name}.json").read; versions = JSON.parse(body).map { |v| v["number"] }; print versions.include?(version) ? "true" : "false"; rescue StandardError; print "false"; end')
+
+          if [ "$already_exists" = "true" ]; then
+            echo "better_auth-stripe $TARGET_VERSION already exists on RubyGems, skipping push"
+            exit 0
+          fi
+
+          gem push better_auth-stripe-*.gem
+
   create-release:
     name: Create GitHub release
-    needs: [prepare-release, publish-core, publish-passkey, publish-rails, publish-sinatra, publish-hanami]
+    needs: [prepare-release, publish-core, publish-passkey, publish-rails, publish-sinatra, publish-hanami, publish-api-key, publish-oauth-provider, publish-redis-storage, publish-scim, publish-sso, publish-stripe]
     if: |
       always() &&
       needs.prepare-release.outputs.should_publish == 'true' &&
@@ -656,7 +1178,13 @@ jobs:
         needs.publish-passkey.result == 'success' ||
         needs.publish-rails.result == 'success' ||
         needs.publish-sinatra.result == 'success' ||
-        needs.publish-hanami.result == 'success'
+        needs.publish-hanami.result == 'success' ||
+        needs.publish-api-key.result == 'success' ||
+        needs.publish-oauth-provider.result == 'success' ||
+        needs.publish-redis-storage.result == 'success' ||
+        needs.publish-scim.result == 'success' ||
+        needs.publish-sso.result == 'success' ||
+        needs.publish-stripe.result == 'success'
       )
     runs-on: ubuntu-latest
     steps:
@@ -675,3 +1203,9 @@ jobs:
             - `better_auth_rails` version `${{ needs.prepare-release.outputs.rails_version }}` (released: `${{ needs.prepare-release.outputs.rails_releases }}`)
             - `better_auth-sinatra` version `${{ needs.prepare-release.outputs.sinatra_version }}` (released: `${{ needs.prepare-release.outputs.sinatra_releases }}`)
             - `better_auth-hanami` version `${{ needs.prepare-release.outputs.hanami_version }}` (released: `${{ needs.prepare-release.outputs.hanami_releases }}`)
+            - `better_auth-api-key` version `${{ needs.prepare-release.outputs.api_key_version }}` (released: `${{ needs.prepare-release.outputs.api_key_releases }}`)
+            - `better_auth-oauth-provider` version `${{ needs.prepare-release.outputs.oauth_provider_version }}` (released: `${{ needs.prepare-release.outputs.oauth_provider_releases }}`)
+            - `better_auth-redis-storage` version `${{ needs.prepare-release.outputs.redis_storage_version }}` (released: `${{ needs.prepare-release.outputs.redis_storage_releases }}`)
+            - `better_auth-scim` version `${{ needs.prepare-release.outputs.scim_version }}` (released: `${{ needs.prepare-release.outputs.scim_releases }}`)
+            - `better_auth-sso` version `${{ needs.prepare-release.outputs.sso_version }}` (released: `${{ needs.prepare-release.outputs.sso_releases }}`)
+            - `better_auth-stripe` version `${{ needs.prepare-release.outputs.stripe_version }}` (released: `${{ needs.prepare-release.outputs.stripe_releases }}`)
