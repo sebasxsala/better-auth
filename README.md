@@ -31,6 +31,7 @@ This port is active work. Many server-side flows are implemented, but not every 
 | Gem | Description | Install |
 | --- | --- | --- |
 | [`better_auth`](packages/better_auth/) | Framework-agnostic Rack core. Auth routes, sessions, cookies, adapters, and core plugin shims live here. | `gem "better_auth"` |
+| [`better_auth-redis-storage`](packages/better_auth-redis-storage/) | External Redis secondary storage package for session payloads, active-session indexes, and secondary-storage-backed rate limiting. | `gem "better_auth-redis-storage"` |
 | [`better_auth-api-key`](packages/better_auth-api-key/) | External API key plugin package with creation, verification, quotas, metadata, permissions, storage modes, and API-key sessions. | `gem "better_auth-api-key"` |
 | [`better_auth-rails`](packages/better_auth-rails/) | Rails adapter with mounting helpers, ActiveRecord adapter, controller helpers, and generators. | `gem "better_auth-rails"` |
 | [`better_auth-sinatra`](packages/better_auth-sinatra/) | Sinatra adapter with Rack mounting, request helpers, and SQL migration Rake tasks. | `gem "better_auth-sinatra"` |
@@ -121,7 +122,7 @@ Plugin support is tracked against Ruby server parity: TypeScript inference, brow
 | Endpoint/router/API pipeline | Partial | Rack routing, direct API calls, hooks, redirects, cookies, origin checks, and rate limiting exist; some upstream edge-case matrices remain future work. |
 | Email/password auth | Partial | Sign-up, sign-in, password reset, password verify, set/change password, and email verification exist; some upstream edge cases are still being hardened. |
 | Social OAuth flow | Partial | `/sign-in/social`, `/callback/:providerId`, linking, unlinking, token refresh, and account info exist; upstream account-cookie and some linking-rule details are still future polish. |
-| Sessions | Partial | Signed session cookies, session routes, revocation, cookie cache, secondary storage, and sensitive-route lookup exist; full upstream session/cache matrix is not complete. |
+| Sessions | Partial | Signed session cookies, session routes, revocation, cookie cache, secondary storage, Redis secondary-storage package, and sensitive-route lookup exist; full upstream session/cache matrix is not complete. |
 | Cookies | Partial | Prefixing, signing, chunking, deletion, cache cookies, and advanced attributes exist; filtering and some account-cookie parity gaps are documented. |
 | CSRF/trusted origins | Partial | Origin checks and trusted origins exist; callback-bearing GET route parity is still being tightened. |
 | Rate limiting | Partial | Memory/custom/secondary-storage style rate limiting exists; full database-backed upstream matrix remains future work. |

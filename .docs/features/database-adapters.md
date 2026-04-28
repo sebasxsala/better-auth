@@ -23,6 +23,7 @@ Ruby keeps upstream logical and wire field names such as `emailVerified`, `userI
 - PostgreSQL indexing metadata is carried forward for migration work: unique fields such as `email` and session `token` remain marked unique, and FK fields such as `user_id` remain marked indexed because PostgreSQL does not auto-index foreign keys.
 - DB-less auth now defaults to the memory adapter while keeping the Phase 1 stateless-session option defaults.
 - Secondary storage omits the `session` table unless `session: { store_session_in_database: true }` is set, matching upstream.
+- Redis secondary storage lives in the external `better_auth-redis-storage` package so core does not install Redis client dependencies for apps that do not use it.
 - Database hooks use Ruby callables and may mutate data by returning `{ data: ... }` or cancel by returning `false`.
 - The memory adapter implements Better Auth-specific where operators, basic joins for `session -> user`, `account -> user`, and `user -> account`, sorting, pagination, counts, and rollbackable in-memory transactions.
 - The direct SQL layer generates PostgreSQL, MySQL, SQLite, and MSSQL schema DDL from the same `BetterAuth::Schema` metadata. PostgreSQL uses `text`, `boolean`, `timestamptz`, `bigint`, FK constraints, and explicit FK indexes. MySQL uses InnoDB, `utf8mb4`, `varchar(191)` for indexed strings, `text`, `tinyint(1)`, `datetime(6)`, FK constraints, and explicit FK indexes. SQLite uses `text`, `integer`, `date`, FK constraints, and explicit FK indexes. MSSQL uses `varchar(255)`/`varchar(8000)`, `smallint`, `datetime2(3)`, FK constraints, and explicit FK indexes.
@@ -93,6 +94,7 @@ Rails should later put equivalent configuration in `config/initializers/better_a
 - `packages/better_auth/lib/better_auth/auth.rb`
 - `packages/better_auth/lib/better_auth/context.rb`
 - `packages/better_auth/lib/better_auth/configuration.rb`
+- `packages/better_auth-redis-storage/lib/better_auth/redis_storage.rb`
 
 ## Testing
 

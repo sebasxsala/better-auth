@@ -96,27 +96,19 @@ when configured.
 
 ## Secondary Storage
 
-The Ruby port supports secondary storage for session and token style data. Pass
-an object that responds to `get`, `set`, and `delete`.
+The Ruby port supports secondary storage for session and token style data. Use
+`better_auth-redis-storage` for Redis-backed storage, or pass any object that
+responds to `get`, `set`, and `delete`.
 
 ```ruby title="config/auth.rb"
-secondary_storage = Class.new do
-  def get(key)
-    redis.get(key)
-  end
+require "redis"
+require "better_auth/redis_storage"
 
-  def set(key, value, ttl = nil)
-    ttl ? redis.setex(key, ttl, value) : redis.set(key, value)
-  end
-
-  def delete(key)
-    redis.del(key)
-  end
-end.new
+redis = Redis.new(url: ENV.fetch("REDIS_URL"))
 
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  secondary_storage: secondary_storage
+  secondary_storage: BetterAuth::RedisStorage.new(client: redis)
 )
 ```
 

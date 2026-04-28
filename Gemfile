@@ -10,6 +10,7 @@ ruby file: "packages/better_auth/.ruby-version"
 # Local package references for development.
 # This allows working on all packages simultaneously.
 gem "better_auth", path: "packages/better_auth"
+gem "better_auth-redis-storage", path: "packages/better_auth-redis-storage"
 gem "better_auth-api-key", path: "packages/better_auth-api-key"
 gem "better_auth-passkey", path: "packages/better_auth-passkey"
 gem "better_auth-stripe", path: "packages/better_auth-stripe"
