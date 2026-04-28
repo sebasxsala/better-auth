@@ -183,6 +183,8 @@ Ruby OpenAPI generation is a basic route/model inventory. Upstream snapshot incl
 
 Recommended action: decide whether the Ruby port wants snapshot parity. If yes, endpoint metadata/schema conversion must be much richer.
 
+Update 2026-04-28: Ruby OpenAPI now covers OpenAPI 3.1.1 document metadata, security schemes, servers, model field defaults/readOnly/date formats, `:param` path conversion, disabled paths, selected email/social request bodies, default errors, reference HTML, theme, nonce, and disable-reference behavior. It still remains Partial for exact upstream parity because the full upstream snapshot request/response schema matrix and exact Scalar HTML/configuration are not yet generated.
+
 ## Area Details
 
 ### Core factory, context, router, origin, rate limit

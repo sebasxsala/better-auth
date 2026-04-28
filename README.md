@@ -130,7 +130,7 @@ Plugin support is tracked against Ruby server parity: TypeScript inference, brow
 | Sinatra adapter | Partial | Rack mounting, helpers, SQL migration Rake tasks, and docs exist. ActiveRecord-backed Sinatra migrations are not supported yet. |
 | Secondary storage | Partial | Session and verification-style storage behavior exists; full edge-case parity remains future work. |
 | Experimental joins | Partial | `experimental: { joins: true }` is accepted with adapter fallback behavior; the exhaustive join matrix is not complete. |
-| OpenAPI generation | Partial | Practical OpenAPI 3.1 route/model generation exists; upstream Zod snapshot parity is future work. |
+| OpenAPI generation | Partial | OpenAPI 3.1.1 metadata, route/model inventory, security schemes, servers, default responses, selected upstream request bodies, path params, disabled paths, reference HTML, theme, nonce, and disabled reference handling exist. Exact upstream snapshot parity remains open: not every endpoint request/response schema is derived from Better Auth endpoint metadata/Zod equivalents yet. |
 
 ### Social Providers
 
@@ -172,7 +172,7 @@ Upstream Better Auth exposes many provider factories. The Ruby port currently sh
 | OIDC provider | [x] Supported | Metadata, prompt/max-age handling, dynamic registration, consent-page and HTML consent flows, auth-code/refresh token exchange, userinfo including custom claims, RP logout, client-secret storage modes, and JWT plugin ID-token signing are implemented. |
 | One tap | [x] Supported | Google ID-token callback, account reuse/linking, trusted/verified account linking, disabled signup, client ID handling, invalid-token handling, and session cookies are implemented. Browser/FedCM helpers are outside Ruby server scope. |
 | One-time token | [x] Supported | Generate/verify, single-use, expiration, expired-session rejection, cookie behavior, storage modes, server-only generation, and `set-ott` session headers are implemented. |
-| OpenAPI | Partial | Practical OpenAPI 3.1 generation, route/model inventory, reference HTML, theme, nonce, and disable-reference behavior exist; upstream Zod snapshot parity remains future work. |
+| OpenAPI | Partial | OpenAPI 3.1.1 metadata, route/model inventory, security schemes, servers, default responses, selected upstream request bodies, path params, disabled paths, reference HTML, theme, nonce, and disabled reference handling exist. Exact upstream snapshot parity remains open: not every endpoint request/response schema is derived from Better Auth endpoint metadata/Zod equivalents yet. |
 | Organization | [x] Supported | Organization/member CRUD, invitations including multi-team acceptance, team flows, active org/team session fields, dynamic role CRUD safeguards, hooks, additional fields, permissions, and SQL/Rails plugin schema migrations are implemented. Browser client hooks and TypeScript inference are outside Ruby server scope. |
 | Passkey | [x] Supported | WebAuthn registration/authentication, upstream option shapes, challenge expiration, allow/exclude credential transports, not-found delete behavior, management routes, session creation, and SQL/Rails schema output are implemented through the `webauthn` gem. Browser client package aliases are outside Ruby server scope. |
 | Phone number | [x] Supported | OTP send/verify, sign-in/sign-up, phone updates, password reset safety, attempt limits, uniqueness, additional fields, custom validation, and custom OTP verification are implemented. |

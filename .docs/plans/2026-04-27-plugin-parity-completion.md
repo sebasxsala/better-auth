@@ -68,7 +68,7 @@ These rows should stay `Partial` until the tasks below pass:
 | Plugin | Main upstream parity gaps |
 | --- | --- |
 | OIDC provider | Supported. Ruby server parity covers consent page and HTML consent behavior, prompt/max-age matrix, JWT plugin algorithm negotiation, plain/hashed/encrypted client-secret variants, dynamic registration auth/validation/RFC7591 metadata, token exchange, refresh, userinfo, and RP logout. |
-| OpenAPI | Needs snapshot-style schema parity with upstream Zod-derived output or a documented Ruby schema contract with tests. |
+| OpenAPI | Partial. Ruby now covers OpenAPI 3.1.1 metadata, model fields, route inventory, security schemes, default responses, selected nullable/default request bodies, path params, disabled paths, reference HTML, theme, nonce, and disable-reference behavior. Exact upstream snapshot parity is still open: full request/response schemas, query/body extraction, operation metadata, custom response codes/enums/formats/object strictness/`$ref` usage, and exact Scalar HTML/configuration are not all ported. |
 | Expo server integration | Supported. README/docs are narrowed to the Ruby server surface; authorization proxy cookies, optional OAuth state cookie, origin override/preservation, disabled override, trusted `exp://`, trusted deep-link cookie injection, wildcard trusted origins, and native client scope decisions are covered. React Native secure storage, cookie cache, focus/online managers, browser-opening flow, and React Native behavior tests are client-only and intentionally out of Ruby scope. |
 
 ## Files To Modify
@@ -584,7 +584,7 @@ rbenv exec bundle exec ruby -Itest test/better_auth/plugins/scim_test.rb
 - Modify: `.docs/features/upstream-parity-matrix.md`
 - Modify: `README.md`
 
-- [ ] **Step 1: Decide the Ruby OpenAPI contract.**
+- [x] **Step 1: Decide the Ruby OpenAPI contract.**
 
 Choose one supported target and document it in `.docs/features/open-api.md`:
 
@@ -592,15 +592,24 @@ Choose one supported target and document it in `.docs/features/open-api.md`:
 Status target: Ruby OpenAPI is considered complete when generated route paths, methods, auth requirements, model field names, plugin schema fields, selected request bodies, reference page behavior, nonce, theme, and disable-reference behavior match the upstream server-relevant contract. Exact Zod internals remain TypeScript-only.
 ```
 
-- [ ] **Step 2: Add snapshot-style tests.**
+2026-04-28 correction: this contract is not strict enough for "exactly the same behavior as upstream." OpenAPI should stay `Partial` until the generated Ruby document matches the upstream snapshot contract for every server-relevant endpoint, not only selected request bodies and route/model inventory.
 
-Add tests for base routes, plugin routes, model schemas, request-body hints, reference HTML, theme, nonce, disable-reference, and schema stability.
+- [x] **Step 2: Add partial snapshot-style tests.**
 
-- [ ] **Step 3: Implement missing schema output.**
+Added tests for OpenAPI version/info, security schemes, servers, route/model inventory, selected request-body hints, path params, disabled paths, reference HTML, theme, nonce, and disable-reference behavior. Full upstream snapshot coverage remains open.
 
-Port server-relevant behavior from `upstream/packages/better-auth/src/plugins/open-api/open-api.test.ts` and the upstream OpenAPI plugin source.
+- [ ] **Step 3: Implement exact upstream snapshot schema output.**
 
-- [ ] **Step 4: Run OpenAPI tests.**
+Port the remaining server-relevant behavior from `upstream/packages/better-auth/src/plugins/open-api/open-api.test.ts`, `upstream/packages/better-auth/src/plugins/open-api/generator.ts`, and `upstream/packages/better-auth/src/plugins/open-api/__snapshots__/open-api.test.ts.snap`.
+
+Remaining work:
+
+- Generate rich request/response schemas for every base and plugin path in the upstream snapshot.
+- Extract query/body schema metadata from Ruby endpoint declarations instead of relying on a small hard-coded route table.
+- Add exact operation metadata, custom response codes, enums, formats, object strictness, nullable handling, and `$ref` usage across all documented endpoints.
+- Match upstream Scalar reference HTML/configuration exactly enough for a snapshot-style assertion.
+
+- [x] **Step 4: Run current OpenAPI tests.**
 
 Run:
 
@@ -610,6 +619,14 @@ rbenv exec bundle exec ruby -Itest test/better_auth/plugins/open_api_test.rb
 ```
 
 Expected: pass.
+
+2026-04-28 verification:
+
+```bash
+rbenv exec bundle exec ruby -Itest test/better_auth/plugins/open_api_test.rb
+```
+
+Result: `8 runs, 53 assertions, 0 failures, 0 errors, 0 skips`.
 
 ### Task 10: Final Verification And Promotion
 
