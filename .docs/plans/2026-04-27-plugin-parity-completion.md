@@ -12,6 +12,17 @@
 
 ## Audit Result
 
+2026-04-27 correction: `.docs/plans/2026-04-25-better-auth-ruby-port.md` is referenced by repository instructions but is not present in this checkout. This plan is the active plugin-parity source for the current implementation pass.
+
+### Active Protocol Parity Phases
+
+- [x] OIDC provider: re-inventory upstream `oidc-provider` plus shared `oauth-provider` tests, add introspection/revocation metadata and route coverage, and keep it distinct from SSO OIDC.
+- [x] SIWE: re-inventory upstream SIWE tests and add callback payload/response-shape coverage while documenting `verify_message` as the intentional Ruby equivalent of upstream `verifyMessage`.
+- [x] SCIM: re-inventory upstream SCIM tests, cover linked-account `externalId` filtering, and lock unsupported non-`eq` filter operators as intentional errors.
+- [x] SSO OIDC: keep scoped to `/sign-in/sso` and `/sso/callback/:providerId`; do not use it as evidence for OIDC provider support.
+- [x] SSO/SAML core: add `auth_request_url` and `parse_response` adapter hooks and keep core SSO route/session/replay behavior dependency-free.
+- [x] SSO/SAML full crypto parity: add optional `packages/better_auth-saml` with `ruby-saml >= 1.18.1`, signed XML fixture coverage, forged/tampered/XSW rejection, condition validation, algorithm policy enforcement, replay coverage, and encrypted assertion decryption settings through SP key/certificate config.
+
 The root `README.md` plugin table was compared against:
 
 - `README.md`
@@ -55,7 +66,7 @@ These rows can be marked `[x] Supported` for the Ruby server surface:
 | Passkey | Supported | Ruby covers upstream passkey registration/authentication option shapes, per-request challenge expiration, signed challenge cookies, allow/exclude credential transport details, real WebAuthn verification, management routes, delete not-found behavior, session creation, and SQL/Rails schema output from `upstream/packages/passkey/src/passkey.test.ts`. Browser client aliases are outside Ruby server scope. |
 | Phone number | Supported | Ruby covers OTP send/verify, latest-code behavior, one-time use, expiry, attempt limits, phone sign-up with additional fields, session creation/suppression, phone-number update with duplicate protection, direct update-user prevention, password sign-in, require-verification OTP trigger, password-reset OTP reuse/attempt/session-revocation behavior, reset OTP preservation after validation failures, custom validators, custom verify callbacks, and memory-adapter uniqueness parity. Client aliases are outside Ruby server scope. |
 | SIWE | Supported | Ruby covers nonce lifecycle, callback verification, anonymous/email modes, ENS lookup callback, account/session creation, nonce consumption, duplicate wallet reuse, EIP-55 checksum casing, custom schema merging, and multiple chain IDs. |
-| SSO | Supported | Ruby covers provider CRUD/access/sanitization, OIDC discovery hydration and trusted-origin validation, OIDC callback, SAML callback/ACS/SP metadata, RelayState safety, replay protection, XML assertion count validation, SAML algorithm policy decisions, domain verification, and organization assignment. SAML cryptographic signature verification/decryption is intentionally delegated to `validate_response`. |
+| SSO | Supported | Ruby core covers provider CRUD/access/sanitization, OIDC discovery hydration and trusted-origin validation, OIDC callback, SAML callback/ACS/SP metadata, RelayState safety, replay protection, AuthnRequest/parser/validator hooks, domain verification, and organization assignment. Optional `better_auth-saml` covers real SAML XML validation through `ruby-saml >= 1.18.1` without adding Nokogiri/SAML dependencies to core. |
 | SCIM | Supported | Ruby covers upstream token envelopes, plain/hashed/encrypted/custom token storage, Bearer middleware, SCIM metadata, user CRUD, provider/org scoping, existing-user account linking, filters, PATCH path/value mappings, and organization enforcement. |
 | Stripe | Supported | Ruby server parity was confirmed against `upstream/packages/stripe/src` and `upstream/packages/stripe/test/*.test.ts`. Ruby covers the billing event matrix, plan/seat/trial abuse cases, trial-start callbacks, lookup-key failure handling, webhook ordering, organization mode edge cases, customer metadata/callback customization, checkout params/options, subscription state transitions, injected Stripe-compatible clients, and v18/v19 webhook construction. |
 | Two-factor | Supported | Ruby covers TOTP enable/verify/disable, OTP send/verify with plain/hashed/encrypted/custom hash storage, backup code generation/use/view/regeneration, trusted devices with server-side records, custom/default cookie max-age options, post-login 2FA redirect, invalid/missing cookie errors, attempt limits, and `rememberMe: false` preservation after second-factor verification. |
@@ -67,8 +78,9 @@ These rows should stay `Partial` until the tasks below pass:
 
 | Plugin | Main upstream parity gaps |
 | --- | --- |
-| OIDC provider | Supported. Ruby server parity covers consent page and HTML consent behavior, prompt/max-age matrix, JWT plugin algorithm negotiation, plain/hashed/encrypted client-secret variants, dynamic registration auth/validation/RFC7591 metadata, token exchange, refresh, userinfo, and RP logout. |
+| OIDC provider | Supported. Ruby server parity covers consent page and HTML consent behavior, prompt/max-age matrix, JWT plugin algorithm negotiation, plain/hashed/encrypted client-secret variants, dynamic registration auth/validation/RFC7591 metadata, token exchange, refresh, introspection, revocation, userinfo, and RP logout. |
 | OpenAPI | Partial. Ruby now covers OpenAPI 3.1.1 metadata, model fields, route inventory, security schemes, default responses, selected nullable/default request bodies, path params, disabled paths, reference HTML, theme, nonce, and disable-reference behavior. Exact upstream snapshot parity is still open: full request/response schemas, query/body extraction, operation metadata, custom response codes/enums/formats/object strictness/`$ref` usage, and exact Scalar HTML/configuration are not all ported. |
+| SSO/SAML full XML security | Supported. Core SSO stays dependency-free; optional `better_auth-saml` now covers signed XML validation, forged/tampered/XSW rejection, no/multiple assertion rejection, replay protection, condition validation, deprecated algorithm rejection, and encrypted assertion decryption settings via `spPrivateKey`/`spCertificate`. |
 | Expo server integration | Supported. README/docs are narrowed to the Ruby server surface; authorization proxy cookies, optional OAuth state cookie, origin override/preservation, disabled override, trusted `exp://`, trusted deep-link cookie injection, wildcard trusted origins, and native client scope decisions are covered. React Native secure storage, cookie cache, focus/online managers, browser-opening flow, and React Native behavior tests are client-only and intentionally out of Ruby scope. |
 
 ## Files To Modify
@@ -77,6 +89,7 @@ These rows should stay `Partial` until the tasks below pass:
 - `.docs/features/upstream-parity-matrix.md`: keep every plugin row aligned with the README status and exact upstream test paths.
 - `.docs/features/<plugin>.md`: record supported behavior, Ruby adaptations, and any explicitly out-of-scope TypeScript/browser/client behavior.
 - `packages/better_auth/lib/better_auth/plugins/*.rb`: implement missing plugin behavior.
+- `packages/better_auth-saml/`: optional `ruby-saml` companion for real SAML XML validation.
 - `packages/better_auth/test/better_auth/plugins/*_test.rb`: add upstream-equivalent Minitest cases.
 - `packages/better_auth/test/better_auth/routes/*_test.rb`: add route-level regression tests when plugin behavior depends on base auth routes.
 - `packages/better_auth/test/better_auth/adapters/*_test.rb`: add adapter contract cases when plugin parity depends on persistence semantics.
@@ -532,6 +545,8 @@ Expected: all pass.
 Cover provider CRUD, OIDC callback, OIDC discovery runtime HTTP behavior, SAML callback, SAML ACS, SP metadata, replay protection, RelayState protection, XML signature/assertion/encryption decisions, domain verification, and organization assignment policies.
 
 2026-04-27 update: Added Ruby coverage for provider access scoping, provider sanitization, OIDC discovery hydration/trusted-origin validation, SAML XML assertion counting, SAML algorithm policy decisions, and existing SAML callback/ACS/metadata/replay/RelayState/domain/organization flows.
+
+2026-04-27 update: Added `packages/better_auth-saml` as an optional companion with `ruby-saml >= 1.18.1`. The companion provides AuthnRequest generation and SAML response parsing through core hooks, validates real signed assertions with IdP certificates, rejects unsigned/forged/tampered/multiple/no-assertion/XSW responses, enforces replay and SHA1 rejection, validates audience/recipient/destination/issuer/timestamps, and wires encrypted assertion decryption settings through SP private key/certificate config.
 
 - [x] **Step 2: Add SCIM tests.**
 

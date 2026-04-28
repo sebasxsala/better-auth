@@ -169,13 +169,13 @@ module BetterAuth
           ).map { |member| member.fetch("userId") }
           users = users.select { |user| member_ids.include?(user.fetch("id")) }
         end
-        if (filter = ctx.query[:filter] || ctx.query["filter"])
-          field, value = scim_parse_filter(filter)
-          users = users.select { |user| scim_filter_value(user, field).to_s.downcase == value.to_s.downcase }
-        end
-        resources = users.map do |user|
+        filter_field, filter_value = scim_parse_filter(ctx.query[:filter] || ctx.query["filter"]) if ctx.query[:filter] || ctx.query["filter"]
+        resources = users.filter_map do |user|
           account = accounts.find { |entry| entry.fetch("userId") == user.fetch("id") }
-          scim_user_resource(user, account, ctx.context.base_url)
+          resource = scim_user_resource(user, account, ctx.context.base_url)
+          next resource unless filter_field
+
+          (resource[filter_field.to_sym].to_s.downcase == filter_value.to_s.downcase) ? resource : nil
         end
         ctx.json({schemas: ["urn:ietf:params:scim:api:messages:2.0:ListResponse"], totalResults: resources.length, itemsPerPage: resources.length, startIndex: 1, Resources: resources})
       end
@@ -377,14 +377,6 @@ module BetterAuth
         emails: [{primary: true, value: user.fetch("email")}],
         meta: {resourceType: "User", location: base_url ? "#{base_url}/scim/v2/Users/#{user.fetch("id")}" : nil}.compact
       }.compact
-    end
-
-    def scim_filter_value(user, field)
-      case field
-      when "userName" then user["email"]
-      when "externalId" then user["externalId"]
-      else user[field]
-      end
     end
 
     def scim_parse_filter(filter)

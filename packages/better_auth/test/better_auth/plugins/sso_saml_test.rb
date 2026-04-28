@@ -128,6 +128,77 @@ class BetterAuthPluginsSSOSAMLTest < Minitest::Test
     assert_equal [["saml", "http://localhost:3000/api/auth"]], calls
   end
 
+  def test_saml_response_parser_hook_enables_optional_real_xml_validator_adapter
+    calls = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.sso(
+          saml: {
+            parse_response: ->(raw_response:, provider:, context:) do
+              calls << [raw_response, provider.fetch("providerId"), context.context.base_url]
+              {email: "parsed@example.com", name: "Parsed User", id: "parsed-assertion"}
+            end
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth)
+    auth.api.register_sso_provider(
+      headers: {"cookie" => cookie},
+      body: {
+        providerId: "saml",
+        issuer: "https://idp.example.com",
+        domain: "example.com",
+        samlConfig: {entryPoint: "https://idp.example.com/sso", cert: "test-cert", audience: "better-auth-ruby"}
+      }
+    )
+
+    raw_response = "signed-xml-from-companion-package"
+    status, headers, _body = auth.api.acs_endpoint(
+      params: {providerId: "saml"},
+      body: {SAMLResponse: raw_response},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_equal "/", headers.fetch("location")
+    assert auth.context.internal_adapter.find_user_by_email("parsed@example.com")[:user]
+    assert_equal [[raw_response, "saml", "http://localhost:3000/api/auth"]], calls
+  end
+
+  def test_saml_auth_request_url_hook_enables_optional_real_xml_request_adapter
+    calls = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.sso(
+          saml: {
+            auth_request_url: ->(provider:, relay_state:, context:) do
+              calls << [provider.fetch("providerId"), relay_state, context.context.base_url]
+              "https://idp.example.com/real-saml?RelayState=#{URI.encode_www_form_component(relay_state)}"
+            end
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth)
+    auth.api.register_sso_provider(
+      headers: {"cookie" => cookie},
+      body: {
+        providerId: "saml",
+        issuer: "https://idp.example.com",
+        domain: "example.com",
+        samlConfig: {entryPoint: "https://idp.example.com/sso", cert: "test-cert", audience: "better-auth-ruby"}
+      }
+    )
+
+    sign_in = auth.api.sign_in_sso(body: {providerId: "saml", callbackURL: "/dashboard"})
+
+    assert_match %r{\Ahttps://idp.example.com/real-saml\?RelayState=}, sign_in.fetch(:url)
+    assert_equal "saml", calls.first.fetch(0)
+    assert_equal "http://localhost:3000/api/auth", calls.first.fetch(2)
+    assert calls.first.fetch(1).length.positive?
+  end
+
   def test_saml_xml_response_rejects_missing_and_multiple_assertions
     no_assertion = Base64.strict_encode64("<Response></Response>")
     error = assert_raises(BetterAuth::APIError) { BetterAuth::Plugins.sso_validate_single_saml_assertion!(no_assertion) }

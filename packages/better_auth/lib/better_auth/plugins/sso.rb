@@ -26,7 +26,7 @@ module BetterAuth
         endpoints: {
           sp_metadata: sso_sp_metadata_endpoint,
           register_sso_provider: sso_register_provider_endpoint,
-          sign_in_sso: sso_sign_in_endpoint,
+          sign_in_sso: sso_sign_in_endpoint(config),
           callback_sso: sso_oidc_callback_endpoint,
           callback_sso_saml: sso_saml_callback_endpoint(config),
           acs_endpoint: sso_saml_acs_endpoint(config),
@@ -203,7 +203,7 @@ module BetterAuth
       end
     end
 
-    def sso_sign_in_endpoint
+    def sso_sign_in_endpoint(config = {})
       Endpoint.new(path: "/sign-in/sso", method: "POST") do |ctx|
         body = normalize_hash(ctx.body)
         provider = sso_select_provider(ctx, body)
@@ -217,7 +217,7 @@ module BetterAuth
 
         if provider["samlConfig"]
           relay_state = BetterAuth::Crypto.sign_jwt(state_data.merge(nonce: SecureRandom.hex(8)), ctx.context.secret, expires_in: 600)
-          url = sso_saml_authorization_url(provider, relay_state)
+          url = sso_saml_authorization_url(provider, relay_state, ctx, config)
         else
           state = BetterAuth::Crypto.sign_jwt(state_data, ctx.context.secret, expires_in: 600)
           url = sso_oidc_authorization_url(provider, ctx, state)
@@ -299,7 +299,7 @@ module BetterAuth
       provider = sso_find_provider!(ctx, sso_fetch(ctx.params, :provider_id))
       relay_state = sso_fetch(ctx.body, :relay_state) || sso_fetch(ctx.query, :relay_state)
       state = sso_verify_state(relay_state, ctx.context.secret) || {}
-      assertion = sso_parse_saml_response(sso_fetch(ctx.body, :saml_response))
+      assertion = sso_parse_saml_response(sso_fetch(ctx.body, :saml_response), config, provider, ctx)
       sso_validate_saml_response!(config, assertion, provider, ctx)
       assertion_id = assertion[:id] || assertion["id"] || assertion[:email]
       replay_key = "sso-saml-assertion:#{provider.fetch("providerId")}:#{assertion_id}"
@@ -360,7 +360,13 @@ module BetterAuth
       ctx.context.adapter.create(model: "member", data: {organizationId: organization_id, userId: user.fetch("id"), role: role, createdAt: Time.now})
     end
 
-    def sso_parse_saml_response(value)
+    def sso_parse_saml_response(value, config = {}, provider = nil, ctx = nil)
+      parser = config.dig(:saml, :parse_response)
+      if parser.respond_to?(:call)
+        parsed = parser.call(raw_response: value.to_s, provider: provider, context: ctx)
+        return normalize_hash(parsed)
+      end
+
       JSON.parse(Base64.decode64(value.to_s), symbolize_names: true)
     rescue
       raise APIError.new("BAD_REQUEST", message: "Invalid SAML response")
@@ -427,7 +433,12 @@ module BetterAuth
       "#{endpoint}?#{URI.encode_www_form(query)}"
     end
 
-    def sso_saml_authorization_url(provider, relay_state)
+    def sso_saml_authorization_url(provider, relay_state, ctx = nil, config = {})
+      auth_request_url = config.dig(:saml, :auth_request_url)
+      if auth_request_url.respond_to?(:call)
+        return auth_request_url.call(provider: provider, relay_state: relay_state, context: ctx)
+      end
+
       config = normalize_hash(provider["samlConfig"] || {})
       query = {
         SAMLRequest: Base64.strict_encode64(JSON.generate({providerId: provider.fetch("providerId")})),

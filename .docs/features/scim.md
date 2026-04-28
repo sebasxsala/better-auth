@@ -21,7 +21,7 @@ Status: Complete for Ruby server parity.
 
 ## Key Differences
 
-- Filter support follows upstream server behavior for `userName eq` and `externalId eq`, including SCIM-style errors for unsupported operators.
+- Filter support follows upstream server behavior for `userName eq` and `externalId eq`, including linked-account `externalId` values and intentional SCIM-style errors for unsupported operators (`ne`, `co`, `sw`, `ew`, and `pr`).
 - Organization-scoped provisioning requires the organization plugin and rejects token generation or resource access when the authenticated user/resource is outside the organization.
 
 ## Testing

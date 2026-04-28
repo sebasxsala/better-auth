@@ -93,6 +93,34 @@ class BetterAuthPluginsSiweTest < Minitest::Test
     assert_equal "wallet@example.com", user["email"]
   end
 
+  def test_verify_message_callback_receives_upstream_equivalent_payload_and_response_shape
+    calls = []
+    auth = build_auth(
+      verify_message: lambda do |message:, signature:, address:, chain_id:, cacao:|
+        calls << {message: message, signature: signature, address: address, chain_id: chain_id, cacao: cacao}
+        true
+      end
+    )
+
+    auth.api.get_siwe_nonce(body: {walletAddress: WALLET})
+    result = auth.api.verify_siwe_message(body: {message: "valid-message", signature: "valid-signature", walletAddress: WALLET})
+
+    assert_equal true, result.fetch(:success)
+    assert_kind_of String, result.fetch(:token)
+    assert_equal WALLET, result.dig(:user, :walletAddress)
+    assert_equal 1, result.dig(:user, :chainId)
+    assert_kind_of String, result.dig(:user, :id)
+
+    call = calls.fetch(0)
+    assert_equal "valid-message", call.fetch(:message)
+    assert_equal "valid-signature", call.fetch(:signature)
+    assert_equal WALLET, call.fetch(:address)
+    assert_equal 1, call.fetch(:chain_id)
+    assert_equal "caip122", call.dig(:cacao, :h, :t)
+    assert_equal "nonce-1", call.dig(:cacao, :p, :nonce)
+    assert_equal "example.com", call.dig(:cacao, :p, :domain)
+  end
+
   def test_same_wallet_on_different_chains_reuses_user_and_adds_address
     auth = build_auth
 

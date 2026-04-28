@@ -163,6 +163,32 @@ class BetterAuthPluginsSCIMTest < Minitest::Test
     assert_equal 'The operator "co" is not supported', error.message
   end
 
+  def test_scim_filters_external_id_from_linked_account_and_rejects_unsupported_operators
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "okta"}).fetch(:scimToken)
+    headers = bearer(token)
+
+    auth.context.internal_adapter.create_user(email: "existing@example.com", name: "Existing User", emailVerified: true)
+    created = auth.api.create_scim_user(
+      headers: headers,
+      body: {userName: "existing@example.com", externalId: "external-existing"}
+    )
+    assert_equal "external-existing", created.fetch(:externalId)
+
+    listed = auth.api.list_scim_users(headers: headers, query: {filter: 'externalId eq "external-existing"'})
+    assert_equal 1, listed.fetch(:totalResults)
+    assert_equal created.fetch(:id), listed.fetch(:Resources).first.fetch(:id)
+
+    %w[ne co sw ew pr].each do |operator|
+      error = assert_raises(BetterAuth::APIError) do
+        auth.api.list_scim_users(headers: headers, query: {filter: %(userName #{operator} "existing@example.com")})
+      end
+      assert_equal 400, error.status_code
+      assert_equal %(The operator "#{operator}" is not supported), error.message
+    end
+  end
+
   def test_scim_requires_org_plugin_and_membership_for_org_tokens
     no_org = build_auth
     no_org_cookie = sign_up_cookie(no_org)

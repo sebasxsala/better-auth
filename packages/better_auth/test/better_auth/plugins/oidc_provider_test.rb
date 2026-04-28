@@ -19,7 +19,7 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
   end
 
   def test_metadata_registration_authorization_token_and_userinfo_flow
-    auth = build_auth
+    auth = build_auth(store_client_secret: :hashed)
     cookie = sign_up_cookie(auth)
 
     metadata = auth.api.get_open_id_config
@@ -78,6 +78,74 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
     assert_equal "oidc@example.com", userinfo[:email]
     assert_equal false, userinfo[:email_verified]
     assert_equal "OIDC User", userinfo[:name]
+  end
+
+  def test_metadata_exposes_and_routes_support_introspection_and_revocation
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    metadata = auth.api.get_open_id_config
+
+    assert_equal "http://localhost:3000/api/auth/oauth2/introspect", metadata[:introspection_endpoint]
+    assert_equal "http://localhost:3000/api/auth/oauth2/revoke", metadata[:revocation_endpoint]
+    assert_equal ["client_secret_basic", "client_secret_post"], metadata[:introspection_endpoint_auth_methods_supported]
+    assert_equal ["client_secret_basic", "client_secret_post"], metadata[:revocation_endpoint_auth_methods_supported]
+
+    client = auth.api.register_o_auth_application(
+      headers: {"cookie" => cookie},
+      body: {
+        redirect_uris: ["https://client.example/callback"],
+        token_endpoint_auth_method: "client_secret_post",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        skip_consent: true,
+        client_name: "Introspection Client"
+      }
+    )
+    code = authorize_code(auth, cookie, client, scope: "openid email")
+    tokens = auth.api.o_auth2_token(
+      body: {
+        grant_type: "authorization_code",
+        code: code,
+        redirect_uri: "https://client.example/callback",
+        client_id: client[:client_id],
+        client_secret: client[:client_secret],
+        code_verifier: "verifier"
+      }
+    )
+
+    active = auth.api.o_auth2_introspect(
+      body: {
+        token: tokens.fetch(:access_token),
+        token_type_hint: "access_token",
+        client_id: client[:client_id],
+        client_secret: client[:client_secret]
+      }
+    )
+    assert_equal true, active[:active]
+    assert_equal client[:client_id], active[:client_id]
+    assert_equal "openid email", active[:scope]
+
+    assert_equal(
+      {revoked: true},
+      auth.api.o_auth2_revoke(
+        body: {
+          token: tokens.fetch(:access_token),
+          token_type_hint: "access_token",
+          client_id: client[:client_id],
+          client_secret: client[:client_secret]
+        }
+      )
+    )
+
+    inactive = auth.api.o_auth2_introspect(
+      body: {
+        token: tokens.fetch(:access_token),
+        token_type_hint: "access_token",
+        client_id: client[:client_id],
+        client_secret: client[:client_secret]
+      }
+    )
+    assert_equal false, inactive[:active]
   end
 
   def test_metadata_and_token_flow_work_through_rack_for_external_clients
@@ -323,6 +391,58 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
     assert_equal({"tenant" => "ruby"}, client[:metadata])
   end
 
+  def test_dynamic_client_lifecycle_lists_updates_rotates_and_deletes_owned_clients
+    auth = build_auth(store_client_secret: :hashed)
+    cookie = sign_up_cookie(auth)
+    client = auth.api.register_o_auth_application(
+      headers: {"cookie" => cookie},
+      body: {
+        redirect_uris: ["https://client.example/callback"],
+        token_endpoint_auth_method: "client_secret_post",
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        client_name: "Lifecycle Client"
+      }
+    )
+
+    listed = auth.api.list_o_auth_applications(headers: {"cookie" => cookie})
+    assert_equal [client[:client_id]], listed.map { |entry| entry.fetch(:client_id) }
+    refute listed.first.key?(:client_secret)
+
+    updated = auth.api.update_o_auth_application(
+      headers: {"cookie" => cookie},
+      params: {id: client[:client_id]},
+      body: {
+        redirect_uris: ["https://client.example/callback", "https://client.example/second"],
+        token_endpoint_auth_method: "none",
+        client_secret: "ignored-secret",
+        client_name: "Updated Client"
+      }
+    )
+    assert_equal "Updated Client", updated[:client_name]
+    assert_equal ["https://client.example/callback", "https://client.example/second"], updated[:redirect_uris]
+    assert_equal "client_secret_post", updated[:token_endpoint_auth_method]
+    refute updated.key?(:client_secret)
+
+    rotated = auth.api.rotate_o_auth_application_secret(headers: {"cookie" => cookie}, params: {id: client[:client_id]})
+    assert rotated[:client_secret]
+    refute_equal client[:client_secret], rotated[:client_secret]
+    refute_equal rotated[:client_secret], auth.context.adapter.find_one(model: "oauthApplication", where: [{field: "clientId", value: client[:client_id]}]).fetch("clientSecret")
+
+    deleted = auth.api.delete_o_auth_application(headers: {"cookie" => cookie}, params: {id: client[:client_id]})
+    assert_equal({success: true}, deleted)
+    assert_raises(BetterAuth::APIError) { auth.api.get_o_auth_client(params: {id: client[:client_id]}) }
+  end
+
+  def test_oidc_provider_normalizes_issuer_like_upstream_rfc_9207
+    auth = build_auth(auth_base_url: "http://issuer.example.com")
+
+    metadata = auth.api.get_open_id_config
+
+    assert_equal "https://issuer.example.com", metadata[:issuer]
+    assert_equal "https://issuer.example.com/auth", BetterAuth::Plugins::OIDCProvider.normalize_issuer("http://issuer.example.com/auth/?x=1#frag")
+  end
+
   def test_authorization_validates_scope_pkce_and_max_age
     auth = build_auth(require_pkce: true, login_page: "/login")
     cookie = sign_up_cookie(auth)
@@ -501,8 +621,9 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
 
   def build_auth(options = {})
     extra_plugins = Array(options.delete(:extra_plugins))
+    auth_base_url = options.delete(:auth_base_url) || "http://localhost:3000"
     BetterAuth.auth(
-      base_url: "http://localhost:3000",
+      base_url: auth_base_url,
       secret: SECRET,
       database: :memory,
       plugins: [BetterAuth::Plugins.oidc_provider(options), *extra_plugins]

@@ -9,6 +9,18 @@ module BetterAuth
 
       module_function
 
+      def normalize_issuer(value)
+        uri = URI.parse(value.to_s)
+        uri.query = nil
+        uri.fragment = nil
+        if uri.scheme == "http" && !["localhost", "127.0.0.1"].include?(uri.host)
+          uri.scheme = "https"
+        end
+        uri.to_s.sub(%r{/+\z}, "")
+      rescue URI::InvalidURIError
+        value.to_s.split(/[?#]/).first.sub(%r{/+\z}, "")
+      end
+
       def parse_prompt(value)
         prompts = value.to_s.split(/\s+/).select { |prompt| VALID_PROMPTS.include?(prompt) }
         if prompts.include?("none") && prompts.length > 1
@@ -57,9 +69,15 @@ module BetterAuth
         o_auth2_authorize: oidc_authorize_endpoint(config),
         o_auth_consent: oidc_consent_endpoint(config),
         o_auth2_token: oidc_token_endpoint(config),
+        o_auth2_introspect: oidc_introspect_endpoint(config),
+        o_auth2_revoke: oidc_revoke_endpoint(config),
         o_auth2_user_info: oidc_userinfo_endpoint(config),
         register_o_auth_application: oidc_register_endpoint(config),
         get_o_auth_client: oidc_get_client_endpoint,
+        list_o_auth_applications: oidc_list_clients_endpoint,
+        update_o_auth_application: oidc_update_client_endpoint,
+        rotate_o_auth_application_secret: oidc_rotate_client_secret_endpoint(config),
+        delete_o_auth_application: oidc_delete_client_endpoint,
         end_session: oidc_end_session_endpoint
       }
     end
@@ -69,12 +87,14 @@ module BetterAuth
         base = OAuthProtocol.endpoint_base(ctx)
         supported_algs = oidc_use_jwt_plugin?(ctx, config) ? ["RS256", "EdDSA", "none"] : ["HS256", "none"]
         ctx.json({
-          issuer: OAuthProtocol.issuer(ctx),
+          issuer: OIDCProvider.normalize_issuer(OAuthProtocol.issuer(ctx)),
           authorization_endpoint: "#{base}/oauth2/authorize",
           token_endpoint: "#{base}/oauth2/token",
           userinfo_endpoint: "#{base}/oauth2/userinfo",
           jwks_uri: "#{base}/jwks",
           registration_endpoint: "#{base}/oauth2/register",
+          introspection_endpoint: "#{base}/oauth2/introspect",
+          revocation_endpoint: "#{base}/oauth2/revoke",
           end_session_endpoint: "#{base}/oauth2/endsession",
           scopes_supported: config[:scopes],
           response_types_supported: ["code"],
@@ -84,6 +104,8 @@ module BetterAuth
           subject_types_supported: ["public"],
           id_token_signing_alg_values_supported: supported_algs,
           token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"],
+          introspection_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
+          revocation_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
           code_challenge_methods_supported: ["S256"],
           claims_supported: %w[sub iss aud exp nbf iat jti email email_verified name]
         }.merge(config[:metadata] || {}))
@@ -129,6 +151,69 @@ module BetterAuth
         raise APIError.new("NOT_FOUND", message: "client not found") unless client
 
         ctx.json(OAuthProtocol.client_response(client, include_secret: false))
+      end
+    end
+
+    def oidc_list_clients_endpoint
+      Endpoint.new(path: "/oauth2/clients", method: "GET") do |ctx|
+        session = Routes.current_session(ctx)
+        clients = ctx.context.adapter.find_many(model: "oauthApplication", where: [{field: "userId", value: session[:user]["id"]}])
+        ctx.json(clients.map { |client| OAuthProtocol.client_response(client, include_secret: false) })
+      end
+    end
+
+    def oidc_update_client_endpoint
+      Endpoint.new(path: "/oauth2/client/:id", method: "PATCH") do |ctx|
+        session = Routes.current_session(ctx)
+        client = oidc_find_owned_client!(ctx, session)
+        body = OAuthProtocol.stringify_keys(ctx.body)
+        update_source = OAuthProtocol.stringify_keys(body["update"] || body)
+        update = {}
+        if update_source.key?("client_name") || update_source.key?("name")
+          update["name"] = update_source["client_name"] || update_source["name"]
+        end
+        update["uri"] = update_source["client_uri"] if update_source.key?("client_uri")
+        update["icon"] = update_source["logo_uri"] if update_source.key?("logo_uri")
+        if update_source.key?("redirect_uris")
+          redirects = Array(update_source["redirect_uris"]).map(&:to_s)
+          update["redirectUris"] = redirects
+          update["redirectUrls"] = redirects.join(",")
+        end
+        update["postLogoutRedirectUris"] = Array(update_source["post_logout_redirect_uris"]).map(&:to_s) if update_source.key?("post_logout_redirect_uris")
+        update["grantTypes"] = Array(update_source["grant_types"]).map(&:to_s) if update_source.key?("grant_types")
+        update["responseTypes"] = Array(update_source["response_types"]).map(&:to_s) if update_source.key?("response_types")
+        update["scopes"] = OAuthProtocol.parse_scopes(update_source["scope"] || update_source["scopes"]) if update_source.key?("scope") || update_source.key?("scopes")
+        update["metadata"] = update_source["metadata"] if update_source.key?("metadata")
+        update["updatedAt"] = Time.now
+        updated = update.empty? ? client : ctx.context.adapter.update(model: "oauthApplication", where: [{field: "id", value: client.fetch("id")}], update: update)
+        ctx.json(OAuthProtocol.client_response(updated, include_secret: false))
+      end
+    end
+
+    def oidc_rotate_client_secret_endpoint(config)
+      Endpoint.new(path: "/oauth2/client/:id/rotate-secret", method: "POST") do |ctx|
+        session = Routes.current_session(ctx)
+        client = oidc_find_owned_client!(ctx, session)
+        if OAuthProtocol.stringify_keys(client)["tokenEndpointAuthMethod"] == "none"
+          raise APIError.new("BAD_REQUEST", message: "invalid_client")
+        end
+
+        client_secret = Crypto.random_string(32)
+        updated = ctx.context.adapter.update(
+          model: "oauthApplication",
+          where: [{field: "id", value: client.fetch("id")}],
+          update: {clientSecret: OAuthProtocol.store_client_secret_value(ctx, client_secret, config[:store_client_secret]), updatedAt: Time.now}
+        )
+        ctx.json(OAuthProtocol.client_response(updated, include_secret: false).merge(client_secret: client_secret))
+      end
+    end
+
+    def oidc_delete_client_endpoint
+      Endpoint.new(path: "/oauth2/client/:id", method: "DELETE") do |ctx|
+        session = Routes.current_session(ctx)
+        client = oidc_find_owned_client!(ctx, session)
+        ctx.context.adapter.delete(model: "oauthApplication", where: [{field: "id", value: client.fetch("id")}])
+        ctx.json({success: true})
       end
     end
 
@@ -275,12 +360,12 @@ module BetterAuth
             session: code[:session],
             scopes: code[:scopes],
             include_refresh: code[:scopes].include?("offline_access"),
-            issuer: OAuthProtocol.issuer(ctx),
+            issuer: OIDCProvider.normalize_issuer(OAuthProtocol.issuer(ctx)),
             access_token_expires_in: config[:access_token_expires_in],
             id_token_signer: oidc_id_token_signer(ctx, config)
           )
         when OAuthProtocol::REFRESH_GRANT
-          OAuthProtocol.refresh_tokens(ctx, config[:store], model: "oauthAccessToken", client: client, refresh_token: body["refresh_token"], scopes: body["scope"], issuer: OAuthProtocol.issuer(ctx), access_token_expires_in: config[:access_token_expires_in], id_token_signer: oidc_id_token_signer(ctx, config))
+          OAuthProtocol.refresh_tokens(ctx, config[:store], model: "oauthAccessToken", client: client, refresh_token: body["refresh_token"], scopes: body["scope"], issuer: OIDCProvider.normalize_issuer(OAuthProtocol.issuer(ctx)), access_token_expires_in: config[:access_token_expires_in], id_token_signer: oidc_id_token_signer(ctx, config))
         else
           raise APIError.new("BAD_REQUEST", message: "unsupported_grant_type")
         end
@@ -291,6 +376,33 @@ module BetterAuth
     def oidc_userinfo_endpoint(config)
       Endpoint.new(path: "/oauth2/userinfo", method: "GET") do |ctx|
         ctx.json(OAuthProtocol.userinfo(config[:store], ctx.headers["authorization"], additional_claim: config[:get_additional_user_info_claim]))
+      end
+    end
+
+    def oidc_introspect_endpoint(config)
+      Endpoint.new(path: "/oauth2/introspect", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
+        OAuthProtocol.authenticate_client!(ctx, "oauthApplication", store_client_secret: config[:store_client_secret])
+        body = OAuthProtocol.stringify_keys(ctx.body)
+        token = config[:store][:tokens][body["token"].to_s] || config[:store][:refresh_tokens][body["token"].to_s]
+        active = token && !token["revoked"] && (!token["expiresAt"] || token["expiresAt"] > Time.now)
+        ctx.json(active ? {
+          active: true,
+          client_id: token["clientId"],
+          scope: OAuthProtocol.scope_string(token["scope"] || token["scopes"]),
+          sub: token.dig("user", "id"),
+          exp: token["expiresAt"]&.to_i
+        } : {active: false})
+      end
+    end
+
+    def oidc_revoke_endpoint(config)
+      Endpoint.new(path: "/oauth2/revoke", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
+        OAuthProtocol.authenticate_client!(ctx, "oauthApplication", store_client_secret: config[:store_client_secret])
+        body = OAuthProtocol.stringify_keys(ctx.body)
+        if (token = config[:store][:tokens][body["token"].to_s] || config[:store][:refresh_tokens][body["token"].to_s])
+          token["revoked"] = Time.now
+        end
+        ctx.json({revoked: true})
       end
     end
 
@@ -369,6 +481,14 @@ module BetterAuth
           }
         }
       }
+    end
+
+    def oidc_find_owned_client!(ctx, session)
+      client = OAuthProtocol.find_client(ctx, "oauthApplication", ctx.params["id"] || ctx.params[:id])
+      raise APIError.new("NOT_FOUND", message: "client not found") unless client
+      raise APIError.new("FORBIDDEN", message: "Access denied") unless client["userId"] == session[:user]["id"]
+
+      client
     end
 
     def valid_code_challenge_method?(method, config)

@@ -6,12 +6,12 @@
 
 Status: Complete for Ruby server parity.
 
-Adds OIDC provider metadata, dynamic client registration, authorization-code issuance, token exchange, refresh tokens, userinfo, prompt parsing, consent-code flow, and RP-initiated logout.
+Adds OIDC provider metadata, dynamic client registration, authorization-code issuance, token exchange, refresh tokens, introspection, revocation, userinfo, prompt parsing, consent-code flow, and RP-initiated logout.
 
 ## Ruby Adaptation
 
 - Exposed as `BetterAuth::Plugins.oidc_provider`.
-- Adds `/.well-known/openid-configuration`, `/oauth2/authorize`, `/oauth2/consent`, `/oauth2/token`, `/oauth2/userinfo`, `/oauth2/register`, `/oauth2/client/:id`, and `/oauth2/endsession`.
+- Adds `/.well-known/openid-configuration`, `/oauth2/authorize`, `/oauth2/consent`, `/oauth2/token`, `/oauth2/introspect`, `/oauth2/revoke`, `/oauth2/userinfo`, `/oauth2/register`, `/oauth2/client/:id`, and `/oauth2/endsession`.
 - Adds `oauthApplication`, `oauthAccessToken`, and `oauthConsent` schema tables.
 - Uses existing `JWT`/OpenSSL/stdlib helpers only; no new runtime dependency was added.
 - Stores short-lived authorization codes and issued token lookup state in the plugin runtime store while also persisting token/client records through the configured adapter.
@@ -19,7 +19,7 @@ Adds OIDC provider metadata, dynamic client registration, authorization-code iss
 ## Key Differences
 
 - Ruby options use snake_case equivalents of upstream camelCase.
-- Current coverage focuses on server-side Rack/API behavior: metadata, prompt validation, client registration, consent redirects/HTML rendering, auth-code redirect, token exchange, userinfo, refresh-token issuance, and logout.
+- Current coverage focuses on server-side Rack/API behavior: metadata, prompt validation, client registration, consent redirects/HTML rendering, auth-code redirect, token exchange, introspection, revocation, userinfo, refresh-token issuance, and logout.
 - Rack integration coverage exercises the external-client path for metadata, dynamic registration, authorize redirect, and token exchange.
 - Browser client helpers and TypeScript inference are outside Ruby server scope.
 
