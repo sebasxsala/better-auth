@@ -178,7 +178,7 @@ module BetterAuth
       return jwt_config[:sign].call(payload) if jwt_config[:sign].respond_to?(:call)
 
       key = signing_jwk(ctx, config)
-      private_key = OpenSSL::PKey.read(key["privateKey"])
+      private_key = OpenSSL::PKey.read(jwk_private_key_value(ctx, key, config))
       alg = key["alg"] || "RS256"
       return encode_eddsa_jwt(payload, private_key, key["id"]) if alg == "EdDSA"
 
@@ -189,19 +189,17 @@ module BetterAuth
       header = ::JWT.decode(token.to_s, nil, false).last
       key = verification_jwks(ctx, config).find { |entry| entry["id"] == header["kid"] || entry["kid"] == header["kid"] }
       return nil unless key
-      return verify_eddsa_jwt(token.to_s, key, config) if (key["alg"] || header["alg"]) == "EdDSA"
+      return verify_eddsa_jwt(ctx, token.to_s, key, config) if (key["alg"] || header["alg"]) == "EdDSA"
 
-      options = {algorithm: key["alg"] || "RS256"}
-      if config.dig(:jwt, :issuer)
-        options[:iss] = config.dig(:jwt, :issuer)
-        options[:verify_iss] = true
-      end
-      if config.dig(:jwt, :audience)
-        options[:aud] = config.dig(:jwt, :audience)
-        options[:verify_aud] = true
-      end
+      options = {
+        algorithm: key["alg"] || "RS256",
+        iss: config.dig(:jwt, :issuer) || ctx.context.base_url,
+        verify_iss: true,
+        aud: config.dig(:jwt, :audience) || ctx.context.base_url,
+        verify_aud: true
+      }
       decoded, = ::JWT.decode(token.to_s, JWT.public_key(key), true, options)
-      decoded
+      jwt_payload_valid?(decoded) ? decoded : nil
     rescue ::JWT::DecodeError, OpenSSL::PKey::PKeyError
       nil
     end
@@ -274,7 +272,7 @@ module BetterAuth
       data = {
         "id" => Crypto.uuid,
         "publicKey" => public_pem,
-        "privateKey" => private_key_pem(pair),
+        "privateKey" => jwk_private_key_for_storage(ctx, private_key_pem(pair), config),
         "createdAt" => Time.now,
         "alg" => alg,
         "pem" => public_pem
@@ -303,6 +301,27 @@ module BetterAuth
       data[:x] = key["x"] if key["x"]
       data[:y] = key["y"] if key["y"]
       data
+    end
+
+    def jwk_private_key_for_storage(ctx, private_key, config)
+      return private_key if config.dig(:jwks, :disable_private_key_encryption)
+
+      Crypto.symmetric_encrypt(key: ctx.context.secret, data: private_key)
+    end
+
+    def jwk_private_key_value(ctx, key, _config)
+      value = key["privateKey"]
+      Crypto.symmetric_decrypt(key: ctx.context.secret, data: value) || value
+    end
+
+    def jwt_payload_valid?(payload)
+      return false if payload["sub"].to_s.empty?
+
+      audience = payload["aud"]
+      return false if audience.nil?
+      return false if audience.respond_to?(:empty?) && audience.empty?
+
+      true
     end
 
     def generate_key_pair(alg)
@@ -377,7 +396,7 @@ module BetterAuth
       "#{signing_input}.#{Crypto.base64url_encode(signature)}"
     end
 
-    def verify_eddsa_jwt(token, key, config)
+    def verify_eddsa_jwt(ctx, token, key, config)
       header_segment, payload_segment, signature_segment = token.split(".", 3)
       return nil unless header_segment && payload_segment && signature_segment
 
@@ -389,8 +408,11 @@ module BetterAuth
       payload = JSON.parse(Crypto.base64url_decode(payload_segment))
       now = Time.now.to_i
       return nil if payload["exp"] && payload["exp"].to_i <= now
-      return nil if config.dig(:jwt, :issuer) && payload["iss"] != config.dig(:jwt, :issuer)
-      return nil if config.dig(:jwt, :audience) && Array(payload["aud"]).map(&:to_s).none?(config.dig(:jwt, :audience).to_s)
+      issuer = config.dig(:jwt, :issuer) || ctx.context.base_url
+      audience = config.dig(:jwt, :audience) || ctx.context.base_url
+      return nil if issuer && payload["iss"] != issuer
+      return nil if audience && Array(payload["aud"]).map(&:to_s).none?(audience.to_s)
+      return nil unless jwt_payload_valid?(payload)
 
       payload
     rescue JSON::ParserError, OpenSSL::PKey::PKeyError, ArgumentError

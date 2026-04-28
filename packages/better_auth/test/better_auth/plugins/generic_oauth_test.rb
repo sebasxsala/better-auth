@@ -50,6 +50,132 @@ class BetterAuthPluginsGenericOAuthTest < Minitest::Test
     assert_equal "query", params.fetch("response_mode")
   end
 
+  def test_pkce_uses_s256_challenge_and_token_exchange_only_sends_verifier_when_enabled
+    requests = []
+    with_oauth_server(requests) do |base_url|
+      auth = build_auth(
+        provider_overrides: {
+          get_token: nil,
+          get_user_info: nil,
+          authorization_url: "#{base_url}/authorize",
+          token_url: "#{base_url}/token",
+          user_info_url: "#{base_url}/userinfo",
+          pkce: true
+        }
+      )
+      _status, headers, body = auth.api.sign_in_with_oauth2(
+        body: {providerId: "custom", callbackURL: "/dashboard"},
+        as_response: true
+      )
+      data = JSON.parse(body.join)
+      params = Rack::Utils.parse_query(URI.parse(data.fetch("url")).query)
+      state = params.fetch("state")
+
+      assert_equal "S256", params.fetch("code_challenge_method")
+      auth.api.o_auth2_callback(
+        params: {providerId: "custom"},
+        query: {code: "oauth-code", state: state},
+        headers: {"cookie" => cookie_header(headers.fetch("set-cookie"))},
+        as_response: true
+      )
+
+      assert requests.find { |request| request[:path] == "/token" }.fetch(:params).key?("code_verifier")
+    end
+
+    requests = []
+    with_oauth_server(requests) do |base_url|
+      auth = build_auth(
+        provider_overrides: {
+          get_token: nil,
+          get_user_info: nil,
+          authorization_url: "#{base_url}/authorize",
+          token_url: "#{base_url}/token",
+          user_info_url: "#{base_url}/userinfo",
+          pkce: false
+        }
+      )
+      _status, headers, body = auth.api.sign_in_with_oauth2(
+        body: {providerId: "custom", callbackURL: "/dashboard"},
+        as_response: true
+      )
+      params = Rack::Utils.parse_query(URI.parse(JSON.parse(body.join).fetch("url")).query)
+
+      refute params.key?("code_challenge")
+      refute params.key?("code_challenge_method")
+
+      auth.api.o_auth2_callback(
+        params: {providerId: "custom"},
+        query: {code: "oauth-code", state: params.fetch("state")},
+        headers: {"cookie" => cookie_header(headers.fetch("set-cookie"))},
+        as_response: true
+      )
+
+      refute requests.find { |request| request[:path] == "/token" }.fetch(:params).key?("code_verifier")
+    end
+  end
+
+  def test_callback_without_state_redirects_to_restart_error
+    auth = build_auth(on_api_error: {error_url: "/error"})
+
+    status, headers, = auth.api.o_auth2_callback(
+      params: {providerId: "custom"},
+      query: {code: "oauth-code"},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_equal "/error?error=please_restart_the_process", headers.fetch("location")
+  end
+
+  def test_additional_data_cannot_override_internal_state_fields
+    auth = build_auth(on_api_error: {error_url: "/error"})
+    _status, headers, body = auth.api.sign_in_with_oauth2(
+      body: {
+        providerId: "custom",
+        callbackURL: "/dashboard",
+        additionalData: {
+          callbackURL: "/evil",
+          errorURL: "/evil-error",
+          codeVerifier: "attacker-verifier"
+        }
+      },
+      as_response: true
+    )
+    state = Rack::Utils.parse_query(URI.parse(JSON.parse(body.join).fetch("url")).query).fetch("state")
+
+    status, callback_headers, = auth.api.o_auth2_callback(
+      params: {providerId: "custom"},
+      query: {code: "oauth-code", state: state},
+      headers: {"cookie" => cookie_header(headers.fetch("set-cookie"))},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_equal "/dashboard", callback_headers.fetch("location")
+  end
+
+  def test_discovery_headers_are_sent_when_fetching_metadata
+    requests = []
+    with_oauth_server(requests) do |base_url|
+      auth = build_auth(
+        provider_overrides: {
+          get_token: nil,
+          get_user_info: nil,
+          authorization_url: nil,
+          token_url: nil,
+          user_info_url: nil,
+          discovery_url: "#{base_url}/.well-known/openid-configuration",
+          discovery_headers: {"X-Discovery-Token" => "secret"}
+        }
+      )
+
+      auth.api.sign_in_with_oauth2(body: {providerId: "custom", disableRedirect: true})
+
+      discovery_request = requests.find { |request| request[:path] == "/.well-known/openid-configuration" }
+      assert_equal "secret", discovery_request.fetch(:headers).fetch("x-discovery-token")
+    end
+  end
+
   def test_callback_creates_user_account_session_and_redirects_new_user
     auth = build_auth
     sign_in = auth.api.sign_in_with_oauth2(body: {providerId: "custom", callbackURL: "/dashboard", newUserCallbackURL: "/welcome"})
@@ -179,6 +305,37 @@ class BetterAuthPluginsGenericOAuthTest < Minitest::Test
 
     assert_equal 302, status
     assert_equal "/dashboard", headers.fetch("location")
+  end
+
+  def test_override_user_info_updates_existing_user_on_sign_in
+    calls = 0
+    auth = build_auth(
+      provider_overrides: {
+        override_user_info: true,
+        get_user_info: ->(_tokens) {
+          calls += 1
+          {
+            id: "override-sub",
+            email: "override@example.com",
+            name: (calls == 1) ? "Original Name" : "Updated Name",
+            image: (calls == 1) ? "https://example.com/original.png" : "https://example.com/updated.png",
+            emailVerified: true
+          }
+        }
+      }
+    )
+
+    first = auth.api.sign_in_with_oauth2(body: {providerId: "custom", callbackURL: "/dashboard"})
+    first_state = Rack::Utils.parse_query(URI.parse(first[:url]).query).fetch("state")
+    auth.api.o_auth2_callback(params: {providerId: "custom"}, query: {code: "oauth-code", state: first_state}, as_response: true)
+
+    second = auth.api.sign_in_with_oauth2(body: {providerId: "custom", callbackURL: "/dashboard"})
+    second_state = Rack::Utils.parse_query(URI.parse(second[:url]).query).fetch("state")
+    auth.api.o_auth2_callback(params: {providerId: "custom"}, query: {code: "oauth-code", state: second_state}, as_response: true)
+
+    user = auth.context.internal_adapter.find_user_by_email("override@example.com")[:user]
+    assert_equal "Updated Name", user.fetch("name")
+    assert_equal "https://example.com/updated.png", user.fetch("image")
   end
 
   def test_link_account_generates_link_state_and_callback_links_to_current_user
@@ -582,6 +739,7 @@ class BetterAuthPluginsGenericOAuthTest < Minitest::Test
 
   def with_oauth_server(requests)
     server = TCPServer.new("127.0.0.1", 0)
+    @oauth_server_base_url = "http://127.0.0.1:#{server.addr[1]}"
     thread = Thread.new do
       loop do
         socket = server.accept
@@ -607,13 +765,22 @@ class BetterAuthPluginsGenericOAuthTest < Minitest::Test
         socket&.close
       end
     end
-    yield "http://127.0.0.1:#{server.addr[1]}"
+    yield @oauth_server_base_url
   ensure
     server&.close
     thread&.join
   end
 
   def oauth_server_response_body(path, params = {})
+    if path == "/.well-known/openid-configuration"
+      return JSON.generate(
+        authorization_endpoint: "#{@oauth_server_base_url}/authorize",
+        token_endpoint: "#{@oauth_server_base_url}/token",
+        userinfo_endpoint: "#{@oauth_server_base_url}/userinfo",
+        issuer: @oauth_server_base_url
+      )
+    end
+
     if path == "/token"
       access_token = (params["grant_type"] == "refresh_token") ? "refreshed-access-token" : "http-access-token"
       return JSON.generate(

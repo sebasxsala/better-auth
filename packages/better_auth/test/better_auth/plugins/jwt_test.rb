@@ -36,6 +36,93 @@ class BetterAuthPluginsJWTTest < Minitest::Test
     assert_match(/\A[\w-]+\.[\w-]+\.[\w-]+\z/, signed[:token])
   end
 
+  def test_jwt_header_can_be_disabled
+    auth = build_auth(plugins: [BetterAuth::Plugins.jwt(disable_setting_jwt_header: true)])
+    cookie = sign_up_cookie(auth, email: "jwt-disabled-header@example.com")
+
+    _status, headers, _body = auth.api.get_session(headers: {"cookie" => cookie}, as_response: true)
+
+    refute headers.key?("set-auth-jwt")
+  end
+
+  def test_jwt_supports_custom_payload_and_subject
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.jwt(
+          jwt: {
+            define_payload: ->(session) { {"email" => session[:user]["email"], "role" => "admin"} },
+            get_subject: ->(session) { "user:#{session[:user]["id"]}" }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "jwt-payload@example.com")
+
+    token = auth.api.get_token(headers: {"cookie" => cookie})
+    payload = auth.api.verify_jwt(body: {token: token[:token]})[:payload]
+
+    assert_equal "jwt-payload@example.com", payload.fetch("email")
+    assert_equal "admin", payload.fetch("role")
+    assert_match(/\Auser:/, payload.fetch("sub"))
+  end
+
+  def test_jwt_verify_uses_base_url_as_default_issuer_and_audience
+    auth = build_auth(plugins: [BetterAuth::Plugins.jwt])
+    valid = auth.api.sign_jwt(body: {payload: {sub: "default-claims"}})
+    wrong_issuer = auth.api.sign_jwt(body: {payload: {sub: "wrong-issuer", iss: "https://issuer.example", aud: "http://localhost:3000/api/auth"}})
+    wrong_audience = auth.api.sign_jwt(body: {payload: {sub: "wrong-audience", iss: "http://localhost:3000/api/auth", aud: "https://audience.example"}})
+
+    assert_equal "default-claims", auth.api.verify_jwt(body: {token: valid[:token]})[:payload]["sub"]
+    assert_nil auth.api.verify_jwt(body: {token: wrong_issuer[:token]})[:payload]
+    assert_nil auth.api.verify_jwt(body: {token: wrong_audience[:token]})[:payload]
+  end
+
+  def test_jwt_verify_rejects_payloads_without_subject_or_audience
+    auth = build_auth(plugins: [BetterAuth::Plugins.jwt])
+    auth.api.sign_jwt(body: {payload: {sub: "seed-key"}})
+    key = auth.context.adapter.find_many(model: "jwks").first
+    private_key = OpenSSL::PKey.read(BetterAuth::Crypto.symmetric_decrypt(key: SECRET, data: key.fetch("privateKey")))
+    missing_sub = BetterAuth::Plugins.encode_eddsa_jwt(
+      {"aud" => "http://localhost:3000/api/auth", "iss" => "http://localhost:3000/api/auth", "exp" => Time.now.to_i + 60},
+      private_key,
+      key.fetch("id")
+    )
+    missing_aud = BetterAuth::Plugins.encode_eddsa_jwt(
+      {"sub" => "missing-aud", "iss" => "http://localhost:3000/api/auth", "exp" => Time.now.to_i + 60},
+      private_key,
+      key.fetch("id")
+    )
+
+    assert_nil auth.api.verify_jwt(body: {token: missing_sub})[:payload]
+    assert_nil auth.api.verify_jwt(body: {token: missing_aud})[:payload]
+  end
+
+  def test_jwks_path_can_be_customized
+    auth = build_auth(plugins: [BetterAuth::Plugins.jwt(jwks: {jwks_path: "/.well-known/jwks.json"})])
+
+    custom_status, _custom_headers, custom_body = auth.call(rack_env("GET", "/api/auth/.well-known/jwks.json"))
+    default_status, _default_headers, = auth.call(rack_env("GET", "/api/auth/jwks"))
+
+    assert_equal 200, custom_status
+    assert JSON.parse(custom_body.join).fetch("keys").any?
+    assert_equal 404, default_status
+  end
+
+  def test_private_key_is_encrypted_by_default_and_plain_when_disabled
+    encrypted_auth = build_auth(plugins: [BetterAuth::Plugins.jwt])
+    encrypted_auth.api.sign_jwt(body: {payload: {sub: "encrypted"}})
+    encrypted_key = encrypted_auth.context.adapter.find_many(model: "jwks").first.fetch("privateKey")
+
+    refute_match(/\ABEGIN /, encrypted_key)
+    assert BetterAuth::Crypto.symmetric_decrypt(key: SECRET, data: encrypted_key)
+
+    plain_auth = build_auth(plugins: [BetterAuth::Plugins.jwt(jwks: {disable_private_key_encryption: true})])
+    plain_auth.api.sign_jwt(body: {payload: {sub: "plain"}})
+    plain_key = plain_auth.context.adapter.find_many(model: "jwks").first.fetch("privateKey")
+
+    assert_match(/BEGIN/, plain_key)
+  end
+
   def test_jwt_rotates_keys_when_latest_key_is_expired
     storage = []
     auth = build_auth(
@@ -100,7 +187,7 @@ class BetterAuthPluginsJWTTest < Minitest::Test
       "ES512" => {kty: "EC", crv: "P-521", verifier: "ES512"}
     }.each do |alg, expected|
       auth = build_auth(plugins: [BetterAuth::Plugins.jwt(jwks: {key_pair_config: {alg: alg}})])
-      signed = auth.api.sign_jwt(body: {payload: {sub: "subject-#{alg}", aud: "http://localhost:3000", iss: "http://localhost:3000"}})
+      signed = auth.api.sign_jwt(body: {payload: {sub: "subject-#{alg}", aud: "http://localhost:3000/api/auth", iss: "http://localhost:3000/api/auth"}})
       jwk = auth.api.get_jwks[:keys].first
 
       decoded, header = if expected[:verifier]
@@ -196,5 +283,19 @@ class BetterAuthPluginsJWTTest < Minitest::Test
       as_response: true
     )
     headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def rack_env(method, path)
+    {
+      "REQUEST_METHOD" => method,
+      "PATH_INFO" => path,
+      "QUERY_STRING" => "",
+      "SERVER_NAME" => "localhost",
+      "SERVER_PORT" => "3000",
+      "REMOTE_ADDR" => "127.0.0.1",
+      "rack.url_scheme" => "http",
+      "rack.input" => StringIO.new(""),
+      "CONTENT_LENGTH" => "0"
+    }
   end
 end

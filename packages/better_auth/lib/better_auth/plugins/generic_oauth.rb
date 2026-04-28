@@ -3,6 +3,7 @@
 require "net/http"
 require "uri"
 require "base64"
+require "openssl"
 
 module BetterAuth
   module Plugins
@@ -296,6 +297,14 @@ module BetterAuth
         if !existing && (provider[:disable_sign_up] || (provider[:disable_implicit_sign_up] && !state_data["requestSignUp"]))
           redirect_error.call("signup_disabled")
         end
+        if existing && provider[:override_user_info]
+          ctx.context.internal_adapter.update_user(
+            existing[:user]["id"],
+            "name" => name,
+            "image" => fetch_value(mapped_user, "image"),
+            "emailVerified" => !!fetch_value(mapped_user, "emailVerified")
+          )
+        end
 
         session_data = Routes.persist_social_user(
           ctx,
@@ -315,15 +324,15 @@ module BetterAuth
       raise APIError.new("BAD_REQUEST", message: GENERIC_OAUTH_ERROR_CODES["INVALID_OAUTH_CONFIGURATION"]) if authorization_url.to_s.empty? || token_url.to_s.empty?
 
       code_verifier = Crypto.random_string(43)
-      state_data = {
+      state_data = normalize_hash(body[:additional_data] || body[:additionalData]).transform_keys(&:to_s).merge(
         "callbackURL" => body[:callback_url] || body[:callbackURL] || "/",
         "errorURL" => body[:error_callback_url] || body[:errorCallbackURL],
         "newUserURL" => body[:new_user_callback_url] || body[:newUserCallbackURL],
         "requestSignUp" => body[:request_sign_up] || body[:requestSignUp],
-        "codeVerifier" => code_verifier,
+        "codeVerifier" => provider[:pkce] ? code_verifier : nil,
         "link" => link,
         "expiresAt" => Time.now.to_i + 600
-      }.merge(normalize_hash(body[:additional_data] || body[:additionalData]).transform_keys(&:to_s))
+      )
       state = generic_oauth_generate_state(ctx, state_data)
       legacy_state = Crypto.sign_jwt(
         {
@@ -349,8 +358,10 @@ module BetterAuth
       ])
       scopes = Array(body[:scopes]) + Array(provider[:scopes])
       params << ["scope", scopes.join(" ")] unless scopes.empty?
-      params << ["code_challenge", code_verifier] if provider[:pkce]
-      params << ["code_challenge_method", "plain"] if provider[:pkce]
+      if provider[:pkce]
+        params << ["code_challenge", generic_oauth_pkce_challenge(code_verifier)]
+        params << ["code_challenge_method", "S256"]
+      end
       params << ["prompt", provider[:prompt]] if provider[:prompt]
       params << ["access_type", provider[:access_type]] if provider[:access_type]
       params << ["response_mode", provider[:response_mode]] if provider[:response_mode]
@@ -393,19 +404,21 @@ module BetterAuth
           code: code,
           redirectURI: generic_oauth_redirect_uri(ctx, provider),
           redirect_uri: generic_oauth_redirect_uri(ctx, provider),
-          codeVerifier: state_data["codeVerifier"],
-          code_verifier: state_data["codeVerifier"]
+          codeVerifier: provider[:pkce] ? state_data["codeVerifier"] : nil,
+          code_verifier: provider[:pkce] ? state_data["codeVerifier"] : nil
         ))
       end
 
       token_url = provider[:token_url] || generic_oauth_discovery(provider)["token_endpoint"]
       raise APIError.new("BAD_REQUEST", message: GENERIC_OAUTH_ERROR_CODES["TOKEN_URL_NOT_FOUND"]) if token_url.to_s.empty?
 
-      generic_oauth_post_token(ctx, token_url, provider, code, state_data["codeVerifier"], generic_oauth_redirect_uri(ctx, provider))
+      generic_oauth_post_token(ctx, token_url, provider, code, provider[:pkce] ? state_data["codeVerifier"] : nil, generic_oauth_redirect_uri(ctx, provider))
     end
 
     def generic_oauth_parse_state(ctx, state)
-      return Crypto.verify_jwt(state.to_s, ctx.context.secret) || {} if state.to_s.empty?
+      if state.to_s.empty?
+        raise ctx.redirect(generic_oauth_error_url(generic_oauth_state_error_url(ctx), "please_restart_the_process"))
+      end
 
       if ctx.context.options.account[:store_state_strategy].to_s == "cookie"
         cookie = ctx.context.create_auth_cookie("oauth_state")
@@ -564,7 +577,11 @@ module BetterAuth
       return provider[:_discovery] if provider[:_discovery]
 
       uri = URI(provider[:discovery_url])
-      response = Net::HTTP.get_response(uri)
+      request = Net::HTTP::Get.new(uri)
+      normalize_hash(provider[:discovery_headers] || provider[:discoveryHeaders]).each do |key, value|
+        request[key.to_s.tr("_", "-")] = value.to_s
+      end
+      response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == "https") { |http| http.request(request) }
       provider[:_discovery] = response.is_a?(Net::HTTPSuccess) ? JSON.parse(response.body) : {}
     rescue
       {}
@@ -579,9 +596,9 @@ module BetterAuth
       form_data = {
         grant_type: "authorization_code",
         code: code,
-        redirect_uri: redirect_uri,
-        code_verifier: code_verifier
+        redirect_uri: redirect_uri
       }.compact
+      form_data[:code_verifier] = code_verifier if code_verifier
       authentication = (provider[:authentication] || "post").to_s
       if authentication == "basic"
         request["authorization"] = "Basic #{Base64.strict_encode64("#{provider[:client_id]}:#{provider[:client_secret]}")}"
@@ -643,6 +660,10 @@ module BetterAuth
       return scope if scope.is_a?(Array)
 
       scope.to_s.split(/\s+/)
+    end
+
+    def generic_oauth_pkce_challenge(code_verifier)
+      Crypto.base64url_encode(OpenSSL::Digest.digest("SHA256", code_verifier.to_s))
     end
 
     def generic_oauth_normalize_user_info(data)

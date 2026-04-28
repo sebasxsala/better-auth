@@ -23,31 +23,32 @@ module BetterAuth
       config[:paths] = Array(config[:paths]).empty? ? HAVE_I_BEEN_PWNED_DEFAULT_PATHS : Array(config[:paths])
 
       Plugin.new(
-        id: "haveIBeenPwned",
-        hooks: {
-          before: [
-            {
-              matcher: ->(ctx) { config[:paths].include?(ctx.path) },
-              handler: ->(ctx) { have_i_been_pwned_check_context!(ctx, config) }
-            }
-          ]
-        },
+        id: "have-i-been-pwned",
+        init: ->(context) { have_i_been_pwned_wrap_password_hasher!(context, config) },
         error_codes: HAVE_I_BEEN_PWNED_ERROR_CODES,
         options: config
       )
     end
 
-    def have_i_been_pwned_check_context!(ctx, config)
-      body = normalize_hash(ctx.body)
-      password = case ctx.path
-      when "/sign-up/email"
-        body[:password]
-      when "/change-password", "/reset-password"
-        body[:new_password]
-      else
-        body[:password] || body[:new_password]
+    def have_i_been_pwned_wrap_password_hasher!(context, config)
+      email_config = context.options.email_and_password
+      password_config = email_config[:password] ||= {}
+      original_hasher = password_config[:hash]
+      algorithm = context.options.password_hasher
+      password_config[:hash] = lambda do |password, hash_ctx = nil|
+        if config[:enabled] != false && hash_ctx && config[:paths].include?(hash_ctx.path)
+          have_i_been_pwned_check_password!(password, config)
+        end
+
+        if original_hasher.respond_to?(:call)
+          arity = original_hasher.arity
+          return original_hasher.call(password, hash_ctx) if arity != 1 && arity != -1
+
+          return original_hasher.call(password)
+        end
+
+        Password.hash(password, algorithm: algorithm)
       end
-      have_i_been_pwned_check_password!(password, config)
       nil
     end
 

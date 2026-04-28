@@ -104,11 +104,20 @@ module BetterAuth
     end
 
     def self.hash_password(ctx, password)
+      hasher = ctx.context.options.email_and_password.dig(:password, :hash)
+      if hasher.respond_to?(:call)
+        return hasher_arity_accepts_context?(hasher) ? hasher.call(password, ctx) : hasher.call(password)
+      end
+
       Password.hash(
         password,
-        hasher: ctx.context.options.email_and_password.dig(:password, :hash),
         algorithm: ctx.context.options.password_hasher
       )
+    end
+
+    def self.hasher_arity_accepts_context?(hasher)
+      arity = hasher.arity
+      arity != 1 && arity != -1
     end
 
     def self.verify_password_value(ctx, password, digest)
