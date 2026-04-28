@@ -4,7 +4,7 @@ require "json"
 require "forwardable"
 require "webauthn"
 require "webauthn/fake_client"
-require_relative "../../test_helper"
+require_relative "../test_helper"
 
 class BetterAuthPluginsPasskeyTest < Minitest::Test
   SECRET = "phase-eight-secret-with-enough-entropy-123"
@@ -56,10 +56,161 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
 
     assert_equal 200, status
     assert_match(/\A[0-9a-f]{32}\z/, data.fetch("session").fetch("token"))
+    assert_equal "passkey@example.com", data.fetch("user").fetch("email")
     assert_includes headers.fetch("set-cookie"), "better-auth.session_token="
 
     updated_passkey = auth.context.adapter.find_one(model: "passkey", where: [{field: "id", value: passkey.fetch("id")}])
     assert_operator updated_passkey.fetch("counter"), :>, 0
+  end
+
+  def test_passkey_first_registration_resolves_user_context_extensions_and_callback
+    captured = {}
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.passkey(
+          registration: {
+            require_session: false,
+            extensions: {credProps: true},
+            resolve_user: lambda do |data|
+              captured[:resolve_context] = data.fetch(:context)
+              {id: captured.fetch(:user).fetch("id"), name: "resolved@example.com", display_name: "Resolved User"}
+            end,
+            after_verification: lambda do |data|
+              captured[:after_context] = data.fetch(:context)
+              captured[:after_user] = data.fetch(:user)
+              captured[:after_client_data] = data.fetch(:client_data)
+              nil
+            end
+          }
+        )
+      ]
+    )
+    captured[:user] = auth.context.internal_adapter.create_user(email: "resolved@example.com", name: "Resolved User", emailVerified: true)
+    client = WebAuthn::FakeClient.new(ORIGIN)
+
+    registration = auth.api.generate_passkey_registration_options(
+      query: {context: "signed-registration-token", name: "Primary"},
+      return_headers: true
+    )
+    registration_options = registration.fetch(:response)
+    challenge = latest_passkey_verification(auth)
+
+    assert_equal "signed-registration-token", captured[:resolve_context]
+    assert_equal({credProps: true}, registration_options.fetch(:extensions))
+    stored_challenge = JSON.parse(challenge.fetch("value"))
+    assert_equal "signed-registration-token", stored_challenge.fetch("context")
+    assert_equal "resolved@example.com", stored_challenge.fetch("userData").fetch("name")
+    assert_equal "Resolved User", stored_challenge.fetch("userData").fetch("displayName")
+
+    response = client.create(challenge: registration_options.fetch(:challenge), rp_id: "localhost")
+    passkey = auth.api.verify_passkey_registration(
+      headers: {"cookie" => cookie_header(registration.fetch(:headers).fetch("set-cookie")), "origin" => ORIGIN},
+      body: {name: "Primary", response: response}
+    )
+
+    assert_equal captured.fetch(:user).fetch("id"), passkey.fetch("userId")
+    assert_equal "signed-registration-token", captured[:after_context]
+    assert_equal "resolved@example.com", captured.fetch(:after_user).fetch(:name)
+    assert_equal response.fetch("id"), captured.fetch(:after_client_data).fetch("id")
+  end
+
+  def test_passkey_first_registration_requires_resolver_and_valid_user
+    missing_resolver = build_auth(
+      plugins: [BetterAuth::Plugins.passkey(registration: {require_session: false})]
+    )
+
+    missing = assert_raises(BetterAuth::APIError) do
+      missing_resolver.api.generate_passkey_registration_options
+    end
+    assert_equal 400, missing.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("RESOLVE_USER_REQUIRED"), missing.message
+
+    invalid_resolver = build_auth(
+      plugins: [
+        BetterAuth::Plugins.passkey(
+          registration: {
+            require_session: false,
+            resolve_user: ->(_data) { {id: "resolved-user-id"} }
+          }
+        )
+      ]
+    )
+
+    invalid = assert_raises(BetterAuth::APIError) do
+      invalid_resolver.api.generate_passkey_registration_options
+    end
+    assert_equal 400, invalid.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("RESOLVED_USER_INVALID"), invalid.message
+  end
+
+  def test_passkey_first_registration_rejects_invalid_after_verification_user_id
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.passkey(
+          registration: {
+            require_session: false,
+            resolve_user: ->(_data) { {id: "resolved-user-id", name: "resolved@example.com"} },
+            after_verification: ->(_data) { {user_id: 123} }
+          }
+        )
+      ]
+    )
+    client = WebAuthn::FakeClient.new(ORIGIN)
+    registration = auth.api.generate_passkey_registration_options(return_headers: true)
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+
+    invalid = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_passkey_registration(
+        headers: {"cookie" => cookie_header(registration.fetch(:headers).fetch("set-cookie")), "origin" => ORIGIN},
+        body: {response: response}
+      )
+    end
+    assert_equal 400, invalid.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("RESOLVED_USER_INVALID"), invalid.message
+  end
+
+  def test_authentication_extensions_callback_and_array_origin
+    captured = {}
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.passkey(
+          origin: ["https://app.example.test", ORIGIN],
+          authentication: {
+            extensions: ->(data) {
+              captured[:extensions_ctx] = data.fetch(:ctx)
+              {appid: "https://legacy.example.test"}
+            },
+            after_verification: ->(data) {
+              captured[:auth_client_data] = data.fetch(:client_data)
+              captured[:auth_verification] = data.fetch(:verification)
+            }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "array-origin@example.com")
+    client = WebAuthn::FakeClient.new(ORIGIN)
+    registration = auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie}, return_headers: true)
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+    passkey = auth.api.verify_passkey_registration(
+      headers: {"cookie" => [cookie, cookie_header(registration.fetch(:headers).fetch("set-cookie"))].join("; "), "origin" => ORIGIN},
+      body: {response: response}
+    )
+
+    authentication = auth.api.generate_passkey_authentication_options(return_headers: true)
+
+    assert_equal({appid: "https://legacy.example.test"}, authentication.fetch(:response).fetch(:extensions))
+    assert captured[:extensions_ctx]
+
+    assertion = client.get(challenge: authentication.fetch(:response).fetch(:challenge), rp_id: "localhost")
+    result = auth.api.verify_passkey_authentication(
+      headers: {"cookie" => cookie_header(authentication.fetch(:headers).fetch("set-cookie")), "origin" => ORIGIN},
+      body: {response: assertion}
+    )
+
+    assert_equal passkey.fetch("userId"), result.fetch(:user).fetch("id")
+    assert_equal assertion.fetch("id"), captured.fetch(:auth_client_data).fetch("id")
+    assert captured[:auth_verification]
   end
 
   def test_lists_updates_and_deletes_only_the_current_users_passkeys
@@ -119,6 +270,20 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
     assert_equal [{id: "credential-one", type: "public-key", transports: ["internal", "usb"]}], authentication.fetch(:allowCredentials)
     assert_equal "preferred", authentication.fetch(:userVerification)
     assert_operator Time.parse(authentication_verification.fetch("expiresAt").to_s), :>, before_authentication
+  end
+
+  def test_sql_schema_includes_passkey_table
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [BetterAuth::Plugins.passkey]
+    )
+
+    sql = BetterAuth::Schema::SQL.create_statements(config, dialect: :postgres).join("\n")
+
+    assert_includes sql, 'CREATE TABLE IF NOT EXISTS "passkeys"'
+    assert_includes sql, '"credential_id" text NOT NULL'
+    assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_passkeys_on_user_id" ON "passkeys" ("user_id")'
   end
 
   def test_rejects_expired_challenge_and_delete_not_found_message

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../spec_helper"
+require "better_auth/passkey"
 
 RSpec.describe BetterAuth::Rails::Migration do
   let(:config) { BetterAuth::Configuration.new(secret: "test-secret-that-is-long-enough-for-validation", database: :memory) }

@@ -157,8 +157,7 @@ class BetterAuthSchemaTest < Minitest::Test
         BetterAuth::Plugins.username,
         BetterAuth::Plugins.anonymous,
         BetterAuth::Plugins.phone_number,
-        BetterAuth::Plugins.siwe(get_nonce: -> { "nonce" }, verify_message: ->(**) { true }),
-        BetterAuth::Plugins.passkey
+        BetterAuth::Plugins.siwe(get_nonce: -> { "nonce" }, verify_message: ->(**) { true })
       ]
     )
 
@@ -171,7 +170,6 @@ class BetterAuthSchemaTest < Minitest::Test
     assert user_fields.key?("phoneNumber")
     assert user_fields.key?("phoneNumberVerified")
     assert schema.key?("walletAddress")
-    assert schema.key?("passkey")
   end
 
   def test_secondary_storage_omits_session_table_unless_database_storage_enabled

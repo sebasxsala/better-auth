@@ -31,7 +31,6 @@ Gem::Specification.new do |spec|
   spec.add_dependency "json", "~> 2.0"
   spec.add_dependency "jwt", "~> 2.8"
   spec.add_dependency "jwe", "~> 1.1", ">= 1.1.1"
-  spec.add_dependency "webauthn", "~> 3.4", ">= 3.4.3"
 
   # Development dependencies
   spec.add_development_dependency "bundler", "~> 2.5"

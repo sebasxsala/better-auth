@@ -6,6 +6,7 @@ ruby file: ".ruby-version"
 
 # Use local better_auth for development
 gem "better_auth", path: "../better_auth"
+gem "better_auth-passkey", path: "../better_auth-passkey"
 
 gemspec name: "better_auth-rails"
 

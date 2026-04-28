@@ -61,13 +61,12 @@ class BetterAuthSchemaSQLTest < Minitest::Test
     assert_includes sql, "CREATE INDEX [index_sessions_on_user_id] ON [sessions] ([user_id])"
   end
 
-  def test_plugin_sql_schema_includes_organization_and_passkey_tables
+  def test_plugin_sql_schema_includes_organization_tables
     config = BetterAuth::Configuration.new(
       secret: SECRET,
       database: :memory,
       plugins: [
-        BetterAuth::Plugins.organization(teams: {enabled: true}, dynamic_access_control: {enabled: true}),
-        BetterAuth::Plugins.passkey
+        BetterAuth::Plugins.organization(teams: {enabled: true}, dynamic_access_control: {enabled: true})
       ]
     )
 
@@ -79,10 +78,7 @@ class BetterAuthSchemaSQLTest < Minitest::Test
     assert_includes sql, 'CREATE TABLE IF NOT EXISTS "teams"'
     assert_includes sql, 'CREATE TABLE IF NOT EXISTS "team_members"'
     assert_includes sql, 'CREATE TABLE IF NOT EXISTS "organization_roles"'
-    assert_includes sql, 'CREATE TABLE IF NOT EXISTS "passkeys"'
     assert_includes sql, '"active_organization_id" text'
     assert_includes sql, '"active_team_id" text'
-    assert_includes sql, '"credential_id" text NOT NULL'
-    assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_passkeys_on_user_id" ON "passkeys" ("user_id")'
   end
 end
