@@ -1257,6 +1257,768 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
     assert_equal 1, stored_after_task["remaining"]
   end
 
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:90
+  def test_create_without_session_or_user_id_returns_unauthorized
+    auth = build_auth(default_key_length: 12)
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.create_api_key(body: {})
+    end
+
+    assert_equal "UNAUTHORIZED", error.status
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:171
+  def test_create_defaults_rate_limit_enabled_true_when_omitted
+    auth = build_auth(default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "rate-default-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+
+    created = auth.api.create_api_key(body: {userId: user_id})
+
+    assert_equal true, created[:rateLimitEnabled]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:370
+  def test_create_sets_custom_expires_at_from_expires_in
+    auth = build_auth(default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "custom-expiration-create-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    before = Time.now
+
+    created = auth.api.create_api_key(body: {userId: user_id, expiresIn: 60 * 60 * 24 * 7})
+
+    assert created[:expiresAt]
+    assert_operator created[:expiresAt], :>=, before + (60 * 60 * 24 * 7) - 1
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:443
+  def test_create_rejects_custom_expires_in_when_custom_expiration_is_disabled
+    auth = build_auth(default_key_length: 12, key_expiration: {disable_custom_expires_time: true})
+    cookie = sign_up_cookie(auth, email: "disabled-create-expiration-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.create_api_key(body: {userId: user_id, expiresIn: 60 * 60 * 24 * 7})
+    end
+
+    assert_equal "BAD_REQUEST", error.status
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["KEY_DISABLED_EXPIRATION"], error.message
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:921
+  def test_create_accepts_server_side_custom_rate_limit_fields
+    auth = build_auth(default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "server-rate-fields-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+
+    created = auth.api.create_api_key(
+      body: {userId: user_id, rateLimitMax: 15, rateLimitTimeWindow: 1000}
+    )
+
+    assert_equal 15, created[:rateLimitMax]
+    assert_equal 1000, created[:rateLimitTimeWindow]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:985
+  def test_verify_default_rate_limit_allows_first_ten_and_limits_afterward
+    auth = build_auth(default_key_length: 12, rate_limit: {enabled: true, time_window: 60_000, max_requests: 10})
+    cookie = sign_up_cookie(auth, email: "default-rate-limit-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id})
+
+    10.times do
+      result = auth.api.verify_api_key(body: {key: created[:key]})
+      assert_equal true, result[:valid]
+      assert_nil result[:error]
+    end
+    limited = auth.api.verify_api_key(body: {key: created[:key]})
+
+    assert_equal false, limited[:valid]
+    assert_equal "RATE_LIMITED", limited[:error][:code]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:1007
+  def test_verify_allows_requests_after_rate_limit_window_passes
+    auth = build_auth(default_key_length: 12, rate_limit: {enabled: true, time_window: 1000, max_requests: 1})
+    cookie = sign_up_cookie(auth, email: "rate-window-reset-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id})
+
+    assert_equal true, auth.api.verify_api_key(body: {key: created[:key]})[:valid]
+    assert_equal false, auth.api.verify_api_key(body: {key: created[:key]})[:valid]
+    auth.context.adapter.update(
+      model: "apikey",
+      where: [{field: "id", value: created[:id]}],
+      update: {lastRequest: Time.now - 2, requestCount: 1}
+    )
+    reset = auth.api.verify_api_key(body: {key: created[:key]})
+
+    assert_equal true, reset[:valid]
+    assert_nil reset[:error]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:1020
+  def test_verify_decrements_remaining_count_on_each_successful_use
+    auth = build_auth(default_key_length: 12, rate_limit: {enabled: false})
+    cookie = sign_up_cookie(auth, email: "remaining-decrement-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id, remaining: 10})
+
+    first = auth.api.verify_api_key(body: {key: created[:key]})
+    second = auth.api.verify_api_key(body: {key: created[:key]})
+
+    assert_equal true, first[:valid]
+    assert_equal 9, first[:key][:remaining]
+    assert_equal true, second[:valid]
+    assert_equal 8, second[:key][:remaining]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:1224
+  def test_update_rejects_custom_expires_in_when_custom_expiration_is_disabled
+    auth = build_auth(default_key_length: 12, key_expiration: {disable_custom_expires_time: true})
+    cookie = sign_up_cookie(auth, email: "disabled-update-expiration-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.update_api_key(headers: {"cookie" => cookie}, body: {keyId: created[:id], expiresIn: 60 * 60 * 24 * 7})
+    end
+
+    assert_equal "BAD_REQUEST", error.status
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["KEY_DISABLED_EXPIRATION"], error.message
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:1271
+  def test_update_rejects_expires_in_below_minimum
+    auth = build_auth(default_key_length: 12, key_expiration: {min_expires_in: 1})
+    cookie = sign_up_cookie(auth, email: "update-min-expiration-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.update_api_key(headers: {"cookie" => cookie}, body: {keyId: created[:id], expiresIn: 1})
+    end
+
+    assert_equal "BAD_REQUEST", error.status
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["EXPIRES_IN_IS_TOO_SMALL"], error.message
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:1318
+  def test_update_rejects_expires_in_above_maximum
+    auth = build_auth(default_key_length: 12, key_expiration: {max_expires_in: 1})
+    cookie = sign_up_cookie(auth, email: "update-max-expiration-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.update_api_key(headers: {"cookie" => cookie}, body: {keyId: created[:id], expiresIn: 60 * 60 * 24 * 365 * 10})
+    end
+
+    assert_equal "BAD_REQUEST", error.status
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["EXPIRES_IN_IS_TOO_LARGE"], error.message
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:2007
+  def test_delete_without_session_or_user_id_returns_unauthorized
+    auth = build_auth(default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "delete-unauthorized-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.delete_api_key(body: {keyId: created[:id]})
+    end
+
+    assert_equal "UNAUTHORIZED", error.status
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:1772
+  def test_list_pagination_pages_do_not_overlap
+    auth = build_auth(default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "pagination-overlap-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    5.times { |index| auth.api.create_api_key(body: {userId: user_id, name: "page-key-#{index}"}) }
+
+    page_one = auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {limit: 2, offset: 0, sortBy: "name", sortDirection: "asc"})
+    page_two = auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {limit: 2, offset: 2, sortBy: "name", sortDirection: "asc"})
+
+    assert_operator page_one[:apiKeys].length, :<=, 2
+    assert_operator page_two[:apiKeys].length, :<=, 2
+    assert_empty page_one[:apiKeys].map { |key| key[:id] } & page_two[:apiKeys].map { |key| key[:id] }
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:1810
+  def test_list_sorts_by_created_at_descending
+    auth = build_auth(default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "created-desc-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    auth.api.create_api_key(body: {userId: user_id, name: "oldest"})
+    sleep 0.01
+    auth.api.create_api_key(body: {userId: user_id, name: "newest"})
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {sortBy: "createdAt", sortDirection: "desc"})
+    times = listed[:apiKeys].map { |key| key[:createdAt] }
+
+    times.each_cons(2) do |previous, current|
+      assert_operator previous, :>=, current
+    end
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:1857
+  def test_list_combines_created_at_sorting_with_pagination
+    auth = build_auth(default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "created-pagination-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    5.times do |index|
+      auth.api.create_api_key(body: {userId: user_id, name: "created-page-key-#{index}"})
+      sleep 0.005
+    end
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {limit: 3, offset: 0, sortBy: "createdAt", sortDirection: "desc"})
+
+    assert_operator listed[:apiKeys].length, :<=, 3
+    assert_equal 3, listed[:limit]
+    listed[:apiKeys].map { |key| key[:createdAt] }.each_cons(2) do |previous, current|
+      assert_operator previous, :>=, current
+    end
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:2763
+  def test_secondary_storage_expired_key_returns_key_expired
+    storage = MemoryStorage.new
+    auth = build_auth(storage: "secondary-storage", secondary_storage: storage, default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "secondary-expired-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id, expiresIn: 60 * 60 * 24 + 1})
+    record = JSON.parse(storage.get("api-key:by-id:#{created[:id]}"))
+    record["expiresAt"] = (Time.now - 60).iso8601
+    serialized = JSON.generate(record)
+    storage.set("api-key:by-id:#{created[:id]}", serialized)
+    storage.set("api-key:#{record["key"]}", serialized)
+
+    result = auth.api.verify_api_key(body: {key: created[:key]})
+
+    assert_equal false, result[:valid]
+    assert_equal "KEY_EXPIRED", result[:error][:code]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:2792
+  def test_secondary_storage_reference_list_removes_deleted_key
+    storage = MemoryStorage.new
+    auth = build_auth(storage: "secondary-storage", secondary_storage: storage, default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "secondary-ref-list-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    first = auth.api.create_api_key(body: {userId: user_id})
+    second = auth.api.create_api_key(body: {userId: user_id})
+    third = auth.api.create_api_key(body: {userId: user_id})
+
+    before_delete = auth.api.list_api_keys(headers: {"cookie" => cookie})
+    auth.api.delete_api_key(headers: {"cookie" => cookie}, body: {keyId: second[:id]})
+    after_delete = auth.api.list_api_keys(headers: {"cookie" => cookie})
+
+    assert_equal [first[:id], second[:id], third[:id]].sort, before_delete[:apiKeys].map { |key| key[:id] }.sort
+    assert_equal [first[:id], third[:id]].sort, after_delete[:apiKeys].map { |key| key[:id] }.sort
+    ref_ids = JSON.parse(storage.get("api-key:by-ref:#{user_id}"))
+    refute_includes ref_ids, second[:id]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:2879
+  def test_secondary_storage_fallback_reads_cache_before_database
+    storage = MemoryStorage.new
+    auth = build_auth(storage: "secondary-storage", secondary_storage: storage, fallback_to_database: true, default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "fallback-cache-first-key@example.com")
+    created = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {name: "cache-name"})
+    auth.context.adapter.update(model: "apikey", where: [{field: "id", value: created[:id]}], update: {name: "database-name"})
+
+    fetched = auth.api.get_api_key(headers: {"cookie" => cookie}, query: {id: created[:id]})
+
+    assert_equal "cache-name", fetched[:name]
+    assert_includes storage.get_calls, "api-key:by-id:#{created[:id]}"
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:2898
+  def test_secondary_storage_fallback_verify_persists_quota_updates_to_database
+    storage = MemoryStorage.new
+    auth = build_auth(storage: "secondary-storage", secondary_storage: storage, fallback_to_database: true, default_key_length: 12, rate_limit: {enabled: false})
+    cookie = sign_up_cookie(auth, email: "fallback-quota-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id, remaining: 1})
+
+    first = auth.api.verify_api_key(body: {key: created[:key]})
+    db_after_first = auth.api.get_api_key(headers: {"cookie" => cookie}, query: {id: created[:id]})
+    storage.clear
+    second = auth.api.verify_api_key(body: {key: created[:key]})
+
+    assert_equal true, first[:valid]
+    assert_equal 0, first[:key][:remaining]
+    assert_equal 0, db_after_first[:remaining]
+    assert_equal false, second[:valid]
+    assert_equal "USAGE_EXCEEDED", second[:error][:code]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:2990
+  def test_secondary_storage_fallback_list_populates_all_cache_keys_from_database
+    storage = MemoryStorage.new
+    auth = build_auth(storage: "secondary-storage", secondary_storage: storage, fallback_to_database: true, default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "fallback-list-populate-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    first = create_raw_api_key_record(auth, reference_id: user_id, key: "hashed-db-key-1", name: "DB Key 1")
+    second = create_raw_api_key_record(auth, reference_id: user_id, key: "hashed-db-key-2", name: "DB Key 2")
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie})
+
+    assert_includes listed[:apiKeys].map { |key| key[:id] }, first["id"]
+    assert_includes listed[:apiKeys].map { |key| key[:id] }, second["id"]
+    assert storage.get("api-key:by-id:#{first["id"]}")
+    assert storage.get("api-key:by-id:#{second["id"]}")
+    assert storage.get("api-key:hashed-db-key-1")
+    assert storage.get("api-key:hashed-db-key-2")
+    assert_equal [first["id"], second["id"]].sort, JSON.parse(storage.get("api-key:by-ref:#{user_id}")).sort
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:3135
+  def test_secondary_storage_fallback_population_touches_ref_list_once
+    storage = MemoryStorage.new
+    auth = build_auth(storage: "secondary-storage", secondary_storage: storage, fallback_to_database: true, default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "fallback-ref-touch-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    5.times { |index| create_raw_api_key_record(auth, reference_id: user_id, key: "hashed-ref-touch-#{index}", name: "Ref Touch #{index}") }
+    ref_key = "api-key:by-ref:#{user_id}"
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie})
+
+    assert_operator listed[:apiKeys].length, :>=, 5
+    assert_operator storage.get_calls.count { |key| key == ref_key }, :<=, 1
+    assert_equal 1, storage.set_calls.count { |(key, _value, _ttl)| key == ref_key }
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:3243
+  def test_secondary_storage_pure_mode_does_not_write_database
+    storage = MemoryStorage.new
+    auth = build_auth(storage: "secondary-storage", secondary_storage: storage, default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "pure-only-key@example.com")
+
+    created = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {name: "pure-only"})
+
+    assert storage.get("api-key:by-id:#{created[:id]}")
+    assert_nil auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: created[:id]}])
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:3254
+  def test_secondary_storage_fallback_create_writes_database_and_cache
+    storage = MemoryStorage.new
+    auth = build_auth(storage: "secondary-storage", secondary_storage: storage, fallback_to_database: true, default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "fallback-create-cache-key@example.com")
+
+    created = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {name: "fallback-create"})
+    stored = auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: created[:id]}])
+
+    assert storage.get("api-key:by-id:#{created[:id]}")
+    assert stored
+    assert_equal "fallback-create", stored["name"]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:3276
+  def test_secondary_storage_fallback_update_writes_database_and_cache
+    storage = MemoryStorage.new
+    auth = build_auth(storage: "secondary-storage", secondary_storage: storage, fallback_to_database: true, default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "fallback-update-cache-key@example.com")
+    created = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {name: "original"})
+
+    updated = auth.api.update_api_key(headers: {"cookie" => cookie}, body: {keyId: created[:id], name: "updated"})
+    cached = JSON.parse(storage.get("api-key:by-id:#{created[:id]}"))
+    stored = auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: created[:id]}])
+
+    assert_equal "updated", updated[:name]
+    assert_equal "updated", cached["name"]
+    assert_equal "updated", stored["name"]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:3311
+  def test_secondary_storage_fallback_delete_removes_database_and_cache
+    storage = MemoryStorage.new
+    auth = build_auth(storage: "secondary-storage", secondary_storage: storage, fallback_to_database: true, default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "fallback-delete-cache-key@example.com")
+    created = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {})
+
+    result = auth.api.delete_api_key(headers: {"cookie" => cookie}, body: {keyId: created[:id]})
+
+    assert_equal({success: true}, result)
+    assert_nil storage.get("api-key:by-id:#{created[:id]}")
+    assert_nil auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: created[:id]}])
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:3395
+  def test_defer_updates_still_enforces_rate_limits
+    deferred = []
+    auth = build_auth(
+      default_key_length: 12,
+      defer_updates: true,
+      rate_limit: {enabled: true, max_requests: 2, time_window: 60_000},
+      advanced: {background_tasks: {handler: ->(task) { deferred << task }}}
+    )
+    cookie = sign_up_cookie(auth, email: "defer-rate-limit-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id})
+
+    first = auth.api.verify_api_key(body: {key: created[:key]})
+    deferred.each(&:call)
+    deferred.clear
+    second = auth.api.verify_api_key(body: {key: created[:key]})
+    deferred.each(&:call)
+    deferred.clear
+    third = auth.api.verify_api_key(body: {key: created[:key]})
+
+    assert_equal true, first[:valid]
+    assert_equal true, second[:valid]
+    assert_equal false, third[:valid]
+    assert_equal "RATE_LIMITED", third[:error][:code]
+    assert third[:error][:details][:tryAgainIn]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:3443
+  def test_defer_updates_persists_remaining_count_after_background_task
+    deferred = []
+    auth = build_auth(
+      default_key_length: 12,
+      defer_updates: true,
+      advanced: {background_tasks: {handler: ->(task) { deferred << task }}}
+    )
+    cookie = sign_up_cookie(auth, email: "defer-remaining-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id, remaining: 10})
+
+    result = auth.api.verify_api_key(body: {key: created[:key]})
+    deferred.each(&:call)
+    updated = auth.api.get_api_key(headers: {"cookie" => cookie}, query: {id: created[:id]})
+
+    assert_equal true, result[:valid]
+    assert_equal 9, result[:key][:remaining]
+    assert_equal 9, updated[:remaining]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:3483
+  def test_defer_updates_without_background_handler_runs_synchronously
+    auth = build_auth(default_key_length: 12, defer_updates: true)
+    cookie = sign_up_cookie(auth, email: "defer-no-handler-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id})
+
+    result = auth.api.verify_api_key(body: {key: created[:key]})
+    updated = auth.api.get_api_key(headers: {"cookie" => cookie}, query: {id: created[:id]})
+
+    assert_equal true, result[:valid]
+    assert updated[:lastRequest]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:3678
+  def test_list_api_keys_migrates_double_stringified_metadata
+    auth = build_auth(enable_metadata: true)
+    cookie = sign_up_cookie(auth, email: "metadata-list-migration-key@example.com")
+    first = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {name: "first", metadata: {plan: "pro"}})
+    second = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {name: "second", metadata: {plan: "enterprise"}})
+    auth.context.adapter.update(model: "apikey", where: [{field: "id", value: first[:id]}], update: {metadata: JSON.generate(JSON.generate({plan: "legacy-1"}))})
+    auth.context.adapter.update(model: "apikey", where: [{field: "id", value: second[:id]}], update: {metadata: JSON.generate(JSON.generate({plan: "legacy-2"}))})
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie})
+    first_result = listed[:apiKeys].find { |key| key[:id] == first[:id] }
+    second_result = listed[:apiKeys].find { |key| key[:id] == second[:id] }
+    migrated_first = auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: first[:id]}])
+    migrated_second = auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: second[:id]}])
+
+    assert_equal({"plan" => "legacy-1"}, first_result[:metadata])
+    assert_equal({"plan" => "legacy-2"}, second_result[:metadata])
+    assert_equal({"plan" => "legacy-1"}, JSON.parse(migrated_first["metadata"]))
+    assert_equal({"plan" => "legacy-2"}, JSON.parse(migrated_second["metadata"]))
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:3747
+  def test_update_api_key_migrates_double_stringified_metadata
+    auth = build_auth(enable_metadata: true)
+    cookie = sign_up_cookie(auth, email: "metadata-update-migration-key@example.com")
+    created = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {name: "legacy", metadata: {tier: "free"}})
+    auth.context.adapter.update(model: "apikey", where: [{field: "id", value: created[:id]}], update: {metadata: JSON.generate(JSON.generate({tier: "legacy-tier"}))})
+
+    updated = auth.api.update_api_key(headers: {"cookie" => cookie}, body: {keyId: created[:id], name: "updated-name"})
+    migrated = auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: created[:id]}])
+
+    assert_equal "updated-name", updated[:name]
+    assert_equal({"tier" => "legacy-tier"}, updated[:metadata])
+    assert_equal({"tier" => "legacy-tier"}, JSON.parse(migrated["metadata"]))
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:3827
+  def test_metadata_migration_leaves_properly_formatted_metadata_unchanged
+    auth = build_auth(enable_metadata: true)
+    cookie = sign_up_cookie(auth, email: "metadata-unchanged-key@example.com")
+    created = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {metadata: {alreadyCorrect: true, value: 123}})
+
+    fetched = auth.api.get_api_key(headers: {"cookie" => cookie}, query: {id: created[:id]})
+
+    assert_equal({"alreadyCorrect" => true, "value" => 123}, fetched[:metadata])
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:3848
+  def test_metadata_migration_handles_null_metadata
+    auth = build_auth(enable_metadata: true)
+    cookie = sign_up_cookie(auth, email: "metadata-null-key@example.com")
+    created = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {})
+
+    fetched = auth.api.get_api_key(headers: {"cookie" => cookie}, query: {id: created[:id]})
+
+    assert_nil fetched[:metadata]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:4173
+  def test_org_key_create_requires_organization_id
+    auth = build_user_and_org_key_auth
+    cookie = sign_up_cookie(auth, email: "org-id-required-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.create_api_key(body: {configId: "org-keys", userId: user_id})
+    end
+
+    assert_equal "BAD_REQUEST", error.status
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["ORGANIZATION_ID_REQUIRED"], error.message
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:4217
+  def test_list_without_organization_id_returns_only_user_owned_keys
+    auth = build_user_and_org_key_auth
+    cookie = sign_up_cookie(auth, email: "list-user-owned-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "List User Owned Org", slug: unique_slug("list-user-owned")})
+    user_key = auth.api.create_api_key(body: {configId: "user-keys", userId: user_id})
+    org_key = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {configId: "org-keys", organizationId: organization.fetch("id")})
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie})
+    ids = listed[:apiKeys].map { |key| key[:id] }
+
+    assert_includes ids, user_key[:id]
+    refute_includes ids, org_key[:id]
+    assert listed[:apiKeys].all? { |key| key[:configId] == "user-keys" && key[:referenceId] == user_id }
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:4248
+  def test_list_with_organization_id_returns_only_org_owned_keys
+    auth = build_user_and_org_key_auth
+    cookie = sign_up_cookie(auth, email: "list-org-owned-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "List Org Owned Org", slug: unique_slug("list-org-owned")})
+    user_key = auth.api.create_api_key(body: {configId: "user-keys", userId: user_id})
+    first_org_key = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {configId: "org-keys", organizationId: organization.fetch("id"), name: "org-key-1"})
+    second_org_key = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {configId: "org-keys", organizationId: organization.fetch("id"), name: "org-key-2"})
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {organizationId: organization.fetch("id")})
+    ids = listed[:apiKeys].map { |key| key[:id] }
+
+    assert_equal [first_org_key[:id], second_org_key[:id]].sort, ids.sort
+    refute_includes ids, user_key[:id]
+    assert listed[:apiKeys].all? { |key| key[:configId] == "org-keys" && key[:referenceId] == organization.fetch("id") }
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:4300
+  def test_list_org_keys_filters_by_config_id
+    auth = BetterAuth.auth(
+      secret: SECRET,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.api_key([
+          {config_id: "org-public", default_prefix: "pub_", references: "organization", default_key_length: 12},
+          {config_id: "org-internal", default_prefix: "int_", references: "organization", default_key_length: 12}
+        ])
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "org-config-filter-key@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Org Config Filter", slug: unique_slug("org-config-filter")})
+    auth.api.create_api_key(headers: {"cookie" => cookie}, body: {configId: "org-public", organizationId: organization.fetch("id")})
+    auth.api.create_api_key(headers: {"cookie" => cookie}, body: {configId: "org-internal", organizationId: organization.fetch("id")})
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {organizationId: organization.fetch("id"), configId: "org-public"})
+
+    assert_equal 1, listed[:apiKeys].length
+    assert_equal "org-public", listed[:apiKeys].first[:configId]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:4413
+  def test_org_owned_key_cannot_create_api_key_session
+    auth = BetterAuth.auth(
+      secret: SECRET,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.api_key([{config_id: "org-keys", default_prefix: "org_", references: "organization", default_key_length: 12, enable_session_for_api_keys: true}])
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "org-session-denied-key@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Org Session Denied", slug: unique_slug("org-session-denied")})
+    org_key = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {configId: "org-keys", organizationId: organization.fetch("id")})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.get_session(headers: {"x-api-key" => org_key[:key]})
+    end
+
+    assert_equal "INVALID_REFERENCE_ID_FROM_API_KEY", error.code
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:4469
+  def test_user_owned_key_can_create_api_key_session_with_org_plugin_installed
+    auth = BetterAuth.auth(
+      secret: SECRET,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.api_key([{config_id: "user-keys", default_prefix: "usr_", references: "user", default_key_length: 12, enable_session_for_api_keys: true}])
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "user-session-with-org-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    user_key = auth.api.create_api_key(body: {configId: "user-keys", userId: user_id})
+
+    session = auth.api.get_session(headers: {"x-api-key" => user_key[:key]})
+
+    assert session
+    assert_equal user_id, session[:user]["id"]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:4514
+  def test_mixed_user_and_org_keys_verify_in_same_instance
+    auth = build_user_and_org_key_auth
+    cookie = sign_up_cookie(auth, email: "mixed-user-org-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Mixed User Org", slug: unique_slug("mixed-user-org")})
+    user_key = auth.api.create_api_key(body: {configId: "user-keys", userId: user_id})
+    org_key = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {configId: "org-keys", organizationId: organization.fetch("id")})
+
+    user_result = auth.api.verify_api_key(body: {key: user_key[:key], configId: "user-keys"})
+    org_result = auth.api.verify_api_key(body: {key: org_key[:key], configId: "org-keys"})
+
+    assert_equal true, user_result[:valid]
+    assert_equal user_id, user_result[:key][:referenceId]
+    assert_equal true, org_result[:valid]
+    assert_equal organization.fetch("id"), org_result[:key][:referenceId]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:4547
+  def test_get_org_owned_key_by_id_from_server
+    auth = build_user_and_org_key_auth
+    cookie = sign_up_cookie(auth, email: "get-org-owned-key@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Get Org Owned", slug: unique_slug("get-org-owned")})
+    org_key = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {configId: "org-keys", organizationId: organization.fetch("id"), name: "my-org-key"})
+
+    fetched = auth.api.get_api_key(headers: {"cookie" => cookie}, query: {id: org_key[:id], configId: "org-keys"})
+
+    assert_equal org_key[:id], fetched[:id]
+    assert_equal "org-keys", fetched[:configId]
+    assert_equal organization.fetch("id"), fetched[:referenceId]
+    assert_equal "my-org-key", fetched[:name]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:4577
+  def test_delete_org_owned_key_then_verify_fails
+    auth = build_user_and_org_key_auth
+    cookie = sign_up_cookie(auth, email: "delete-org-owned-key@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Delete Org Owned", slug: unique_slug("delete-org-owned")})
+    org_key = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {configId: "org-keys", organizationId: organization.fetch("id")})
+
+    deleted = auth.api.delete_api_key(headers: {"cookie" => cookie}, body: {keyId: org_key[:id], configId: "org-keys"})
+    verified = auth.api.verify_api_key(body: {key: org_key[:key], configId: "org-keys"})
+
+    assert_equal({success: true}, deleted)
+    assert_equal false, verified[:valid]
+  end
+
+  # Upstream: upstream/packages/api-key/src/api-key.test.ts:4609
+  def test_update_org_owned_key_name_and_enabled_status
+    auth = build_user_and_org_key_auth
+    cookie = sign_up_cookie(auth, email: "update-org-owned-key@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Update Org Owned", slug: unique_slug("update-org-owned")})
+    org_key = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {configId: "org-keys", organizationId: organization.fetch("id"), name: "original-name"})
+
+    updated = auth.api.update_api_key(headers: {"cookie" => cookie}, body: {keyId: org_key[:id], configId: "org-keys", name: "updated-name", enabled: false})
+
+    assert_equal "updated-name", updated[:name]
+    assert_equal false, updated[:enabled]
+    assert_equal "org-keys", updated[:configId]
+    assert_equal organization.fetch("id"), updated[:referenceId]
+  end
+
+  # Upstream: upstream/packages/api-key/src/org-api-key.test.ts:101
+  def test_org_non_member_is_denied_full_api_key_crud
+    auth = build_user_and_org_key_auth
+    owner_cookie = sign_up_cookie(auth, email: "org-non-member-owner-key@example.com")
+    non_member_cookie = sign_up_cookie(auth, email: "org-non-member-key@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Non Member CRUD Org", slug: unique_slug("non-member-crud")})
+    org_key = auth.api.create_api_key(headers: {"cookie" => owner_cookie}, body: {configId: "org-keys", organizationId: organization.fetch("id")})
+
+    assert_org_api_key_forbidden(auth, non_member_cookie, organization.fetch("id"), org_key[:id], "USER_NOT_MEMBER_OF_ORGANIZATION")
+  end
+
+  # Upstream: upstream/packages/api-key/src/org-api-key.test.ts:173
+  def test_org_default_member_without_api_key_permissions_is_denied
+    auth = build_user_and_org_key_auth
+    owner_cookie = sign_up_cookie(auth, email: "org-default-owner-key@example.com")
+    member_cookie = sign_up_cookie(auth, email: "org-default-member-key@example.com")
+    member_id = auth.api.get_session(headers: {"cookie" => member_cookie})[:user]["id"]
+    organization = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Default Member Org", slug: unique_slug("default-member")})
+    auth.api.add_member(headers: {"cookie" => owner_cookie}, body: {organizationId: organization.fetch("id"), userId: member_id, role: "member"})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.list_api_keys(headers: {"cookie" => member_cookie}, query: {organizationId: organization.fetch("id")})
+    end
+
+    assert_equal "FORBIDDEN", error.status
+    assert_equal "INSUFFICIENT_API_KEY_PERMISSIONS", error.code
+  end
+
+  # Upstream: upstream/packages/api-key/src/org-api-key.test.ts:416
+  def test_org_read_only_member_can_read_but_cannot_create_update_or_delete
+    auth = build_custom_org_api_key_auth
+    owner_cookie = sign_up_cookie(auth, email: "org-read-owner-key@example.com")
+    member_cookie = sign_up_cookie(auth, email: "org-read-member-key@example.com")
+    member_id = auth.api.get_session(headers: {"cookie" => member_cookie})[:user]["id"]
+    organization = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Read Member Org", slug: unique_slug("read-member")})
+    org_id = organization.fetch("id")
+    org_key = auth.api.create_api_key(headers: {"cookie" => owner_cookie}, body: {configId: "org-keys", organizationId: org_id})
+    auth.api.add_member(headers: {"cookie" => owner_cookie}, body: {organizationId: org_id, userId: member_id, role: "member"})
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => member_cookie}, query: {organizationId: org_id})
+    fetched = auth.api.get_api_key(headers: {"cookie" => member_cookie}, query: {id: org_key[:id], configId: "org-keys"})
+
+    assert_includes listed[:apiKeys].map { |key| key[:id] }, org_key[:id]
+    assert_equal org_key[:id], fetched[:id]
+    create_error = assert_raises(BetterAuth::APIError) do
+      auth.api.create_api_key(headers: {"cookie" => member_cookie}, body: {configId: "org-keys", organizationId: org_id})
+    end
+    update_error = assert_raises(BetterAuth::APIError) do
+      auth.api.update_api_key(headers: {"cookie" => member_cookie}, body: {keyId: org_key[:id], configId: "org-keys", name: "blocked"})
+    end
+    delete_error = assert_raises(BetterAuth::APIError) do
+      auth.api.delete_api_key(headers: {"cookie" => member_cookie}, body: {keyId: org_key[:id], configId: "org-keys"})
+    end
+    [create_error, update_error, delete_error].each do |error|
+      assert_equal "FORBIDDEN", error.status
+      assert_equal "INSUFFICIENT_API_KEY_PERMISSIONS", error.code
+    end
+  end
+
+  # Upstream: upstream/packages/api-key/src/org-api-key.test.ts:478
+  def test_org_restricted_member_is_denied_full_api_key_crud
+    auth = build_custom_org_api_key_auth
+    owner_cookie = sign_up_cookie(auth, email: "org-restricted-owner-key@example.com")
+    restricted_cookie = sign_up_cookie(auth, email: "org-restricted-member-key@example.com")
+    restricted_id = auth.api.get_session(headers: {"cookie" => restricted_cookie})[:user]["id"]
+    organization = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Restricted Member Org", slug: unique_slug("restricted-member")})
+    org_id = organization.fetch("id")
+    org_key = auth.api.create_api_key(headers: {"cookie" => owner_cookie}, body: {configId: "org-keys", organizationId: org_id})
+    auth.api.add_member(headers: {"cookie" => owner_cookie}, body: {organizationId: org_id, userId: restricted_id, role: "restricted"})
+
+    assert_org_api_key_forbidden(auth, restricted_cookie, org_id, org_key[:id], "INSUFFICIENT_API_KEY_PERMISSIONS")
+  end
+
   def build_auth(options = {})
     advanced = options.is_a?(Hash) ? options.delete(:advanced) : nil
     secondary_storage = options.is_a?(Hash) ? options.delete(:secondary_storage) : nil
@@ -1281,6 +2043,103 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
 
   def cookie_header(set_cookie)
     set_cookie.to_s.lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def create_raw_api_key_record(auth, reference_id:, key:, name:)
+    now = Time.now
+    auth.context.adapter.create(
+      model: "apikey",
+      data: {
+        configId: "default",
+        createdAt: now,
+        updatedAt: now,
+        name: name,
+        prefix: "test",
+        start: "test_",
+        key: key,
+        enabled: true,
+        expiresAt: nil,
+        referenceId: reference_id,
+        lastRefillAt: nil,
+        lastRequest: nil,
+        metadata: nil,
+        rateLimitMax: nil,
+        rateLimitTimeWindow: nil,
+        remaining: nil,
+        refillAmount: nil,
+        refillInterval: nil,
+        rateLimitEnabled: false,
+        requestCount: 0,
+        permissions: nil
+      }
+    )
+  end
+
+  def build_user_and_org_key_auth
+    BetterAuth.auth(
+      secret: SECRET,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.api_key([
+          {config_id: "user-keys", default_prefix: "usr_", references: "user", default_key_length: 12},
+          {config_id: "org-keys", default_prefix: "org_", references: "organization", default_key_length: 12}
+        ])
+      ]
+    )
+  end
+
+  def build_custom_org_api_key_auth
+    ac = BetterAuth::Plugins.create_access_control(
+      organization: ["update", "delete"],
+      member: ["create", "update", "delete"],
+      invitation: ["create", "cancel"],
+      team: ["create", "update", "delete"],
+      ac: ["create", "read", "update", "delete"],
+      apiKey: ["create", "read", "update", "delete"]
+    )
+    BetterAuth.auth(
+      secret: SECRET,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization(
+          ac: ac,
+          roles: {
+            owner: ac.new_role(member: ["create", "update", "delete"], apiKey: ["create", "read", "update", "delete"]),
+            admin: ac.new_role(apiKey: ["create", "read", "update", "delete"]),
+            member: ac.new_role(apiKey: ["read"]),
+            restricted: ac.new_role({})
+          }
+        ),
+        BetterAuth::Plugins.api_key([{config_id: "org-keys", references: "organization", default_key_length: 12}])
+      ]
+    )
+  end
+
+  def assert_org_api_key_forbidden(auth, cookie, organization_id, key_id, code)
+    list_error = assert_raises(BetterAuth::APIError) do
+      auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {organizationId: organization_id})
+    end
+    create_error = assert_raises(BetterAuth::APIError) do
+      auth.api.create_api_key(headers: {"cookie" => cookie}, body: {configId: "org-keys", organizationId: organization_id})
+    end
+    get_error = assert_raises(BetterAuth::APIError) do
+      auth.api.get_api_key(headers: {"cookie" => cookie}, query: {id: key_id, configId: "org-keys"})
+    end
+    update_error = assert_raises(BetterAuth::APIError) do
+      auth.api.update_api_key(headers: {"cookie" => cookie}, body: {keyId: key_id, configId: "org-keys", name: "blocked"})
+    end
+    delete_error = assert_raises(BetterAuth::APIError) do
+      auth.api.delete_api_key(headers: {"cookie" => cookie}, body: {keyId: key_id, configId: "org-keys"})
+    end
+    [list_error, create_error, get_error, update_error, delete_error].each do |error|
+      assert_equal "FORBIDDEN", error.status
+      assert_equal code, error.code
+    end
+  end
+
+  def unique_slug(prefix)
+    "#{prefix}-#{SecureRandom.hex(4)}"
   end
 
   class MemoryStorage

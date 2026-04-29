@@ -181,7 +181,7 @@ module BetterAuth
 
     def api_key_create_endpoint(config)
       Endpoint.new(path: "/api-key/create", method: "POST") do |ctx|
-        body = normalize_hash(ctx.body)
+        body = api_key_normalize_body(ctx.body)
         resolved_config = api_key_resolve_config(ctx.context, config, body[:config_id])
         session = Routes.current_session(ctx, allow_nil: true)
         reference_id = api_key_create_reference_id!(ctx, body, session, resolved_config)
@@ -262,7 +262,7 @@ module BetterAuth
 
     def api_key_update_endpoint(config)
       Endpoint.new(path: "/api-key/update", method: "POST") do |ctx|
-        body = normalize_hash(ctx.body)
+        body = api_key_normalize_body(ctx.body)
         resolved_config = api_key_resolve_config(ctx.context, config, body[:config_id])
         session = Routes.current_session(ctx, allow_nil: true)
         user_id = session&.dig(:user, "id") || body[:user_id]
@@ -379,7 +379,13 @@ module BetterAuth
     def api_key_create_reference_id!(ctx, body, session, config)
       if config[:references].to_s == "organization"
         organization_id = body[:organization_id]
-        raise APIError.new("BAD_REQUEST", message: API_KEY_ERROR_CODES["ORGANIZATION_ID_REQUIRED"]) if organization_id.to_s.empty?
+        if organization_id.to_s.empty?
+          raise APIError.new(
+            "BAD_REQUEST",
+            message: API_KEY_ERROR_CODES["ORGANIZATION_ID_REQUIRED"],
+            code: "ORGANIZATION_ID_REQUIRED"
+          )
+        end
 
         user_id = session&.dig(:user, "id") || body[:user_id]
         raise APIError.new("UNAUTHORIZED", message: API_KEY_ERROR_CODES["UNAUTHORIZED_SESSION"]) if user_id.to_s.empty?
@@ -515,11 +521,21 @@ module BetterAuth
       record = api_key_validate!(ctx, key, config)
       api_key_schedule_cleanup(ctx, config)
       if config[:references].to_s != "user"
-        raise APIError.new("UNAUTHORIZED", message: API_KEY_ERROR_CODES["INVALID_REFERENCE_ID_FROM_API_KEY"])
+        raise APIError.new(
+          "UNAUTHORIZED",
+          message: API_KEY_ERROR_CODES["INVALID_REFERENCE_ID_FROM_API_KEY"],
+          code: "INVALID_REFERENCE_ID_FROM_API_KEY"
+        )
       end
       reference_id = api_key_record_reference_id(record)
       user = ctx.context.internal_adapter.find_user_by_id(reference_id)
-      raise APIError.new("UNAUTHORIZED", message: API_KEY_ERROR_CODES["INVALID_REFERENCE_ID_FROM_API_KEY"]) unless user
+      unless user
+        raise APIError.new(
+          "UNAUTHORIZED",
+          message: API_KEY_ERROR_CODES["INVALID_REFERENCE_ID_FROM_API_KEY"],
+          code: "INVALID_REFERENCE_ID_FROM_API_KEY"
+        )
+      end
 
       session = {
         user: user,
@@ -697,6 +713,15 @@ module BetterAuth
 
     def api_key_hash(key, config)
       config[:disable_key_hashing] ? key.to_s : default_api_key_hasher(key)
+    end
+
+    def api_key_normalize_body(raw)
+      body = normalize_hash(raw)
+      return body unless raw.is_a?(Hash)
+
+      metadata_key = raw.key?(:metadata) ? :metadata : ("metadata" if raw.key?("metadata"))
+      body[:metadata] = raw[metadata_key] if metadata_key
+      body
     end
 
     def api_key_expires_at(body, config)

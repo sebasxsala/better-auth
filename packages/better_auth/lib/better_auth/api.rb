@@ -211,7 +211,12 @@ module BetterAuth
       return value unless value.is_a?(Hash)
 
       value.each_with_object({}) do |(key, object_value), result|
-        result[normalize_key(key)] = object_value.is_a?(Hash) ? symbolize_keys(object_value) : object_value
+        normalized_key = normalize_key(key)
+        result[normalized_key] = if normalized_key == :metadata
+          object_value
+        else
+          object_value.is_a?(Hash) ? symbolize_keys(object_value) : object_value
+        end
       end
     end
 
