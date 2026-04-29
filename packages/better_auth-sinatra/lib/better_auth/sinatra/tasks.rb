@@ -23,7 +23,7 @@ namespace :better_auth do
     desc "Create the Better Auth SQL migration"
     task :migration do
       BetterAuth::Sinatra.load_app_config
-      dialect = ENV.fetch("BETTER_AUTH_DIALECT", "postgres").to_sym
+      dialect = BetterAuth::Sinatra::Migration.normalize_dialect(ENV["BETTER_AUTH_DIALECT"] || ENV["BETTER_AUTH_DATABASE_DIALECT"] || "postgres")
       config = BetterAuth::Sinatra.migration_configuration
       path = BetterAuth::Sinatra::Migration.generate(config, dialect: dialect)
       puts "create #{path}"

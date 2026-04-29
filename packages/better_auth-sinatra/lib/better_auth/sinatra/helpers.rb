@@ -32,6 +32,8 @@ module BetterAuth
       end
 
       def resolve_better_auth_session
+        auth = better_auth_auth
+        auth.context.prepare_for_request!(request) if auth.context.respond_to?(:prepare_for_request!)
         context = BetterAuth::Endpoint::Context.new(
           path: request.path_info,
           method: request.request_method,
@@ -39,7 +41,7 @@ module BetterAuth
           body: {},
           params: params,
           headers: {"cookie" => request.env["HTTP_COOKIE"]},
-          context: better_auth_auth.context,
+          context: auth.context,
           request: request
         )
         BetterAuth::Session.find_current(context, disable_refresh: true)

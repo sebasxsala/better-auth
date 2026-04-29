@@ -35,6 +35,7 @@ module BetterAuth
       Endpoint.new(path: "/verify-email", method: "GET") do |ctx|
         token = fetch_value(ctx.query, "token").to_s
         callback_url = fetch_value(ctx.query, "callbackURL")
+        validate_callback_url!(ctx.context, callback_url)
         payload = verify_email_token(ctx, token, callback_url)
         email = payload["email"].to_s.downcase
         update_to = payload["updateTo"] || payload["update_to"]
@@ -43,8 +44,10 @@ module BetterAuth
 
         user = user_data[:user]
         if update_to
-          updated = ctx.context.internal_adapter.update_user_by_email(email, email: update_to, emailVerified: true)
-          set_verified_session_cookie(ctx, updated || user.merge("email" => update_to, "emailVerified" => true))
+          updated = ctx.context.internal_adapter.update_user_by_email(email, email: update_to, emailVerified: false)
+          updated_user = updated || user.merge("email" => update_to, "emailVerified" => false)
+          send_verification_email_payload(ctx, updated_user, callback_url) if ctx.context.options.email_verification[:send_verification_email].respond_to?(:call)
+          set_verified_session_cookie(ctx, updated_user)
           next redirect_or_json(ctx, callback_url, {status: true, user: Schema.parse_output(ctx.context.options, "user", updated)})
         end
 

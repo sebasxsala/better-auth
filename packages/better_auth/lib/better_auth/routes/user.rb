@@ -67,6 +67,7 @@ module BetterAuth
 
         session = current_session(ctx, sensitive: true)
         body = normalize_hash(ctx.body)
+        sender = ctx.context.options.user.dig(:delete_user, :send_delete_account_verification)
         if body["password"]
           account = credential_account(ctx, session[:user]["id"])
           unless account && account["password"] && verify_password_value(ctx, body["password"], account["password"])
@@ -76,7 +77,7 @@ module BetterAuth
 
         if body["token"]
           delete_user_by_token!(ctx, session, body["token"])
-        elsif (sender = ctx.context.options.user.dig(:delete_user, :send_delete_account_verification))
+        elsif sender
           token = SecureRandom.hex(16)
           ctx.context.internal_adapter.create_verification_value(
             identifier: "delete-account-#{token}",
@@ -85,6 +86,8 @@ module BetterAuth
           )
           sender.call({user: session[:user], token: token}, ctx.request)
           next ctx.json({success: true, message: "Verification email sent"})
+        elsif !body["password"]
+          require_fresh_session!(ctx, session)
         end
 
         delete_current_user!(ctx, session)
@@ -99,8 +102,9 @@ module BetterAuth
         session = current_session(ctx)
         token = fetch_value(ctx.query, "token")
         delete_user_by_token!(ctx, session, token)
-        delete_current_user!(ctx, session)
         callback_url = fetch_value(ctx.query, "callbackURL")
+        validate_callback_url!(ctx.context, callback_url)
+        delete_current_user!(ctx, session)
         raise ctx.redirect(callback_url) if callback_url
 
         ctx.json({success: true, message: "User deleted"})
@@ -148,6 +152,14 @@ module BetterAuth
       ctx.context.internal_adapter.delete_sessions(session[:user]["id"])
       Cookies.delete_session_cookie(ctx)
       call_option(config[:after_delete], session[:user], ctx.request)
+    end
+
+    def self.require_fresh_session!(ctx, session)
+      fresh_age = ctx.context.session_config[:fresh_age].to_i
+      return if fresh_age <= 0
+
+      updated_at = Session.normalize_time(session[:session]["updatedAt"] || session[:session]["updated_at"] || session[:session]["createdAt"] || session[:session]["created_at"])
+      raise APIError.new("UNAUTHORIZED") unless updated_at && updated_at + fresh_age > Time.now
     end
 
     def self.parse_declared_input(ctx, model, data, allowed_base: [])

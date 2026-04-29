@@ -12,6 +12,7 @@ module BetterAuth
       module_function
 
       def render(options, dialect:)
+        dialect = normalize_dialect(dialect)
         config = configuration_for(options)
         statements = BetterAuth::Schema::SQL.create_statements(config, dialect: dialect)
         [
@@ -24,6 +25,7 @@ module BetterAuth
       end
 
       def generate(options, dialect:, migrations_path: DEFAULT_MIGRATIONS_PATH, timestamp: Time.now.utc.strftime("%Y%m%d%H%M%S"))
+        dialect = normalize_dialect(dialect)
         FileUtils.mkdir_p(migrations_path)
         path = File.join(migrations_path, "#{timestamp}_create_better_auth_tables.sql")
         return path if File.exist?(path)
@@ -40,7 +42,7 @@ module BetterAuth
         end
 
         connection = adapter.connection
-        dialect = adapter.dialect.to_sym
+        dialect = normalize_dialect(adapter.dialect)
         files = Dir[File.join(migrations_path, "*.sql")].sort
         ensure_schema_migrations!(connection, dialect)
         applied = applied_migrations(connection, dialect)
@@ -116,6 +118,17 @@ module BetterAuth
 
       def literal(value)
         "'#{value.to_s.gsub("'", "''")}'"
+      end
+
+      def normalize_dialect(value)
+        case value.to_s.downcase
+        when "postgresql"
+          :postgres
+        when "sqlite3"
+          :sqlite
+        else
+          value.to_sym
+        end
       end
     end
   end

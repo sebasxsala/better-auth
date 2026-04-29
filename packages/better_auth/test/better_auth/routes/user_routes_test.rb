@@ -79,6 +79,50 @@ class BetterAuthRoutesUserTest < Minitest::Test
     assert_equal "new-email@example.com", auth.context.internal_adapter.find_user_by_email("new-email@example.com")[:user]["email"]
   end
 
+  def test_delete_user_requires_fresh_session_when_no_password_or_verification_token_is_provided
+    auth = build_auth(
+      session: {fresh_age: 1, expires_in: 3600, update_age: 3600},
+      user: {delete_user: {enabled: true}}
+    )
+    cookie = sign_up_cookie(auth, email: "stale-delete@example.com", password: "password123")
+    session = auth.api.get_session(headers: {"cookie" => cookie})[:session]
+    auth.context.internal_adapter.update_session(
+      session["token"],
+      "createdAt" => Time.now - 120,
+      "updatedAt" => Time.now - 120
+    )
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.delete_user(headers: {"cookie" => cookie}, body: {})
+    end
+
+    assert_equal 401, error.status_code
+    assert auth.context.internal_adapter.find_user_by_email("stale-delete@example.com")
+  end
+
+  def test_delete_user_callback_rejects_untrusted_callback_url
+    auth = build_auth(user: {delete_user: {enabled: true}})
+    cookie = sign_up_cookie(auth, email: "delete-callback@example.com", password: "password123")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    token = "delete-token"
+    auth.context.internal_adapter.create_verification_value(
+      identifier: "delete-account-#{token}",
+      value: user_id,
+      expiresAt: Time.now + 3600
+    )
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.delete_user_callback(
+        headers: {"cookie" => cookie},
+        query: {token: token, callbackURL: "https://evil.example/deleted"}
+      )
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_CALLBACK_URL"], error.message
+    assert auth.context.internal_adapter.find_user_by_id(user_id)
+  end
+
   def test_delete_user_deletes_current_user_sessions_and_calls_hooks
     calls = []
     auth = build_auth(

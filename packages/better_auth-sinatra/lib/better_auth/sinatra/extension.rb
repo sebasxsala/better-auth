@@ -14,7 +14,7 @@ module BetterAuth
           config = BetterAuth::Sinatra.configuration.copy
           yield config if block_given?
           config.base_path = mount_path
-          options = config.to_auth_options.merge(overrides)
+          options = config.to_auth_options.merge(overrides).merge(base_path: mount_path)
           auth_instance = auth || BetterAuth.auth(options)
 
           set :better_auth_auth, auth_instance
