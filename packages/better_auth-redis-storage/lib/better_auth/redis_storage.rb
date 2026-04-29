@@ -4,18 +4,28 @@ require "better_auth"
 require_relative "redis_storage/version"
 
 module BetterAuth
+  def self.redis_storage(client:, key_prefix: RedisStorage::DEFAULT_KEY_PREFIX, scan_count: nil)
+    RedisStorage.new(client: client, key_prefix: key_prefix, scan_count: scan_count)
+  end
+
   class RedisStorage
     DEFAULT_KEY_PREFIX = "better-auth:"
+    SCAN_DEFAULT_COUNT = 100
 
-    attr_reader :client, :key_prefix
+    attr_reader :client, :key_prefix, :scan_count
 
-    def self.build(client:, key_prefix: DEFAULT_KEY_PREFIX)
-      new(client: client, key_prefix: key_prefix)
+    def self.build(client:, key_prefix: DEFAULT_KEY_PREFIX, scan_count: nil)
+      new(client: client, key_prefix: key_prefix, scan_count: scan_count)
     end
 
-    def initialize(client:, key_prefix: DEFAULT_KEY_PREFIX)
+    def self.redisStorage(client:, key_prefix: DEFAULT_KEY_PREFIX, scan_count: nil)
+      new(client: client, key_prefix: key_prefix, scan_count: scan_count)
+    end
+
+    def initialize(client:, key_prefix: DEFAULT_KEY_PREFIX, scan_count: nil)
       @client = client
       @key_prefix = key_prefix.nil? ? DEFAULT_KEY_PREFIX : key_prefix.to_s
+      @scan_count = scan_count
     end
 
     def get(key)
@@ -24,8 +34,9 @@ module BetterAuth
 
     def set(key, value, ttl = nil)
       prefixed_key = prefix_key(key)
-      if ttl&.to_i&.positive?
-        client.setex(prefixed_key, ttl.to_i, value)
+      coerced_ttl = coerce_ttl(ttl)
+      if coerced_ttl
+        client.setex(prefixed_key, coerced_ttl, value)
       else
         client.set(prefixed_key, value)
       end
@@ -38,11 +49,13 @@ module BetterAuth
     end
 
     def list_keys
-      client.keys("#{key_prefix}*").map { |key| unprefix_key(key) }
+      storage_keys.map { |key| unprefix_key(key) }
     end
 
     def clear
-      keys = client.keys("#{key_prefix}*")
+      keys = storage_keys
+      # Upstream calls del(...keys) unconditionally; Ruby keeps this guard to
+      # avoid Redis ERR wrong number of arguments when no prefixed keys exist.
       client.del(*keys) unless keys.empty?
       nil
     end
@@ -57,6 +70,38 @@ module BetterAuth
 
     def unprefix_key(key)
       key.sub(/\A#{Regexp.escape(key_prefix)}/, "")
+    end
+
+    def storage_keys
+      return scan_keys if scan_count
+
+      client.keys("#{key_prefix}*")
+    end
+
+    def scan_keys
+      cursor = "0"
+      matches = []
+      loop do
+        cursor, keys = client.scan(cursor, match: "#{key_prefix}*", count: scan_count)
+        matches.concat(keys)
+        break if cursor.to_s == "0"
+      end
+      matches
+    end
+
+    def coerce_ttl(ttl)
+      numeric = case ttl
+      when nil
+        nil
+      when Integer
+        ttl
+      when Float
+        ttl.to_i
+      when String
+        Integer(ttl, exception: false)
+      end
+
+      numeric&.positive? ? numeric : nil
     end
   end
 end

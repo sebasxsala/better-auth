@@ -2,6 +2,11 @@
 
 Redis secondary storage package for Better Auth Ruby.
 
+This gem tracks the server-side behavior of upstream `@better-auth/redis-storage`
+pinned at Better Auth `v1.6.9`. The Ruby gem versions independently from the
+upstream npm package; `BetterAuth::RedisStorage::VERSION` is the Ruby gem
+version.
+
 ## Installation
 
 Add the gem and require the package before configuring auth:
@@ -19,13 +24,114 @@ redis = Redis.new(url: ENV.fetch("REDIS_URL"))
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   database: :memory,
-  secondary_storage: BetterAuth::RedisStorage.new(client: redis)
+  secondary_storage: BetterAuth.redis_storage(client: redis)
 )
 ```
 
-## Notes
+The canonical Ruby form is also supported:
 
-This package depends on the official `redis` gem. Keeping Redis storage outside `better_auth` avoids installing Redis client dependencies for applications that do not use secondary storage.
+```ruby
+storage = BetterAuth::RedisStorage.new(client: redis)
+```
 
-`secondary_storage` is used by Better Auth for session payload storage, active-session indexes, and rate limiting when `rate_limit: { storage: "secondary-storage" }` is configured.
+For upstream-shaped call sites, use `BetterAuth.redis_storage(client: redis)` or
+the camelCase class alias:
 
+```ruby
+storage = BetterAuth::RedisStorage.redisStorage(client: redis)
+```
+
+## Configuration
+
+```ruby
+storage = BetterAuth::RedisStorage.new(
+  client: redis,
+  key_prefix: "better-auth:",
+  scan_count: nil
+)
+```
+
+`client` must respond to `get`, `set`, `setex`, `del`, and `keys`. It should
+also respond to `scan` when `scan_count:` is configured. This matches the
+interfaces exposed by the `redis` and `redis-namespace` gems.
+
+`key_prefix` defaults to `"better-auth:"`. Passing `nil` falls back to the
+default. Any other value, including the empty string, is honored verbatim.
+Redis databases are not isolation boundaries for shared clients; applications
+sharing a Redis instance should use distinct prefixes.
+
+`scan_count` is a Ruby-only opt-in for large Redis databases. By default the gem
+uses `KEYS "#{key_prefix}*"` to match upstream exactly. Set `scan_count:` to a
+positive count such as `100`, `500`, or `1000` to use `SCAN` instead:
+
+```ruby
+storage = BetterAuth::RedisStorage.new(client: redis, scan_count: 500)
+```
+
+## Behavior
+
+The storage object implements the Better Auth secondary storage contract:
+
+```ruby
+storage.get(key)
+storage.set(key, value, ttl = nil)
+storage.delete(key)
+storage.list_keys
+storage.clear
+```
+
+`listKeys` is available as a camelCase alias for upstream parity.
+
+TTL handling for `set(key, value, ttl)`:
+
+| TTL value | Redis command |
+| --- | --- |
+| `nil`, non-numeric strings, `0`, negative numbers | `set(prefixed_key, value)` |
+| Positive `Integer` | `setex(prefixed_key, ttl, value)` |
+| Positive `Float` | `setex(prefixed_key, ttl.to_i, value)` |
+| Positive numeric `String` | `setex(prefixed_key, ttl.to_i, value)` |
+
+`set`, `delete`, and `clear` return `nil`, mirroring upstream's `Promise<void>`
+contract in Ruby form. Tests and applications should assert stored values via
+`get` rather than relying on truthy return values.
+
+`clear` intentionally differs from upstream when there are no matching keys:
+upstream calls `del(...keys)` even when `keys` is empty, while this Ruby gem
+skips `del` to avoid Redis `ERR wrong number of arguments for 'del'`.
+
+## Better Auth Usage
+
+`secondary_storage` is used by Better Auth for session payload storage,
+active-session indexes, verification values, and rate limiting when
+`rate_limit: { storage: "secondary-storage" }` is configured.
+
+```ruby
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  database: :memory,
+  secondary_storage: BetterAuth.redis_storage(client: redis),
+  rate_limit: { storage: "secondary-storage", enabled: true }
+)
+```
+
+Custom secondary storage backends should implement:
+
+- `get(key)`
+- `set(key, value, ttl = nil)`
+- `delete(key)`
+- Optional: `list_keys` or `listKeys`
+- Optional: `clear`
+
+## Testing
+
+The normal unit suite skips real Redis unless explicitly enabled:
+
+```bash
+bundle exec rake test
+```
+
+Run the Redis integration suite with:
+
+```bash
+REDIS_INTEGRATION=1 REDIS_URL=redis://localhost:6379/15 bundle exec rake test:integration
+```
