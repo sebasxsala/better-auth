@@ -528,6 +528,16 @@ jobs:
     needs: [prepare-release]
     if: needs.prepare-release.outputs.redis_storage_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -544,6 +554,8 @@ jobs:
 
       - name: Run tests
         working-directory: packages/better_auth-redis-storage
+        env:
+          REDIS_URL: redis://localhost:6379/0
         run: bundle exec rake test
 
   test-scim:

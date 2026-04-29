@@ -76,6 +76,79 @@ class BetterAuthInternalAdapterTest < Minitest::Test
     assert_nil internal.find_session("token-1")
   end
 
+  def test_store_session_in_database_keeps_hooked_db_copy_and_falls_back_when_secondary_storage_misses
+    storage = MemoryStorage.new
+    internal = internal_adapter(
+      secondary_storage: storage,
+      session: {store_session_in_database: true},
+      database_hooks: {
+        session: {
+          create: {
+            before: ->(_data, _context) { {data: {userAgent: "from-hook"}} }
+          }
+        }
+      }
+    )
+    user = internal.create_user(name: "Ada", email: "ada@example.com")
+
+    session = internal.create_session(user["id"], false, {token: "token-db"}, true)
+    stored_db_session = internal.adapter.find_one(model: "session", where: [{field: "token", value: "token-db"}])
+
+    assert_equal "from-hook", session["userAgent"]
+    assert_equal "from-hook", stored_db_session["userAgent"]
+
+    storage.delete("token-db")
+    found = internal.find_session("token-db")
+
+    assert_equal "token-db", found[:session]["token"]
+    assert_equal user["id"], found[:user]["id"]
+  end
+
+  def test_update_session_with_secondary_storage_updates_database_copy_when_enabled
+    storage = MemoryStorage.new
+    internal = internal_adapter(secondary_storage: storage, session: {store_session_in_database: true})
+    user = internal.create_user(name: "Ada", email: "ada@example.com")
+    internal.create_session(user["id"], false, {token: "token-update"}, true)
+
+    internal.update_session("token-update", {userAgent: "updated-agent"})
+    stored_db_session = internal.adapter.find_one(model: "session", where: [{field: "token", value: "token-update"}])
+
+    assert_equal "updated-agent", internal.find_session("token-update")[:session]["userAgent"]
+    assert_equal "updated-agent", stored_db_session["userAgent"]
+  end
+
+  def test_list_sessions_deduplicates_secondary_storage_active_session_tokens
+    storage = MemoryStorage.new
+    internal = internal_adapter(secondary_storage: storage)
+    user = internal.create_user(name: "Ada", email: "ada@example.com")
+    session = internal.create_session(user["id"], false, {token: "token-dup"}, true)
+    expires_ms = (session["expiresAt"].to_f * 1000).to_i
+
+    storage.set("active-sessions-#{user["id"]}", JSON.generate([
+      {"token" => "token-dup", "expiresAt" => expires_ms},
+      {"token" => "token-dup", "expiresAt" => expires_ms}
+    ]), 60)
+
+    assert_equal ["token-dup"], internal.list_sessions(user["id"]).map { |entry| entry["token"] }
+  end
+
+  def test_list_sessions_skips_missing_and_corrupt_secondary_storage_entries
+    storage = MemoryStorage.new
+    internal = internal_adapter(secondary_storage: storage)
+    user = internal.create_user(name: "Ada", email: "ada@example.com")
+    session = internal.create_session(user["id"], false, {token: "token-valid"}, true)
+    expires_ms = (session["expiresAt"].to_f * 1000).to_i
+    storage.set("token-corrupt", "{bad-json", 60)
+    storage.set("active-sessions-#{user["id"]}", JSON.generate([
+      {"token" => "token-valid", "expiresAt" => expires_ms},
+      {"token" => "token-missing", "expiresAt" => expires_ms},
+      {"token" => "token-corrupt", "expiresAt" => expires_ms}
+    ]), 60)
+
+    assert_equal ["token-valid"], internal.list_sessions(user["id"]).map { |entry| entry["token"] }
+    assert_equal ["token-valid"], internal.find_sessions(["token-valid", "token-corrupt"]).map { |entry| entry[:session]["token"] }
+  end
+
   def test_find_session_uses_adapter_join_when_experimental_joins_enabled
     config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, experimental: {joins: true})
     adapter = BetterAuth::Adapters::Memory.new(config)
@@ -131,6 +204,81 @@ class BetterAuthInternalAdapterTest < Minitest::Test
     assert_includes calls, [:after_create, "mutated"]
     assert_includes calls, [:before_delete, "verify-1"]
     assert_includes calls, [:after_delete, "verify-1"]
+  end
+
+  def test_verification_values_use_secondary_storage_by_default
+    storage = MemoryStorage.new
+    internal = internal_adapter(secondary_storage: storage)
+    expires_at = Time.now + 120
+
+    verification = internal.create_verification_value(identifier: "verify-secondary", value: "initial", expiresAt: expires_at)
+
+    assert verification["id"]
+    assert_empty internal.adapter.find_many(model: "verification")
+    stored = JSON.parse(storage.get("verification:verify-secondary"))
+    assert_equal verification["id"], stored.fetch("id")
+    assert_equal "initial", stored.fetch("value")
+    assert_in_delta 120, storage.ttls.fetch("verification:verify-secondary"), 2
+
+    assert_equal "initial", internal.find_verification_value("verify-secondary")["value"]
+
+    internal.update_verification_value(verification["id"], value: "updated")
+    assert_equal "updated", internal.find_verification_value("verify-secondary")["value"]
+
+    internal.delete_verification_value(verification["id"])
+    assert_nil storage.get("verification:verify-secondary")
+  end
+
+  def test_verification_store_in_database_falls_back_when_secondary_storage_misses
+    storage = MemoryStorage.new
+    internal = internal_adapter(secondary_storage: storage, verification: {store_in_database: true})
+
+    verification = internal.create_verification_value(identifier: "verify-dual", value: "initial", expiresAt: Time.now + 120)
+
+    assert storage.get("verification:verify-dual")
+    assert_equal verification["id"], internal.adapter.find_many(model: "verification").first["id"]
+
+    storage.delete("verification:verify-dual")
+    found = internal.find_verification_value("verify-dual")
+
+    assert_equal verification["id"], found["id"]
+    assert_equal "initial", found["value"]
+  end
+
+  def test_verification_secondary_storage_hashes_identifiers_when_configured
+    storage = MemoryStorage.new
+    internal = internal_adapter(secondary_storage: storage, verification: {store_identifier: "hashed"})
+    hashed = BetterAuth::Crypto.sha256("verify-hashed", encoding: :base64url)
+
+    verification = internal.create_verification_value(identifier: "verify-hashed", value: "secret", expiresAt: Time.now + 120)
+
+    assert_nil storage.get("verification:verify-hashed")
+    assert storage.get("verification:#{hashed}")
+    assert_equal hashed, verification["identifier"]
+    assert_equal "secret", internal.find_verification_value("verify-hashed")["value"]
+  end
+
+  def test_verification_secondary_storage_supports_identifier_overrides
+    storage = MemoryStorage.new
+    internal = internal_adapter(
+      secondary_storage: storage,
+      verification: {
+        store_identifier: {
+          default: "plain",
+          overrides: {
+            "custom:" => {hash: ->(identifier) { "stored-#{identifier.delete_prefix("custom:")}" }}
+          }
+        }
+      }
+    )
+
+    internal.create_verification_value(identifier: "custom:token", value: "secret", expiresAt: Time.now + 120)
+    internal.create_verification_value(identifier: "plain:token", value: "visible", expiresAt: Time.now + 120)
+
+    assert storage.get("verification:stored-token")
+    assert storage.get("verification:plain:token")
+    assert_equal "secret", internal.find_verification_value("custom:token")["value"]
+    assert_equal "visible", internal.find_verification_value("plain:token")["value"]
   end
 
   def test_user_and_account_helpers

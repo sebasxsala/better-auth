@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "securerandom"
 require "test_helper"
 
 class RedisStorageTest < Minitest::Test
@@ -15,9 +16,18 @@ class RedisStorageTest < Minitest::Test
     assert_equal "payload", @client.data.fetch("better-auth:session-token")
   end
 
-  def test_set_with_positive_ttl_uses_setex
-    @storage.set("rate-limit", "payload", 60)
+  def test_nil_key_prefix_uses_default_prefix
+    storage = BetterAuth::RedisStorage.new(client: @client, key_prefix: nil)
 
+    storage.set("session-token", "payload")
+
+    assert_equal "payload", @client.data.fetch("better-auth:session-token")
+  end
+
+  def test_set_with_positive_ttl_uses_setex
+    result = @storage.set("rate-limit", "payload", 60)
+
+    assert_nil result
     assert_equal [["better-auth:rate-limit", 60, "payload"]], @client.setex_calls
   end
 
@@ -30,8 +40,9 @@ class RedisStorageTest < Minitest::Test
 
   def test_delete_removes_prefixed_key
     @storage.set("session-token", "payload")
-    @storage.delete("session-token")
+    result = @storage.delete("session-token")
 
+    assert_nil result
     refute @client.data.key?("better-auth:session-token")
   end
 
@@ -49,8 +60,9 @@ class RedisStorageTest < Minitest::Test
     @storage.set("b", "two")
     @client.set("other:c", "three")
 
-    @storage.clear
+    result = @storage.clear
 
+    assert_nil result
     assert_empty @storage.list_keys
     assert_equal "three", @client.get("other:c")
   end
@@ -65,6 +77,62 @@ class RedisStorageTest < Minitest::Test
     @storage.set("a", "one")
 
     assert_equal ["a"], @storage.listKeys
+  end
+
+  def test_real_redis_stores_better_auth_sessions_with_prefix_isolation
+    redis_url = ENV["REDIS_URL"]
+    skip "set REDIS_URL to run real Redis integration" if redis_url.to_s.empty?
+
+    begin
+      require "redis"
+      redis_connected = false
+      client = Redis.new(url: redis_url)
+      client.ping
+      redis_connected = true
+    rescue LoadError
+      skip "redis gem is not available"
+    rescue Redis::BaseConnectionError
+      skip "Redis is not reachable at REDIS_URL"
+    end
+
+    prefix_root = "better-auth-test:#{SecureRandom.hex(6)}"
+    client.set("#{prefix_root}:other:session", "outside")
+
+    [false, true].each do |store_session_in_database|
+      key_prefix = "#{prefix_root}:#{store_session_in_database}:"
+      storage = BetterAuth::RedisStorage.new(client: client, key_prefix: key_prefix)
+      storage.clear
+      auth = BetterAuth.auth(
+        base_url: "http://localhost:3000",
+        secret: "redis-storage-secret-with-enough-entropy-123",
+        database: :memory,
+        secondary_storage: storage,
+        session: {store_session_in_database: store_session_in_database}
+      )
+
+      result = auth.api.sign_up_email(
+        body: {
+          email: "redis-#{store_session_in_database}@example.com",
+          password: "password123",
+          name: "Redis User"
+        }
+      )
+
+      assert result[:token]
+      keys = storage.listKeys
+      assert_equal 2, keys.length
+      refute_includes keys, "#{prefix_root}:other:session"
+      session_key = keys.find { |key| !key.start_with?("active-sessions-") }
+      session_data = JSON.parse(storage.get(session_key))
+      assert session_data.fetch("user").fetch("id")
+      assert session_data.fetch("session").fetch("id")
+      assert_equal result[:token], session_data.fetch("session").fetch("token")
+    ensure
+      storage&.clear
+    end
+  ensure
+    client&.del("#{prefix_root}:other:session") if defined?(client) && client && redis_connected
+    client&.close if defined?(client) && client.respond_to?(:close) && redis_connected
   end
 
   class FakeRedisClient

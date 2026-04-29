@@ -74,28 +74,31 @@ module BetterAuth
           "userId" => user_id,
           "token" => token
         }.merge(timestamps)
+        base["id"] = generated_id if secondary_storage
         data = override_all ? base.merge(override) : override.merge(base)
 
         custom = secondary_storage && lambda do |session_data|
           actual_session = apply_schema_create("session", session_data)
           store_session(actual_session)
+          adapter.create(model: "session", data: actual_session, force_allow_id: true) if options.session[:store_session_in_database]
           actual_session
         end
-        execute_main = !secondary_storage || options.session[:store_session_in_database]
-        created = hooks.create(data, "session", custom: custom, context: context)
-        adapter.create(model: "session", data: data, force_allow_id: true) if secondary_storage && execute_main
-        created
+        hooks.create(data, "session", custom: custom, context: context)
       end
 
       def find_session(token)
         if secondary_storage
           data = parse_storage(secondary_storage.get(token))
-          return nil unless data
+          unless data
+            return nil unless options.session[:store_session_in_database] && !options.session[:preserve_session_in_database]
+          end
 
-          return {
-            session: normalize_session_dates(data["session"]),
-            user: normalize_user_dates(data["user"])
-          }
+          if data
+            return {
+              session: normalize_session_dates(data["session"]),
+              user: normalize_user_dates(data["user"])
+            }
+          end
         end
 
         found = find_session_with_user(token)
@@ -113,7 +116,9 @@ module BetterAuth
         data = stringify_keys(session)
         if secondary_storage
           return hooks.update(data, [{field: "token", value: token}], "session", custom: lambda { |actual_data|
-            update_stored_session(token, actual_data)
+            stored = update_stored_session(token, actual_data)
+            db = adapter.update(model: "session", where: [{field: "token", value: token}], update: actual_data) if options.session[:store_session_in_database]
+            db || stored
           })
         end
 
@@ -226,30 +231,93 @@ module BetterAuth
       end
 
       def create_verification_value(data)
-        hooks.create(timestamps.merge(stringify_keys(data)), "verification")
+        payload = timestamps.merge(stringify_keys(data))
+        stored_identifier = processed_verification_identifier(payload.fetch("identifier"))
+        payload["identifier"] = stored_identifier
+
+        custom = secondary_storage && lambda do |verification_data|
+          actual = apply_schema_create("verification", verification_data)
+          actual["id"] ||= generated_id
+          store_verification(actual)
+          adapter.create(model: "verification", data: actual, force_allow_id: true) if verification_store_in_database?
+          actual
+        end
+
+        hooks.create(payload, "verification", custom: custom)
       end
 
       def find_verification_value(identifier)
+        stored_identifier = processed_verification_identifier(identifier)
+        storage_option = verification_storage_option(identifier)
+        if secondary_storage
+          cached = read_verification(stored_identifier)
+          cached ||= read_verification(identifier) if storage_option && storage_option.to_s != "plain"
+          return cached if cached
+          return nil unless verification_store_in_database?
+        end
+
         values = adapter.find_many(
           model: "verification",
-          where: [{field: "identifier", value: identifier}],
+          where: [{field: "identifier", value: stored_identifier}],
           sort_by: {field: "createdAt", direction: "desc"},
           limit: 1
         )
+        if values.empty? && storage_option && storage_option.to_s != "plain"
+          values = adapter.find_many(
+            model: "verification",
+            where: [{field: "identifier", value: identifier}],
+            sort_by: {field: "createdAt", direction: "desc"},
+            limit: 1
+          )
+        end
         hooks.delete_many([{field: "expiresAt", value: Time.now, operator: "lt"}], "verification") unless options.verification[:disable_cleanup]
         values.first
       end
 
       def delete_verification_value(id)
+        if secondary_storage
+          stored_identifier = secondary_storage.get(verification_id_key(id))
+          if stored_identifier
+            secondary_storage.delete(verification_key(stored_identifier))
+            secondary_storage.delete(verification_id_key(id))
+            return nil unless verification_store_in_database?
+          elsif !verification_store_in_database?
+            return nil
+          end
+        end
+
         hooks.delete([{field: "id", value: id}], "verification")
       end
 
       def delete_verification_by_identifier(identifier)
-        hooks.delete([{field: "identifier", value: identifier}], "verification")
+        stored_identifier = processed_verification_identifier(identifier)
+        if secondary_storage
+          cached = read_verification(stored_identifier)
+          secondary_storage.delete(verification_key(stored_identifier))
+          secondary_storage.delete(verification_id_key(cached["id"])) if cached && cached["id"]
+          return nil unless verification_store_in_database?
+        end
+
+        hooks.delete([{field: "identifier", value: stored_identifier}], "verification")
       end
 
       def update_verification_value(id, data)
-        hooks.update(stringify_keys(data), [{field: "id", value: id}], "verification")
+        update = stringify_keys(data)
+        if secondary_storage
+          stored_identifier = secondary_storage.get(verification_id_key(id))
+          if stored_identifier
+            cached = read_verification(stored_identifier)
+            if cached
+              updated = cached.merge(update)
+              store_verification(updated)
+              return updated unless verification_store_in_database?
+            end
+          elsif !verification_store_in_database?
+            return nil
+          end
+        end
+
+        hooks.update(update, [{field: "id", value: id}], "verification")
       end
 
       private
@@ -283,6 +351,14 @@ module BetterAuth
       def timestamps
         now = Time.now
         {"createdAt" => now, "updatedAt" => now}
+      end
+
+      def generated_id
+        generator = options.advanced.dig(:database, :generate_id)
+        return generator.call.to_s if generator.respond_to?(:call)
+        return SecureRandom.uuid if generator == "uuid"
+
+        SecureRandom.hex(16)
       end
 
       def stringify_keys(data)
@@ -334,7 +410,8 @@ module BetterAuth
           .push({"token" => session["token"], "expiresAt" => expires_ms})
           .sort_by { |entry| entry["expiresAt"] }
         write_active_sessions(session["userId"], entries)
-        secondary_storage.set(session["token"], JSON.generate({session: session, user: user}), ttl(expires_ms))
+        ttl_seconds = ttl(expires_ms)
+        secondary_storage.set(session["token"], JSON.generate({session: session, user: user}), ttl_seconds) if ttl_seconds.positive?
       end
 
       def update_stored_session(token, data)
@@ -345,7 +422,12 @@ module BetterAuth
         merged["expiresAt"] = normalize_time(merged["expiresAt"])
         merged["createdAt"] = normalize_time(merged["createdAt"])
         merged["updatedAt"] = normalize_time(merged["updatedAt"])
-        secondary_storage.set(token, JSON.generate({session: merged, user: parsed["user"]}), ttl(millis(merged["expiresAt"])))
+        ttl_seconds = ttl(millis(merged["expiresAt"]))
+        if ttl_seconds.positive?
+          secondary_storage.set(token, JSON.generate({session: merged, user: parsed["user"]}), ttl_seconds)
+        else
+          secondary_storage.delete(token)
+        end
         entries = active_session_entries(merged["userId"])
           .reject { |entry| entry["token"] == token || entry["expiresAt"].to_i <= current_millis }
           .push({"token" => token, "expiresAt" => millis(merged["expiresAt"])})
@@ -369,7 +451,7 @@ module BetterAuth
         raw = secondary_storage.get(active_key(user_id))
         Array(parse_storage(raw)).map do |entry|
           entry.transform_keys(&:to_s)
-        end
+        end.uniq { |entry| entry["token"] }
       end
 
       def write_active_sessions(user_id, entries)
@@ -377,7 +459,12 @@ module BetterAuth
         if future.empty?
           secondary_storage.delete(active_key(user_id))
         else
-          secondary_storage.set(active_key(user_id), JSON.generate(future), ttl(future.last["expiresAt"]))
+          ttl_seconds = ttl(future.last["expiresAt"])
+          if ttl_seconds.positive?
+            secondary_storage.set(active_key(user_id), JSON.generate(future), ttl_seconds)
+          else
+            secondary_storage.delete(active_key(user_id))
+          end
         end
       end
 
@@ -413,6 +500,67 @@ module BetterAuth
           "createdAt" => normalize_time(user["createdAt"] || user[:createdAt]),
           "updatedAt" => normalize_time(user["updatedAt"] || user[:updatedAt])
         )
+      end
+
+      def normalize_verification_dates(verification)
+        return nil unless verification
+
+        verification.transform_keys(&:to_s).merge(
+          "expiresAt" => normalize_time(verification["expiresAt"] || verification[:expiresAt]),
+          "createdAt" => normalize_time(verification["createdAt"] || verification[:createdAt]),
+          "updatedAt" => normalize_time(verification["updatedAt"] || verification[:updatedAt])
+        )
+      end
+
+      def store_verification(verification)
+        normalized = normalize_verification_dates(verification)
+        ttl_seconds = ttl(millis(normalized["expiresAt"]))
+        return normalized unless ttl_seconds.positive?
+
+        secondary_storage.set(verification_key(normalized["identifier"]), JSON.generate(normalized), ttl_seconds)
+        secondary_storage.set(verification_id_key(normalized["id"]), normalized["identifier"], ttl_seconds) if normalized["id"]
+        normalized
+      end
+
+      def read_verification(identifier)
+        normalize_verification_dates(parse_storage(secondary_storage.get(verification_key(identifier))))
+      end
+
+      def verification_key(identifier)
+        "verification:#{identifier}"
+      end
+
+      def verification_id_key(id)
+        "verification-id:#{id}"
+      end
+
+      def verification_store_in_database?
+        !!options.verification[:store_in_database]
+      end
+
+      def processed_verification_identifier(identifier)
+        option = verification_storage_option(identifier)
+        return identifier.to_s if option.nil? || option.to_s == "plain"
+        return Crypto.sha256(identifier.to_s, encoding: :base64url) if option.to_s == "hashed"
+        return option[:hash].call(identifier.to_s).to_s if option.is_a?(Hash) && option[:hash].respond_to?(:call)
+        return option["hash"].call(identifier.to_s).to_s if option.is_a?(Hash) && option["hash"].respond_to?(:call)
+
+        identifier.to_s
+      end
+
+      def verification_storage_option(identifier)
+        config = options.verification[:store_identifier]
+        return nil unless config
+
+        if config.is_a?(Hash) && (config.key?(:default) || config.key?("default"))
+          overrides = config[:overrides] || config["overrides"] || {}
+          overrides.each do |prefix, option|
+            return option if identifier.to_s.start_with?(prefix.to_s)
+          end
+          return config[:default] || config["default"]
+        end
+
+        config
       end
 
       def normalize_time(value)

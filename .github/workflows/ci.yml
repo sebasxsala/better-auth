@@ -258,6 +258,16 @@ jobs:
   test-redis-storage:
     name: Test better_auth-redis-storage (Redis Storage Plugin)
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -274,6 +284,8 @@ jobs:
 
       - name: Run tests
         working-directory: packages/better_auth-redis-storage
+        env:
+          REDIS_URL: redis://localhost:6379/0
         run: bundle exec rake test
 
   test-scim:

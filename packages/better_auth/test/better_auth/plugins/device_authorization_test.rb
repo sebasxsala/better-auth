@@ -211,6 +211,36 @@ class BetterAuthPluginsDeviceAuthorizationTest < Minitest::Test
     assert_match(/\A[A-Za-z0-9_-]{32}\z/, headers.fetch("set-ott"))
   end
 
+  def test_device_token_exchange_stores_session_in_secondary_storage
+    storage = StringStorage.new
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      secondary_storage: storage,
+      plugins: [
+        BetterAuth::Plugins.device_authorization(
+          interval: "5s",
+          generate_device_code: -> { "device-code-secondary" },
+          generate_user_code: -> { "SECNDRY1" }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "device-secondary@example.com")
+    issued = auth.api.device_code(body: {client_id: "cli", scope: "openid profile"})
+    auth.api.device_approve(headers: {"cookie" => cookie}, body: {userCode: issued[:user_code]})
+    record = auth.context.adapter.find_one(model: "deviceCode", where: [{field: "deviceCode", value: issued[:device_code]}])
+    auth.context.adapter.update(model: "deviceCode", where: [{field: "id", value: record["id"]}], update: {"lastPolledAt" => Time.now - 6})
+
+    token = auth.api.device_token(body: {grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: issued[:device_code], client_id: "cli"})
+    stored = JSON.parse(storage.get(token[:access_token]))
+
+    assert_equal "Bearer", token[:token_type]
+    assert_equal "device-secondary@example.com", stored.fetch("user").fetch("email")
+    assert_equal token[:access_token], stored.fetch("session").fetch("token")
+    assert storage.get("active-sessions-#{stored.fetch("user").fetch("id")}")
+  end
+
   def test_verification_uri_preserves_existing_query_params_and_encodes_user_code
     auth = BetterAuth.auth(
       base_url: "http://localhost:3000",
@@ -309,5 +339,23 @@ class BetterAuthPluginsDeviceAuthorizationTest < Minitest::Test
       as_response: true
     )
     headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  class StringStorage
+    def initialize
+      @store = {}
+    end
+
+    def set(key, value, _ttl = nil)
+      @store[key] = value
+    end
+
+    def get(key)
+      @store[key]
+    end
+
+    def delete(key)
+      @store.delete(key)
+    end
   end
 end

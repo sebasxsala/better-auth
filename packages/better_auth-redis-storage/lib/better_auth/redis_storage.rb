@@ -15,7 +15,7 @@ module BetterAuth
 
     def initialize(client:, key_prefix: DEFAULT_KEY_PREFIX)
       @client = client
-      @key_prefix = key_prefix.to_s
+      @key_prefix = key_prefix.nil? ? DEFAULT_KEY_PREFIX : key_prefix.to_s
     end
 
     def get(key)
@@ -29,10 +29,12 @@ module BetterAuth
       else
         client.set(prefixed_key, value)
       end
+      nil
     end
 
     def delete(key)
       client.del(prefix_key(key))
+      nil
     end
 
     def list_keys
@@ -42,6 +44,7 @@ module BetterAuth
     def clear
       keys = client.keys("#{key_prefix}*")
       client.del(*keys) unless keys.empty?
+      nil
     end
 
     alias_method :listKeys, :list_keys

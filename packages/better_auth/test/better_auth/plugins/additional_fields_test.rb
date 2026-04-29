@@ -108,6 +108,7 @@ class BetterAuthPluginsAdditionalFieldsTest < Minitest::Test
     assert_equal 400, locked.status_code
 
     update = auth.api.update_session(headers: {"cookie" => cookie}, body: {deviceName: "mobile"}, return_headers: true)
+    assert_equal "mobile", update.fetch(:response).fetch(:session).fetch("deviceName")
     updated_cookie = [cookie, cookie_header(update.fetch(:headers).fetch("set-cookie"))].join("; ")
     updated = auth.api.get_session(headers: {"cookie" => updated_cookie})
     assert_equal "mobile", updated.fetch(:session).fetch("deviceName")
