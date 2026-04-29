@@ -16,7 +16,7 @@ default collections with upstream-compatible singular names such as `user`,
 
 ```ruby title="Gemfile"
 gem "better_auth"
-gem "mongo"
+gem "better_auth-mongo-adapter"
 ```
 
 ```bash title="Terminal"
@@ -27,7 +27,7 @@ bundle install
 
 ```ruby title="config/auth.rb"
 require "better_auth"
-require "mongo"
+require "better_auth/mongo_adapter"
 
 client = Mongo::Client.new(
   ENV.fetch("MONGODB_URL", "mongodb://127.0.0.1:27017/better_auth")
@@ -36,31 +36,62 @@ client = Mongo::Client.new(
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   base_url: ENV.fetch("BETTER_AUTH_URL"),
-  database: BetterAuth::Adapters::MongoDB.new(
-    database: client.database,
-    client: client
-  )
+  database: ->(options) {
+    BetterAuth::Adapters::MongoDB.new(
+      options,
+      database: client.database,
+      client: client
+    )
+  }
 )
 ```
 
+The lambda form lets Better Auth pass the final configuration into the adapter,
+including plugins, custom schemas, and advanced database options.
+
 Transactions are enabled when a client is provided. If your MongoDB deployment
-does not support transactions, disable them explicitly.
+does not support transactions, disable them explicitly. MongoDB transactions
+require a replica set, even for a single local node.
+
+```ruby title=".env"
+MONGODB_URL="mongodb://127.0.0.1:27017/better_auth?replicaSet=rs0"
+```
+
+For local Docker-based development, start MongoDB with `--replSet rs0` and run
+`rs.initiate()` once before using transactions.
 
 ```ruby title="config/auth.rb"
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  database: BetterAuth::Adapters::MongoDB.new(
-    database: client.database,
-    client: client,
-    transaction: false
-  )
+  database: ->(options) {
+    BetterAuth::Adapters::MongoDB.new(
+      options,
+      database: client.database,
+      client: client,
+      transaction: false
+    )
+  }
 )
+```
+
+Use `use_plural: true` when you want collection names from the Better Auth
+schema `model_name` values instead of the default singular collection names.
+
+```ruby title="config/auth.rb"
+database: ->(options) {
+  BetterAuth::Adapters::MongoDB.new(
+    options,
+    database: client.database,
+    use_plural: true
+  )
+}
 ```
 
 ## Schema
 
 MongoDB does not need SQL schema generation or migrations. The adapter writes
-documents using Better Auth storage field names.
+documents using Better Auth storage field names, including custom model names,
+custom field names, plugin schemas, and `additional_fields`.
 
 | Better Auth field | MongoDB field |
 | --- | --- |
@@ -71,7 +102,32 @@ documents using Better Auth storage field names.
 | `expiresAt` | `expires_at` |
 
 The adapter supports the same core CRUD contract as the SQL adapters, including
-where operators, sorting, pagination, counts, and core joins used by sessions
-and accounts.
+where operators, sorting, pagination, counts, and native MongoDB joins. Joins
+are inferred from schema references, so plugin models with `references` fields
+work the same way as core `session -> user` and `user -> account` joins.
+
+JSON fields are stored as JSON strings and parsed on output, matching upstream
+adapter behavior. Array fields are stored natively.
+
+By default, generated ids are stored as MongoDB `ObjectId` values. If you set
+`advanced: {database: {generate_id: "uuid"}}`, generated ids and id references
+are stored as native BSON UUID values and returned to Ruby callers as UUID
+strings. If you provide a callable custom id generator, the returned value is
+stored as-is.
+
+The upstream TypeScript adapter exposes `debugLogs`; Better Auth Ruby does not
+currently have an adapter-level debug logging contract, so that option is not
+ported.
+
+## Testing Transactions Locally
+
+The Mongo adapter test suite runs transaction rollback coverage when
+`BETTER_AUTH_MONGODB_REPLICA_SET_URL` points to a replica-set-capable MongoDB
+URL.
+
+```bash title="Terminal"
+BETTER_AUTH_MONGODB_REPLICA_SET_URL="mongodb://127.0.0.1:27017/better-auth-ruby-transaction-test?replicaSet=rs0" \
+  bundle exec rake test
+```
 
 {/* Upstream MongoDB guide is preserved in upstream/docs/content/docs/adapters/mongo.mdx. */}

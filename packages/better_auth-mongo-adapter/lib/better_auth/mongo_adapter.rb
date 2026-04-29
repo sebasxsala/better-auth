@@ -8,9 +8,18 @@ require "time"
 module BetterAuth
   module Adapters
     class MongoDB < Base
+      class MongoAdapterError < Error
+        attr_reader :code
+
+        def initialize(code, message)
+          @code = code
+          super(message)
+        end
+      end
+
       attr_reader :database, :client, :use_plural
 
-      def initialize(options = nil, database:, client: nil, transaction: nil, use_plural: false)
+      def initialize(options = nil, database:, client: nil, transaction: nil, use_plural: false, session: nil)
         require "mongo" unless database
 
         super(options || Configuration.new(secret: Configuration::DEFAULT_SECRET, database: :memory))
@@ -18,7 +27,7 @@ module BetterAuth
         @client = client
         @transaction_enabled = transaction.nil? ? !client.nil? : !!transaction
         @use_plural = !!use_plural
-        @session = nil
+        @session = session
       end
 
       def create(model:, data:, force_allow_id: false)
@@ -35,45 +44,65 @@ module BetterAuth
 
       def find_many(model:, where: [], sort_by: nil, limit: nil, offset: nil, select: nil, join: nil)
         model = model.to_s
-        records = documents_for(model)
-          .select { |document| matches_where?(model, document, where || []) }
-          .map { |document| from_document(model, document) }
-        records = records.map { |record| apply_join(model, record, join) } if join
-        records = sort_records(records, sort_by) if sort_by
-        records = records.drop(offset.to_i) if offset
-        records = records.first(limit.to_i) if limit
-        records = records.map { |record| select_fields(record, select, join) } if select && !select.empty?
-        records
+        pipeline = [{"$match" => mongo_filter(model, where || [])}]
+        pipeline.concat(join_stages(model, join)) if join
+        pipeline << {"$project" => projection_for(model, select, join)} if select && !select.empty?
+        pipeline << {"$sort" => {sort_field(model, sort_by) => sort_direction(sort_by)}} if sort_by
+        pipeline << {"$skip" => offset.to_i} if offset
+        pipeline << {"$limit" => limit.to_i} if limit
+
+        collection_for(model)
+          .aggregate(pipeline, session_options)
+          .to_a
+          .map { |document| from_document(model, stringify_document(document), join: join) }
       end
 
       def update(model:, where:, update:)
         model = model.to_s
-        records = update_matching(model, where || [], update, first_only: true)
-        records.first
+        data = transform_input(model, update, "update", true)
+        document = to_document(model, data)
+        document.delete("_id")
+        result = collection_for(model).find_one_and_update(
+          mongo_filter(model, where || []),
+          {"$set" => document},
+          session_options.merge(return_document: :after)
+        )
+        result = unwrap_update_result(result)
+        result ? from_document(model, stringify_document(result)) : nil
       end
 
       def update_many(model:, where:, update:)
-        update_matching(model.to_s, where || [], update, first_only: false).length
+        model = model.to_s
+        data = transform_input(model, update, "update", true)
+        document = to_document(model, data)
+        document.delete("_id")
+        result = collection_for(model).update_many(
+          mongo_filter(model, where || []),
+          {"$set" => document},
+          session_options
+        )
+        result.respond_to?(:modified_count) ? result.modified_count : result.to_i
       end
 
       def delete(model:, where:)
-        delete_many(model: model, where: where, first_only: true)
+        collection_for(model.to_s).delete_one(mongo_filter(model.to_s, where || []), session_options)
         nil
       end
 
-      def delete_many(model:, where:, first_only: false)
-        model = model.to_s
-        documents = documents_for(model)
-        matches = documents.select { |document| matches_where?(model, document, where || []) }
-        matches = matches.first(1) if first_only
-        ids = matches.map { |document| document["_id"] }
-        remaining = documents.reject { |document| ids.include?(document["_id"]) }
-        replace_documents(model, remaining)
-        ids.length
+      def delete_many(model:, where:)
+        result = collection_for(model.to_s).delete_many(mongo_filter(model.to_s, where || []), session_options)
+        result.respond_to?(:deleted_count) ? result.deleted_count : result.to_i
       end
 
       def count(model:, where: nil)
-        find_many(model: model, where: where || []).length
+        pipeline = [
+          {"$match" => mongo_filter(model.to_s, where || [])},
+          {"$count" => "total"}
+        ]
+        row = collection_for(model.to_s).aggregate(pipeline, session_options).to_a.first
+        return 0 unless row
+
+        (row["total"] || row[:total] || 0).to_i
       end
 
       def transaction
@@ -82,15 +111,14 @@ module BetterAuth
         session = client.start_session
         begin
           session.start_transaction
-          @session = session
-          result = yield self
+          adapter = self.class.new(options, database: database, client: client, transaction: @transaction_enabled, use_plural: use_plural, session: session)
+          result = yield adapter
           session.commit_transaction
           result
         rescue
           session.abort_transaction
           raise
         ensure
-          @session = nil
           session.end_session
         end
       end
@@ -98,7 +126,7 @@ module BetterAuth
       private
 
       def transform_input(model, data, action, force_allow_id)
-        fields = schema_for(model).fetch(:fields)
+        fields = fields_for(model)
         input = stringify_keys(data)
         output = {}
 
@@ -129,37 +157,208 @@ module BetterAuth
         output
       end
 
-      def update_matching(model, where, update, first_only:)
-        data = transform_input(model, update, "update", true)
-        documents = documents_for(model)
-        matches = documents.select { |document| matches_where?(model, document, where) }
-        matches = matches.first(1) if first_only
-        updates = to_document(model, data)
-        ids = matches.map { |document| document["_id"] }
-        updated = documents.map do |document|
-          ids.include?(document["_id"]) ? document.merge(updates) : document
-        end
-        replace_documents(model, updated)
-        updated.select { |document| ids.include?(document["_id"]) }.map { |document| from_document(model, document) }
-      end
+      def mongo_filter(model, where)
+        clauses = Array(where)
+        return {} if clauses.empty?
 
-      def documents_for(model)
-        collection = collection_for(model)
-        if collection.respond_to?(:all_documents)
-          collection.all_documents
-        else
-          collection.find({}, session_options).to_a.map { |document| stringify_document(document) }
+        clauses.each_with_index.reduce(nil) do |filter, (clause, index)|
+          condition = condition_for(model, clause)
+          next condition if index.zero?
+
+          if fetch_key(clause, :connector).to_s.upcase == "OR"
+            {"$or" => [filter, condition]}
+          else
+            {"$and" => [filter, condition]}
+          end
         end
       end
 
-      def replace_documents(model, documents)
-        collection = collection_for(model)
-        if collection.respond_to?(:replace_documents)
-          collection.replace_documents(documents)
-        else
-          collection.delete_many({}, session_options)
-          documents.each { |document| collection.insert_one(document, session_options) }
+      def condition_for(model, clause)
+        operator = (fetch_key(clause, :operator) || "eq").to_s.downcase
+        value = fetch_key(clause, :value)
+        if operator == "in" && !value.is_a?(Array)
+          raise MongoAdapterError.new("UNSUPPORTED_OPERATOR", "Value must be an array")
         end
+
+        field = resolve_field(model, fetch_key(clause, :field))
+        attributes = fields_for(model).fetch(field)
+        key = (field == "id") ? "_id" : storage_field(model, field)
+        mode = (fetch_key(clause, :mode) || "sensitive").to_s
+        id_field = id_field?(field, attributes)
+        insensitive = !id_field && mode == "insensitive" && insensitive_value?(value)
+        value = coerce_where_value(value, attributes)
+
+        case operator
+        when "eq"
+          (insensitive && value.is_a?(String)) ? regex_condition(key, value, :eq, insensitive: true) : {key => store_value(field, value, attributes, strict_id: true)}
+        when "in"
+          (insensitive && value.is_a?(Array)) ? insensitive_in_condition(key, value) : {key => {"$in" => Array(value).map { |entry| store_value(field, entry, attributes, strict_id: true) }}}
+        when "not_in"
+          (insensitive && value.is_a?(Array)) ? insensitive_not_in_condition(key, value) : {key => {"$nin" => Array(value).map { |entry| store_value(field, entry, attributes, strict_id: true) }}}
+        when "ne"
+          (insensitive && value.is_a?(String)) ? {key => {"$not" => regex_for(value, :eq, insensitive: true)}} : {key => {"$ne" => store_value(field, value, attributes, strict_id: true)}}
+        when "gt", "gte", "lt", "lte"
+          {key => {"$#{operator}" => store_value(field, value, attributes, strict_id: true)}}
+        when "contains", "starts_with", "ends_with"
+          regex_condition(key, value.to_s, operator.to_sym, insensitive: insensitive)
+        else
+          raise MongoAdapterError.new("UNSUPPORTED_OPERATOR", "Unsupported operator: #{operator}")
+        end
+      end
+
+      def insensitive_value?(value)
+        value.is_a?(String) || (value.is_a?(Array) && value.all? { |entry| entry.is_a?(String) })
+      end
+
+      def insensitive_in_condition(key, values)
+        return {"$expr" => {"$eq" => [1, 0]}} if values.empty?
+
+        {"$or" => values.map { |value| regex_condition(key, value, :eq, insensitive: true) }}
+      end
+
+      def insensitive_not_in_condition(key, values)
+        return {} if values.empty?
+
+        {"$nor" => values.map { |value| regex_condition(key, value, :eq, insensitive: true) }}
+      end
+
+      def regex_condition(key, value, operator, insensitive:)
+        {key => regex_for(value, operator, insensitive: insensitive)}
+      end
+
+      def regex_for(value, operator, insensitive:)
+        escaped = Regexp.escape(value.to_s[0, 256])
+        pattern = case operator.to_s
+        when "eq" then "\\A#{escaped}\\z"
+        when "starts_with" then "\\A#{escaped}"
+        when "ends_with" then "#{escaped}\\z"
+        else escaped
+        end
+        Regexp.new(pattern, insensitive ? Regexp::IGNORECASE : nil)
+      end
+
+      def join_stages(model, join)
+        normalized_join(model, join).flat_map do |join_model, config|
+          local_field = storage_field_for_join(model, config.fetch(:from))
+          foreign_field = storage_field_for_join(join_model, config.fetch(:to))
+          relation = config[:relation]
+          limit = config[:limit]
+          unique = relation == "one-to-one" || config[:unique]
+          should_limit = !unique && limit && limit.to_i.positive?
+
+          lookup = if should_limit
+            {
+              "$lookup" => {
+                "from" => collection_name(join_model),
+                "let" => {"localFieldValue" => "$#{local_field}"},
+                "pipeline" => [
+                  {"$match" => {"$expr" => {"$eq" => ["$#{foreign_field}", "$$localFieldValue"]}}},
+                  {"$limit" => limit.to_i}
+                ],
+                "as" => join_model
+              }
+            }
+          else
+            {
+              "$lookup" => {
+                "from" => collection_name(join_model),
+                "localField" => local_field,
+                "foreignField" => foreign_field,
+                "as" => join_model
+              }
+            }
+          end
+
+          unique ? [lookup, {"$unwind" => {"path" => "$#{join_model}", "preserveNullAndEmptyArrays" => true}}] : [lookup]
+        end
+      end
+
+      def normalized_join(model, join)
+        join.each_with_object({}) do |(join_model, config), result|
+          join_model = join_model.to_s
+          result[join_model] = normalize_join_config(model, join_model, config)
+        end
+      end
+
+      def normalize_join_config(model, join_model, config)
+        if config.is_a?(Hash) && (config.key?(:on) || config.key?("on"))
+          on = config[:on] || config["on"]
+          relation = config[:relation] || config["relation"]
+          limit = config[:limit] || config["limit"]
+          from = fetch_key(on, :from)
+          to = fetch_key(on, :to)
+          return {from: Schema.storage_key(from), to: Schema.storage_key(to), relation: relation, limit: limit, unique: unique_join_field?(join_model, to)}
+        end
+
+        inferred_join_config(model, join_model)
+      end
+
+      def inferred_join_config(model, join_model)
+        base_model = default_model_name(model)
+        target_model = default_model_name(join_model)
+        foreign_keys = fields_for(target_model).select do |_field, attributes|
+          reference_model_matches?(attributes, base_model)
+        end
+        forward_join = true
+
+        if foreign_keys.empty?
+          foreign_keys = fields_for(base_model).select do |_field, attributes|
+            reference_model_matches?(attributes, target_model)
+          end
+          forward_join = false
+        end
+
+        if foreign_keys.empty?
+          raise Error, "No foreign key found for model #{join_model} and base model #{model} while performing join operation."
+        end
+        if foreign_keys.length > 1
+          raise Error, "Multiple foreign keys found for model #{join_model} and base model #{model} while performing join operation. Only one foreign key is supported."
+        end
+
+        foreign_key, attributes = foreign_keys.first
+        reference = attributes.fetch(:references)
+        if forward_join
+          unique = attributes[:unique] == true
+          {from: reference.fetch(:field).to_s, to: foreign_key, relation: unique ? "one-to-one" : "one-to-many", unique: unique}
+        else
+          {from: foreign_key, to: reference.fetch(:field).to_s, relation: "one-to-one", unique: true}
+        end
+      end
+
+      def reference_model_matches?(attributes, model)
+        reference = attributes[:references]
+        return false unless reference
+
+        default_model_name(reference[:model] || reference["model"]) == model
+      end
+
+      def unique_join_field?(model, field)
+        field = resolve_field(model, field)
+        field == "id" || fields_for(model).dig(field, :unique) == true
+      end
+
+      def storage_field_for_join(model, field)
+        field = resolve_field(model, field)
+        (field == "id") ? "_id" : storage_field(model, field)
+      end
+
+      def projection_for(model, select, join)
+        selected_fields = Array(select).map { |field| storage_field_for_join(model, field) }
+        Array(select).each_with_object({}) do |field, projection|
+          projection[storage_field_for_join(model, field)] = 1
+        end.tap do |projection|
+          projection["_id"] = 0 unless selected_fields.include?("_id")
+          normalized_join(model, join).each_key { |join_model| projection[join_model] = 1 } if join
+        end
+      end
+
+      def sort_field(model, sort_by)
+        field = resolve_field(model, fetch_key(sort_by, :field))
+        storage_field_for_join(model, field)
+      end
+
+      def sort_direction(sort_by)
+        (fetch_key(sort_by, :direction).to_s == "desc") ? -1 : 1
       end
 
       def collection_for(model)
@@ -167,13 +366,17 @@ module BetterAuth
       end
 
       def collection_name(model)
+        model = default_model_name(model)
+        configured = configured_model_name(model)
+        return "#{configured}s" if configured && use_plural
+        return configured if configured
         return schema_for(model).fetch(:model_name) if use_plural
 
         model.to_s
       end
 
       def to_document(model, record)
-        schema_for(model).fetch(:fields).each_with_object({}) do |(field, attributes), document|
+        fields_for(model).each_with_object({}) do |(field, attributes), document|
           next unless record.key?(field)
 
           key = (field == "id") ? "_id" : storage_field(model, field)
@@ -181,136 +384,112 @@ module BetterAuth
         end
       end
 
-      def from_document(model, document)
-        fields = schema_for(model).fetch(:fields)
-        fields.each_with_object({}) do |(field, attributes), record|
+      def from_document(model, document, join: nil)
+        fields = fields_for(model)
+        record = fields.each_with_object({}) do |(field, attributes), output|
           key = (field == "id") ? "_id" : storage_field(model, field)
-          record[field] = output_value(field, fetch_document(document, key), attributes) if document_key?(document, key)
+          output[field] = output_value(field, fetch_document(document, key), attributes) if document_key?(document, key)
         end
+
+        if join
+          normalized_join(model, join).each do |join_model, config|
+            next unless document_key?(document, join_model)
+
+            joined_value = fetch_document(document, join_model)
+            record[join_model] = if joined_value.is_a?(Array)
+              joined_value.map { |entry| from_document(join_model, stringify_document(entry)) }
+            elsif joined_value
+              from_document(join_model, stringify_document(joined_value))
+            elsif config[:relation] == "one-to-one"
+              nil
+            else
+              []
+            end
+          end
+        end
+
+        record
       end
 
       def stringify_document(document)
         document.each_with_object({}) { |(key, value), result| result[key.to_s] = value }
       end
 
-      def matches_where?(model, document, where)
-        clauses = Array(where)
-        return true if clauses.empty?
+      def unwrap_update_result(result)
+        return result unless result.is_a?(Hash)
+        return result if document_key?(result, "_id")
 
-        result = evaluate_clause(model, document, clauses.first)
-        clauses.drop(1).each do |clause|
-          clause_result = evaluate_clause(model, document, clause)
-          if fetch_key(clause, :connector).to_s.upcase == "OR"
-            result ||= clause_result
-          else
-            result &&= clause_result
-          end
+        if result.key?("value") && (result.key?("ok") || result.key?("lastErrorObject"))
+          return result["value"]
         end
+        if result.key?(:value) && (result.key?(:ok) || result.key?(:last_error_object))
+          return result[:value]
+        end
+
         result
       end
 
-      def evaluate_clause(model, document, clause)
-        field = Schema.storage_key(fetch_key(clause, :field))
-        attributes = schema_for(model).fetch(:fields).fetch(field)
-        key = (field == "id") ? "_id" : storage_field(model, field)
-        expected = store_value(field, fetch_key(clause, :value), attributes)
-        current = fetch_document(document, key)
-        operator = (fetch_key(clause, :operator) || "eq").to_s
-
-        case operator
-        when "in"
-          Array(expected).any? { |value| same_value?(current, value) }
-        when "not_in"
-          Array(expected).none? { |value| same_value?(current, value) }
-        when "contains"
-          current.to_s.include?(expected.to_s)
-        when "starts_with"
-          current.to_s.start_with?(expected.to_s)
-        when "ends_with"
-          current.to_s.end_with?(expected.to_s)
-        when "ne"
-          !same_value?(current, expected)
-        when "gt"
-          !expected.nil? && current > expected
-        when "gte"
-          !expected.nil? && current >= expected
-        when "lt"
-          !expected.nil? && current < expected
-        when "lte"
-          !expected.nil? && current <= expected
-        else
-          same_value?(current, expected)
-        end
-      end
-
-      def same_value?(left, right)
-        left == right || left.to_s == right.to_s
-      end
-
-      def apply_join(model, record, join)
-        joined = record.dup
-        join.each_key do |join_model|
-          join_model = join_model.to_s
-          joined[join_model] = case [model, join_model]
-          when ["session", "user"], ["account", "user"]
-            find_one(model: "user", where: [{field: "id", value: record["userId"]}])
-          when ["user", "account"]
-            find_many(model: "account", where: [{field: "userId", value: record["id"]}])
-          end
-        end
-        joined
-      end
-
-      def sort_records(records, sort_by)
-        field = Schema.storage_key(fetch_key(sort_by, :field))
-        direction = fetch_key(sort_by, :direction).to_s
-        records.sort_by { |record| record[field].nil? ? "" : record[field] }.then do |sorted|
-          (direction == "desc") ? sorted.reverse : sorted
-        end
-      end
-
-      def select_fields(record, select, join)
-        fields = Array(select).map { |field| Schema.storage_key(field) }
-        selected = record.slice(*fields)
-        join&.each_key { |join_model| selected[join_model.to_s] = record[join_model.to_s] if record.key?(join_model.to_s) }
-        selected
-      end
-
-      def store_value(field, value, attributes)
+      def store_value(field, value, attributes, strict_id: false)
         return nil if value.nil?
-        return Array(value).map { |entry| store_value(field, entry, attributes) } if value.is_a?(Array)
+        return Array(value).map { |entry| store_value(field, entry, attributes, strict_id: strict_id) } if value.is_a?(Array)
 
-        if field == "id" || attributes.dig(:references, :field) == "id"
+        if id_field?(field, attributes)
           return value if custom_id_generator?
-          return bson_id(value)
+          return bson_id(value, strict: strict_id)
         end
 
-        coerce_value(value, attributes)
+        input_value(value, attributes)
       end
 
       def output_value(field, value, attributes)
         return nil if value.nil?
-        return value.to_s if field == "id" || attributes.dig(:references, :field) == "id"
+        if id_field?(field, attributes)
+          return value.to_uuid if bson_uuid?(value)
+          return value.to_s if value.is_a?(BSON::ObjectId)
+          return value.map { |entry| output_value(field, entry, attributes) } if value.is_a?(Array)
+          return value
+        end
 
-        coerce_value(value, attributes)
+        output_scalar_value(value, attributes)
       end
 
-      def bson_id(value)
-        return value unless defined?(BSON::ObjectId)
-        return value if value.is_a?(BSON::ObjectId)
+      def id_field?(field, attributes)
+        field.to_s == "id" || attributes.dig(:references, :field) == "id"
+      end
 
-        BSON::ObjectId.from_string(value.to_s)
-      rescue
+      def bson_id(value, strict:)
+        if use_uuid_ids?
+          return value if bson_uuid?(value)
+          return BSON::Binary.from_uuid(value.to_s) if value.is_a?(String)
+          raise MongoAdapterError.new("INVALID_ID", "Invalid id value") if strict
+
+          return value
+        end
+
+        return value if value.is_a?(BSON::ObjectId)
+        return BSON::ObjectId.from_string(value.to_s) if value.is_a?(String)
+        raise MongoAdapterError.new("INVALID_ID", "Invalid id value") if strict
+
         value
+      rescue BSON::Error::InvalidObjectId, ArgumentError
+        value
+      end
+
+      def bson_uuid?(value)
+        defined?(BSON::Binary) && value.is_a?(BSON::Binary) && value.respond_to?(:to_uuid) && value.type == :uuid
       end
 
       def generated_id
         generator = options.advanced.dig(:database, :generate_id)
-        return generator.call.to_s if generator.respond_to?(:call)
-        return SecureRandom.uuid if generator == "uuid"
+        return generator.call if generator.respond_to?(:call)
+        return SecureRandom.uuid if use_uuid_ids?
         return BSON::ObjectId.new.to_s if defined?(BSON::ObjectId)
 
         SecureRandom.hex(12)
+      end
+
+      def use_uuid_ids?
+        options.advanced.dig(:database, :generate_id) == "uuid"
       end
 
       def custom_id_generator?
@@ -325,6 +504,37 @@ module BetterAuth
         return value if value.nil?
         return Time.parse(value) if attributes[:type] == "date" && value.is_a?(String)
 
+        value
+      end
+
+      def input_value(value, attributes)
+        value = coerce_value(value, attributes)
+        return JSON.generate(value) if attributes[:type] == "json" && (value.is_a?(Hash) || value.is_a?(Array))
+
+        value
+      end
+
+      def output_scalar_value(value, attributes)
+        return JSON.parse(value) if attributes[:type] == "json" && value.is_a?(String)
+
+        coerce_value(value, attributes)
+      rescue JSON::ParserError
+        value
+      end
+
+      def coerce_where_value(value, attributes)
+        return value.map { |entry| coerce_where_value(entry, attributes) } if value.is_a?(Array)
+        return value == "true" if attributes[:type] == "boolean" && value.is_a?(String)
+        if attributes[:type] == "number" && value.is_a?(String) && !value.strip.empty?
+          parsed = Float(value)
+          return parsed.to_i if parsed.to_i == parsed
+
+          return parsed
+        end
+        return JSON.generate(value) if attributes[:type] == "json" && (value.is_a?(Hash) || value.is_a?(Array))
+
+        value
+      rescue ArgumentError
         value
       end
 
@@ -349,15 +559,68 @@ module BetterAuth
       end
 
       def fetch_key(hash, key)
-        hash[key] || hash[key.to_s] || hash[Schema.storage_key(key)] || hash[Schema.storage_key(key).to_sym]
+        [key, key.to_s, Schema.storage_key(key), Schema.storage_key(key).to_sym].each do |candidate|
+          return hash[candidate] if hash.key?(candidate)
+        end
+        nil
       end
 
       def schema_for(model)
-        Schema.auth_tables(options).fetch(model.to_s)
+        Schema.auth_tables(options).fetch(default_model_name(model))
+      end
+
+      def fields_for(model)
+        schema_for(model).fetch(:fields).merge("id" => {type: "string", required: true})
+      end
+
+      def default_model_name(model)
+        model = model.to_s
+        tables = Schema.auth_tables(options)
+        return model if tables.key?(model)
+
+        pluraless = model.end_with?("s") ? model[0...-1] : nil
+        return pluraless if pluraless && tables.key?(pluraless)
+
+        matched = tables.find { |_key, table| table[:model_name].to_s == model }
+        return matched.first if matched
+
+        raise Error, "Model \"#{model}\" not found in schema"
+      end
+
+      def configured_model_name(model)
+        configured = configured_model_option(model, :model_name)
+        return configured.to_s if configured
+
+        return nil if core_model?(model)
+
+        table_model_name = schema_for(model).fetch(:model_name).to_s
+        (table_model_name == physical_name(model)) ? nil : table_model_name
+      end
+
+      def configured_model_option(model, key)
+        data = options.respond_to?(model.to_sym) ? options.public_send(model.to_sym) : nil
+        data[key] || data[key.to_s] if data.respond_to?(:[])
+      end
+
+      def core_model?(model)
+        ["user", "session", "account", "verification", "rateLimit"].include?(model.to_s)
+      end
+
+      def resolve_field(model, field)
+        field = Schema.storage_key(field)
+        return "id" if field == "id" || field == "_id"
+
+        fields = fields_for(model)
+        return field if fields.key?(field)
+
+        matched = fields.find { |_key, attributes| attributes[:field_name].to_s == field.to_s }
+        return matched.first if matched
+
+        raise Error, "Field #{field} not found in model #{model}"
       end
 
       def storage_field(model, field)
-        schema_for(model).fetch(:fields).fetch(field.to_s).fetch(:field_name, physical_name(field))
+        fields_for(model).fetch(field.to_s).fetch(:field_name, physical_name(field))
       end
 
       def physical_name(value)

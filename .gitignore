@@ -15,9 +15,6 @@ Thumbs.db
 coverage/
 .rspec_status
 
-# Ignore local agent implementation plans
-.docs/plans/
-
 # Ignore temp files
 tmp/
 *.log

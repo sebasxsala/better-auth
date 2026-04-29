@@ -12,6 +12,10 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     @adapter = BetterAuth::Adapters::MongoDB.new(@config, database: @database)
   end
 
+  def test_mongodb_adapter_can_be_constructed_with_minimal_database
+    assert_instance_of BetterAuth::Adapters::MongoDB, BetterAuth::Adapters::MongoDB.new(@config, database: @database)
+  end
+
   def test_mongodb_adapter_maps_id_to_bson_id_and_returns_logical_fields
     user = @adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
     stored = @database.collection("user").documents.first
@@ -29,6 +33,74 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
 
     assert_instance_of BSON::ObjectId, stored.fetch("_id")
     assert_equal stored.fetch("_id").to_s, user.fetch("id")
+  end
+
+  def test_mongodb_adapter_stores_uuid_generated_ids_as_bson_binary_uuid
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, advanced: {database: {generate_id: "uuid"}})
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: @database)
+
+    user = adapter.create(model: "user", data: {name: "Ada", email: "ada@example.com"})
+    stored = @database.collection("user").documents.first
+
+    assert_instance_of BSON::Binary, stored.fetch("_id")
+    assert_equal :uuid, stored.fetch("_id").type
+    assert_match(/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i, user.fetch("id"))
+    assert_equal stored.fetch("_id").to_uuid, user.fetch("id")
+  end
+
+  def test_mongodb_adapter_stores_uuid_foreign_keys_as_bson_binary_uuid
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, advanced: {database: {generate_id: "uuid"}})
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: @database)
+    user_id = "550e8400-e29b-41d4-a716-446655440000"
+
+    session = adapter.create(model: "session", data: {token: "token-1", userId: user_id, expiresAt: Time.now + 60})
+    stored = @database.collection("session").documents.first
+
+    assert_instance_of BSON::Binary, stored.fetch("_id")
+    assert_instance_of BSON::Binary, stored.fetch("user_id")
+    assert_equal :uuid, stored.fetch("user_id").type
+    assert_equal user_id, stored.fetch("user_id").to_uuid
+    assert_equal user_id, session.fetch("userId")
+  end
+
+  def test_mongodb_adapter_converts_bson_uuid_values_to_logical_strings
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, advanced: {database: {generate_id: "uuid"}})
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: @database)
+    user_id = "550e8400-e29b-41d4-a716-446655440000"
+    session_id = "660e8400-e29b-41d4-a716-446655440001"
+    @database.collection("session").insert_one(
+      "_id" => BSON::Binary.from_uuid(session_id),
+      "token" => "token-1",
+      "user_id" => BSON::Binary.from_uuid(user_id),
+      "expires_at" => Time.now + 60
+    )
+
+    session = adapter.find_one(model: "session", where: [{field: "id", value: session_id}])
+
+    assert_equal session_id, session.fetch("id")
+    assert_equal user_id, session.fetch("userId")
+  end
+
+  def test_mongodb_adapter_keeps_callable_custom_ids_as_plain_values
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, advanced: {database: {generate_id: -> { "custom-user-1" }}})
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: @database)
+
+    user = adapter.create(model: "user", data: {name: "Ada", email: "ada@example.com"})
+    stored = @database.collection("user").documents.first
+
+    assert_equal "custom-user-1", user.fetch("id")
+    assert_equal "custom-user-1", stored.fetch("_id")
+  end
+
+  def test_mongodb_adapter_keeps_non_string_callable_custom_ids_as_plain_values
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, advanced: {database: {generate_id: -> { 42 }}})
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: @database)
+
+    user = adapter.create(model: "user", data: {name: "Ada", email: "ada@example.com"})
+    stored = @database.collection("user").documents.first
+
+    assert_equal 42, user.fetch("id")
+    assert_equal 42, stored.fetch("_id")
   end
 
   def test_mongodb_adapter_supports_where_connectors_sort_limit_offset_and_count
@@ -50,6 +122,73 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     assert_equal 2, @adapter.count(model: "user", where: [{field: "email", operator: "ends_with", value: "example.com"}])
   end
 
+  def test_mongodb_adapter_supports_case_insensitive_where_modes_and_regex_escaping
+    @adapter.create(model: "user", data: {id: "user-1", name: "A.da", email: "ADA+test@example.com"}, force_allow_id: true)
+    @adapter.create(model: "user", data: {id: "user-2", name: "Grace", email: "grace@example.net"}, force_allow_id: true)
+
+    eq_matches = @adapter.find_many(model: "user", where: [{field: "email", mode: "insensitive", value: "ada+TEST@example.com"}])
+    contains_matches = @adapter.find_many(model: "user", where: [{field: "name", operator: "contains", mode: "insensitive", value: "."}])
+    not_in_matches = @adapter.find_many(model: "user", where: [{field: "email", operator: "not_in", mode: "insensitive", value: ["ADA+TEST@example.com"]}])
+
+    assert_equal ["user-1"], eq_matches.map { |user| user["id"] }
+    assert_equal ["user-1"], contains_matches.map { |user| user["id"] }
+    assert_equal ["user-2"], not_in_matches.map { |user| user["id"] }
+  end
+
+  def test_mongodb_adapter_preserves_false_where_values
+    @adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    @adapter.create(model: "user", data: {id: "user-2", name: "Grace", email: "grace@example.net", emailVerified: true}, force_allow_id: true)
+
+    matches = @adapter.find_many(model: "user", where: [{field: "emailVerified", value: false}])
+
+    assert_equal ["user-1"], matches.map { |user| user["id"] }
+  end
+
+  def test_mongodb_adapter_rejects_unsupported_where_operators
+    error = assert_raises(BetterAuth::Adapters::MongoDB::MongoAdapterError) do
+      @adapter.find_many(model: "user", where: [{field: "email", operator: "matches", value: "ada"}])
+    end
+
+    assert_equal "UNSUPPORTED_OPERATOR", error.code
+  end
+
+  def test_mongodb_adapter_rejects_invalid_non_string_id_query_values
+    error = assert_raises(BetterAuth::Adapters::MongoDB::MongoAdapterError) do
+      @adapter.find_one(model: "user", where: [{field: "id", value: 123}])
+    end
+
+    assert_equal "INVALID_ID", error.code
+  end
+
+  def test_mongodb_adapter_supports_select_update_update_many_delete_and_delete_many
+    @adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    @adapter.create(model: "user", data: {id: "user-2", name: "Grace", email: "grace@example.com"}, force_allow_id: true)
+    @adapter.create(model: "user", data: {id: "user-3", name: "Linus", email: "linus@example.net"}, force_allow_id: true)
+
+    selected = @adapter.find_one(model: "user", where: [{field: "id", value: "user-1"}], select: ["email"])
+    updated = @adapter.update(model: "user", where: [{field: "id", value: "user-1"}], update: {name: "Augusta"})
+    update_count = @adapter.update_many(model: "user", where: [{field: "email", operator: "ends_with", value: "example.com"}], update: {emailVerified: true})
+    delete_result = @adapter.delete(model: "user", where: [{field: "id", value: "user-3"}])
+    delete_count = @adapter.delete_many(model: "user", where: [{field: "emailVerified", value: true}])
+
+    assert_equal({"email" => "ada@example.com"}, selected)
+    assert_equal 0, @database.collection("user").aggregate_pipelines.last.first.find { |stage| stage.key?("$project") }.fetch("$project").fetch("_id")
+    assert_equal "Augusta", updated.fetch("name")
+    assert_equal 2, update_count
+    assert_nil delete_result
+    assert_equal 2, delete_count
+    assert_equal 0, @adapter.count(model: "user")
+  end
+
+  def test_mongodb_adapter_updates_models_with_value_fields
+    @adapter.create(model: "verification", data: {id: "verification-1", identifier: "email", value: "old", expiresAt: Time.now + 60}, force_allow_id: true)
+
+    updated = @adapter.update(model: "verification", where: [{field: "id", value: "verification-1"}], update: {value: "new"})
+
+    assert_equal "verification-1", updated.fetch("id")
+    assert_equal "new", updated.fetch("value")
+  end
+
   def test_mongodb_adapter_supports_core_joins
     user = @adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
     session = @adapter.create(model: "session", data: {id: "session-1", token: "token-1", userId: user["id"], expiresAt: Time.now + 60}, force_allow_id: true)
@@ -62,11 +201,31 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     assert_equal ["github"], found_user["account"].map { |account| account["providerId"] }
   end
 
+  def test_mongodb_adapter_supports_upstream_style_join_config
+    user = @adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    @adapter.create(model: "session", data: {id: "session-1", token: "token-1", userId: user["id"], expiresAt: Time.now + 60}, force_allow_id: true)
+    @adapter.create(model: "session", data: {id: "session-2", token: "token-2", userId: user["id"], expiresAt: Time.now + 60}, force_allow_id: true)
+
+    found = @adapter.find_one(
+      model: "user",
+      where: [{field: "id", value: user["id"]}],
+      join: {
+        session: {
+          on: {from: "id", to: "userId"},
+          relation: "one-to-many",
+          limit: 1
+        }
+      }
+    )
+
+    assert_equal ["token-1"], found["session"].map { |session| session["token"] }
+  end
+
   def test_mongodb_adapter_persists_auth_routes_and_get_session_reads_database_rows
     require "mongo"
 
-    client = Mongo::Client.new(ENV.fetch("BETTER_AUTH_MONGODB_URL", "mongodb://127.0.0.1:27017/better-auth-ruby-test"), server_selection_timeout: 1)
-    client.database.collections.each(&:drop)
+    client = real_mongo_client("better-auth-ruby-test")
+    drop_real_database(client)
     auth = BetterAuth.auth(
       base_url: "http://localhost:3000",
       secret: SECRET,
@@ -101,6 +260,120 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     client&.close
   end
 
+  def test_mongodb_adapter_real_mongo_native_update_delete_count_and_object_id_update
+    require "mongo"
+
+    client = real_mongo_client("better-auth-ruby-native-test")
+    drop_real_database(client)
+    adapter = BetterAuth::Adapters::MongoDB.new(@config, database: client.database, client: client, transaction: false)
+
+    user = adapter.create(model: "user", data: {name: "Ada", email: "ada-native@example.com"})
+    session = adapter.create(model: "session", data: {token: "native-token", userId: user.fetch("id"), expiresAt: Time.now + 60})
+    stored_session = client.database.collection("session").find(_id: mongo_object_id(session.fetch("id"))).first
+    assert_instance_of BSON::ObjectId, stored_session.fetch("user_id")
+
+    updated = adapter.update(model: "session", where: [{field: "id", value: session.fetch("id")}], update: session.merge("expiresAt" => Time.now + 120, "id" => nil))
+    stored_after_update = client.database.collection("session").find(_id: mongo_object_id(session.fetch("id"))).first
+
+    assert_equal session.fetch("id"), updated.fetch("id")
+    assert_instance_of BSON::ObjectId, stored_after_update.fetch("user_id")
+
+    adapter.create(model: "user", data: {name: "Grace", email: "grace-native@example.com"})
+    assert_equal 2, adapter.count(model: "user", where: [{field: "email", operator: "ends_with", value: "native@example.com"}])
+    assert_equal 2, adapter.update_many(model: "user", where: [{field: "email", operator: "ends_with", value: "native@example.com"}], update: {emailVerified: true})
+    assert_equal 2, adapter.delete_many(model: "user", where: [{field: "emailVerified", value: true}])
+    assert_equal 0, adapter.count(model: "user")
+  rescue LoadError
+    skip "mongo gem is not installed"
+  rescue Mongo::Error::NoServerAvailable, Mongo::Error::SocketError
+    skip "MongoDB test service is not available"
+  ensure
+    client&.close
+  end
+
+  def test_mongodb_adapter_real_mongo_auth_flow_parity
+    require "mongo"
+
+    client = real_mongo_client("better-auth-ruby-auth-flow-test")
+    drop_real_database(client)
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: ->(options) { BetterAuth::Adapters::MongoDB.new(options, database: client.database, client: client, transaction: false) },
+      email_and_password: {
+        password: {
+          hash: ->(password) { password },
+          verify: ->(data) { data[:hash] == data[:password] || data["hash"] == data["password"] }
+        }
+      },
+      user: {
+        additional_fields: {
+          dateField: {type: "date", required: false}
+        }
+      },
+      session: {cookie_cache: {enabled: false}}
+    )
+
+    date_field = Time.now
+    status, headers, body = auth.api.sign_up_email(
+      body: {email: "auth-flow@example.com", password: "password123", name: "Auth Flow", dateField: date_field.iso8601},
+      as_response: true
+    )
+    payload = JSON.parse(body.join)
+
+    assert_equal 200, status
+    assert_equal "auth-flow@example.com", payload.fetch("user").fetch("email")
+
+    sign_in = auth.api.sign_in_email(body: {email: "auth-flow@example.com", password: "password123"})
+    assert_equal payload.fetch("user").fetch("id"), sign_in.fetch(:user).fetch("id")
+
+    assert_raises(BetterAuth::APIError) do
+      auth.api.sign_in_email(body: {email: "missing-auth-flow@example.com", password: "password123"})
+    end
+
+    original_tz = ENV["TZ"]
+    ENV["TZ"] = "Europe/London"
+    london_session = auth.api.get_session(headers: {"cookie" => cookie_header(headers.fetch("set-cookie"))})
+    ENV["TZ"] = "America/Los_Angeles"
+    pacific_session = auth.api.get_session(headers: {"cookie" => cookie_header(headers.fetch("set-cookie"))})
+
+    assert_equal london_session[:user]["createdAt"].iso8601, pacific_session[:user]["createdAt"].iso8601
+    assert_equal date_field.to_i, london_session[:user]["dateField"].to_i
+  rescue LoadError
+    skip "mongo gem is not installed"
+  rescue Mongo::Error::NoServerAvailable, Mongo::Error::SocketError
+    skip "MongoDB test service is not available"
+  ensure
+    ENV["TZ"] = original_tz
+    client&.close
+  end
+
+  def test_mongodb_adapter_real_mongo_transaction_rollback_when_replica_set_url_is_configured
+    require "mongo"
+
+    url = ENV["BETTER_AUTH_MONGODB_REPLICA_SET_URL"]
+    skip "BETTER_AUTH_MONGODB_REPLICA_SET_URL is not configured" unless url && !url.empty?
+
+    client = Mongo::Client.new(url, database: "better-auth-ruby-transaction-test", server_selection_timeout: 1)
+    drop_real_database(client)
+    adapter = BetterAuth::Adapters::MongoDB.new(@config, database: client.database, client: client, transaction: true)
+
+    assert_raises(RuntimeError) do
+      adapter.transaction do |transaction_adapter|
+        transaction_adapter.create(model: "user", data: {id: "rolled-back-user", name: "Rollback", email: "rollback@example.com"}, force_allow_id: true)
+        raise "rollback"
+      end
+    end
+
+    assert_equal 0, adapter.count(model: "user")
+  rescue LoadError
+    skip "mongo gem is not installed"
+  rescue Mongo::Error::NoServerAvailable, Mongo::Error::SocketError
+    skip "MongoDB replica set test service is not available"
+  ensure
+    client&.close
+  end
+
   def test_mongodb_adapter_wraps_operations_in_client_transaction_when_enabled
     database = FakeMongoDatabase.new
     client = FakeMongoClient.new
@@ -119,12 +392,186 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     assert_equal session, database.collection("user").insert_options.first.fetch(:session)
   end
 
+  def test_mongodb_adapter_uses_schema_model_and_field_names
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      user: {
+        model_name: "people",
+        fields: {
+          email: "email_address"
+        }
+      }
+    )
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: @database)
+
+    user = adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    stored = @database.collection("people").documents.first
+
+    assert_equal "ada@example.com", user.fetch("email")
+    assert_equal "ada@example.com", stored.fetch("email_address")
+    assert_nil @database.collection("user").documents.first
+    assert_equal "Ada", adapter.find_one(model: "user", where: [{field: "email", value: "ada@example.com"}]).fetch("name")
+  end
+
+  def test_mongodb_adapter_matches_upstream_where_coercions_and_json_storage
+    plugin = {
+      id: "parity-fields",
+      schema: {
+        typedModel: {
+          fields: {
+            jsonData: {type: "json", required: false},
+            score: {type: "number", required: false, defaultValue: 7},
+            enabled: {type: "boolean", required: false, defaultValue: false},
+            nullableReference: {type: "string", required: false, references: {model: "user", field: "id"}}
+          }
+        }
+      }
+    }
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [plugin])
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: @database)
+
+    record = adapter.create(
+      model: "typedModel",
+      data: {
+        jsonData: {"theme" => "dark"},
+        nullableReference: nil
+      }
+    )
+    stored = @database.collection("typedModel").documents.first
+
+    assert_equal({"theme" => "dark"}, record.fetch("jsonData"))
+    assert_equal JSON.generate("theme" => "dark"), stored.fetch("json_data")
+    assert_nil stored.fetch("nullable_reference")
+
+    adapter.find_many(model: "typedModel", where: [{field: "score", value: "7"}])
+    assert_equal({"score" => 7}, @database.collection("typedModel").aggregate_pipelines.last.first.first.fetch("$match"))
+
+    adapter.find_many(model: "typedModel", where: [{field: "enabled", value: "false"}])
+    assert_equal({"enabled" => false}, @database.collection("typedModel").aggregate_pipelines.last.first.first.fetch("$match"))
+
+    adapter.find_many(model: "typedModel", where: [{field: "score", operator: "in", value: ["7", "8"]}])
+    assert_equal({"score" => {"$in" => [7, 8]}}, @database.collection("typedModel").aggregate_pipelines.last.first.first.fetch("$match"))
+
+    error = assert_raises(BetterAuth::Adapters::MongoDB::MongoAdapterError) do
+      adapter.find_many(model: "typedModel", where: [{field: "score", operator: "in", value: "7"}])
+    end
+    assert_equal "UNSUPPORTED_OPERATOR", error.code
+  end
+
+  def test_mongodb_adapter_infers_schema_driven_one_to_one_joins_and_empty_join_values
+    plugin = {
+      id: "join-parity",
+      schema: {
+        oneToOneTable: {
+          fields: {
+            oneToOne: {type: "string", required: true, references: {model: "user", field: "id"}, unique: true}
+          }
+        }
+      }
+    }
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [plugin])
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: @database)
+    user = adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    joined = adapter.create(model: "oneToOneTable", data: {oneToOne: user.fetch("id")})
+
+    found = adapter.find_one(model: "user", where: [{field: "id", value: user.fetch("id")}], join: {oneToOneTable: true, session: true})
+
+    assert_equal joined.fetch("id"), found.fetch("oneToOneTable").fetch("id")
+    assert_equal [], found.fetch("session")
+
+    missing_user = adapter.create(model: "user", data: {id: "user-2", name: "Grace", email: "grace@example.com"}, force_allow_id: true)
+    missing = adapter.find_one(model: "user", where: [{field: "id", value: missing_user.fetch("id")}], join: {oneToOneTable: true})
+
+    assert_nil missing.fetch("oneToOneTable")
+  end
+
+  def test_mongodb_adapter_infers_schema_driven_custom_field_joins
+    plugin = {
+      id: "custom-join-parity",
+      schema: {
+        profile: {
+          modelName: "user_profile",
+          fields: {
+            ownerEmail: {type: "string", required: true, fieldName: "owner_email", references: {model: "user", field: "email"}, unique: true}
+          }
+        }
+      }
+    }
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [plugin],
+      user: {
+        fields: {
+          email: "email_address"
+        }
+      }
+    )
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: @database)
+    user = adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    profile = adapter.create(model: "profile", data: {ownerEmail: user.fetch("email")})
+
+    found = adapter.find_one(model: "user", where: [{field: "id", value: user.fetch("id")}], join: {profile: true})
+
+    assert_equal profile.fetch("id"), found.fetch("profile").fetch("id")
+    assert_equal "ada@example.com", @database.collection("user_profile").documents.first.fetch("owner_email")
+  end
+
+  def test_mongodb_adapter_rejects_missing_and_ambiguous_schema_joins
+    ambiguous_plugin = {
+      id: "ambiguous-join-parity",
+      schema: {
+        ambiguousProfile: {
+          fields: {
+            primaryUserId: {type: "string", required: true, references: {model: "user", field: "id"}},
+            secondaryUserId: {type: "string", required: true, references: {model: "user", field: "id"}}
+          }
+        },
+        unrelatedProfile: {
+          fields: {
+            label: {type: "string", required: false}
+          }
+        }
+      }
+    }
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [ambiguous_plugin])
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: @database)
+
+    assert_raises(BetterAuth::Error) do
+      adapter.find_one(model: "user", where: [{field: "id", value: "missing"}], join: {unrelatedProfile: true})
+    end
+
+    assert_raises(BetterAuth::Error) do
+      adapter.find_one(model: "user", where: [{field: "id", value: "missing"}], join: {ambiguousProfile: true})
+    end
+  end
+
+  def test_mongodb_adapter_escapes_regex_literals_for_each_string_operator
+    starts = @adapter.create(model: "user", data: {id: "user-1", name: ".*danger", email: "start@example.com"}, force_allow_id: true)
+    ends = @adapter.create(model: "user", data: {id: "user-2", name: "danger.*", email: "end@example.com"}, force_allow_id: true)
+    contains = @adapter.create(model: "user", data: {id: "user-3", name: "prefix-.*-suffix", email: "contains@example.com"}, force_allow_id: true)
+    @adapter.create(model: "user", data: {id: "user-4", name: "ordinary", email: "ordinary@example.com"}, force_allow_id: true)
+
+    assert_equal [starts.fetch("id")], @adapter.find_many(model: "user", where: [{field: "name", operator: "starts_with", value: ".*"}]).map { |user| user.fetch("id") }
+    assert_equal [ends.fetch("id")], @adapter.find_many(model: "user", where: [{field: "name", operator: "ends_with", value: ".*"}]).map { |user| user.fetch("id") }
+    assert_equal [contains.fetch("id")], @adapter.find_many(model: "user", where: [{field: "name", operator: "contains", value: "-.*-"}]).map { |user| user.fetch("id") }
+  end
+
   private
 
   def mongo_object_id(value)
     BSON::ObjectId.from_string(value)
-  rescue BSON::ObjectId::Invalid
+  rescue BSON::Error::InvalidObjectId
     value
+  end
+
+  def real_mongo_client(database_name)
+    Mongo::Client.new(ENV.fetch("BETTER_AUTH_MONGODB_URL", "mongodb://127.0.0.1:27017/#{database_name}"), server_selection_timeout: 1)
+  end
+
+  def drop_real_database(client)
+    client.database.collections.each(&:drop)
   end
 
   def cookie_header(set_cookie)
@@ -137,23 +584,74 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     end
 
     def collection(name)
-      @collections[name.to_s] ||= FakeMongoCollection.new
+      @collections[name.to_s] ||= FakeMongoCollection.new(self)
     end
   end
 
   class FakeMongoCollection
     attr_reader :documents
     attr_reader :insert_options
+    attr_reader :aggregate_pipelines
+    attr_reader :find_one_and_update_calls
+    attr_reader :update_many_calls
+    attr_reader :delete_one_calls
+    attr_reader :delete_many_calls
 
-    def initialize
+    def initialize(database)
+      @database = database
       @documents = []
       @insert_options = []
+      @aggregate_pipelines = []
+      @find_one_and_update_calls = []
+      @update_many_calls = []
+      @delete_one_calls = []
+      @delete_many_calls = []
     end
 
     def insert_one(document, options = {})
       @insert_options << options
       @documents << deep_dup(document)
       InsertResult.new(document.fetch("_id"))
+    end
+
+    def aggregate(pipeline, options = {})
+      @aggregate_pipelines << [deep_dup(pipeline), options]
+      Cursor.new(apply_pipeline(@documents.map { |document| deep_dup(document) }, pipeline))
+    end
+
+    def find_one_and_update(filter, update, options = {})
+      @find_one_and_update_calls << [deep_dup(filter), deep_dup(update), options]
+      document = @documents.find { |entry| matches_filter?(entry, filter) }
+      return nil unless document
+
+      document.merge!(deep_dup(update.fetch("$set")))
+      deep_dup(document)
+    end
+
+    def update_many(filter, update, options = {})
+      @update_many_calls << [deep_dup(filter), deep_dup(update), options]
+      count = 0
+      @documents.each do |document|
+        next unless matches_filter?(document, filter)
+
+        document.merge!(deep_dup(update.fetch("$set")))
+        count += 1
+      end
+      UpdateResult.new(count)
+    end
+
+    def delete_one(filter, options = {})
+      @delete_one_calls << [deep_dup(filter), options]
+      index = @documents.index { |document| matches_filter?(document, filter) }
+      @documents.delete_at(index) if index
+      DeleteResult.new(index ? 1 : 0)
+    end
+
+    def delete_many(filter, options = {})
+      @delete_many_calls << [deep_dup(filter), options]
+      before = @documents.length
+      @documents.reject! { |document| matches_filter?(document, filter) }
+      DeleteResult.new(before - @documents.length)
     end
 
     def all_documents
@@ -165,8 +663,141 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     end
 
     InsertResult = Struct.new(:inserted_id)
+    UpdateResult = Struct.new(:modified_count)
+    DeleteResult = Struct.new(:deleted_count)
+
+    class Cursor
+      def initialize(documents)
+        @documents = documents
+      end
+
+      def to_a
+        @documents.map { |document| Marshal.load(Marshal.dump(document)) }
+      end
+    end
 
     private
+
+    def apply_pipeline(input, pipeline)
+      pipeline.reduce(input) do |documents, stage|
+        if stage.key?("$match")
+          documents.select { |document| matches_filter?(document, stage.fetch("$match")) }
+        elsif stage.key?("$lookup")
+          apply_lookup(documents, stage.fetch("$lookup"))
+        elsif stage.key?("$unwind")
+          apply_unwind(documents, stage.fetch("$unwind"))
+        elsif stage.key?("$project")
+          apply_project(documents, stage.fetch("$project"))
+        elsif stage.key?("$sort")
+          field, direction = stage.fetch("$sort").first
+          sorted = documents.sort_by { |document| document[field].nil? ? "" : document[field] }
+          (direction == -1) ? sorted.reverse : sorted
+        elsif stage.key?("$skip")
+          documents.drop(stage.fetch("$skip"))
+        elsif stage.key?("$limit")
+          documents.first(stage.fetch("$limit"))
+        elsif stage.key?("$count")
+          [{stage.fetch("$count") => documents.length}]
+        else
+          documents
+        end
+      end
+    end
+
+    def apply_lookup(documents, lookup)
+      foreign_documents = @database.collection(lookup.fetch("from")).documents
+      documents.map do |document|
+        matches = if lookup.key?("pipeline")
+          local_value = document[lookup.fetch("let").fetch("localFieldValue").delete_prefix("$")]
+          lookup.fetch("pipeline").reduce(foreign_documents.map { |entry| deep_dup(entry) }) do |result, stage|
+            if stage.key?("$match") && stage.fetch("$match").key?("$expr")
+              left, right = stage.dig("$match", "$expr", "$eq")
+              field = left.delete_prefix("$")
+              expected = (right == "$$localFieldValue") ? local_value : right
+              result.select { |entry| entry[field] == expected }
+            elsif stage.key?("$limit")
+              result.first(stage.fetch("$limit"))
+            else
+              result
+            end
+          end
+        else
+          local_value = document[lookup.fetch("localField")]
+          foreign_documents.select { |entry| entry[lookup.fetch("foreignField")] == local_value }.map { |entry| deep_dup(entry) }
+        end
+        document.merge(lookup.fetch("as") => matches)
+      end
+    end
+
+    def apply_unwind(documents, unwind)
+      field = unwind.fetch("path").delete_prefix("$")
+      documents.flat_map do |document|
+        value = document[field]
+        if value.is_a?(Array) && !value.empty?
+          value.map { |entry| document.merge(field => entry) }
+        elsif unwind.fetch("preserveNullAndEmptyArrays", false)
+          [document.merge(field => nil)]
+        else
+          []
+        end
+      end
+    end
+
+    def apply_project(documents, project)
+      documents.map do |document|
+        project.each_with_object({}) do |(field, enabled), projected|
+          projected[field] = document[field] if enabled == 1 && document.key?(field)
+        end
+      end
+    end
+
+    def matches_filter?(document, filter)
+      return true if filter.empty?
+      return filter.fetch("$and").all? { |entry| matches_filter?(document, entry) } if filter.key?("$and")
+      return filter.fetch("$or").any? { |entry| matches_filter?(document, entry) } if filter.key?("$or")
+      return filter.fetch("$nor").none? { |entry| matches_filter?(document, entry) } if filter.key?("$nor")
+      return filter.dig("$expr", "$eq") == [1, 0] if filter.key?("$expr")
+
+      filter.all? do |field, expected|
+        current = document[field.to_s]
+        matches_value?(current, expected)
+      end
+    end
+
+    def matches_value?(current, expected)
+      if expected.is_a?(Hash)
+        expected.all? do |operator, value|
+          case operator
+          when "$in"
+            value.any? { |entry| values_equal?(current, entry) }
+          when "$nin"
+            value.none? { |entry| values_equal?(current, entry) }
+          when "$ne"
+            !values_equal?(current, value)
+          when "$gt"
+            current > value
+          when "$gte"
+            current >= value
+          when "$lt"
+            current < value
+          when "$lte"
+            current <= value
+          when "$not"
+            !matches_value?(current, value)
+          else
+            false
+          end
+        end
+      elsif expected.is_a?(Regexp)
+        current.to_s.match?(expected)
+      else
+        values_equal?(current, expected)
+      end
+    end
+
+    def values_equal?(left, right)
+      left == right || left.to_s == right.to_s
+    end
 
     def deep_dup(value)
       Marshal.load(Marshal.dump(value))
