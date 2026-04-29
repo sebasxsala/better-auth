@@ -133,6 +133,40 @@ RSpec.describe BetterAuth::Sinatra::Migration do
     Rake.application = Rake::Application.new
   end
 
+  it "uses BETTER_AUTH_DATABASE_DIALECT when generating migrations" do
+    with_env("BETTER_AUTH_DIALECT" => nil, "BETTER_AUTH_DATABASE_DIALECT" => "sqlite") do
+      Dir.mktmpdir("better-auth-sinatra-tasks") do |dir|
+        in_directory(dir) do
+          load_tasks
+
+          Rake::Task["better_auth:generate:migration"].invoke
+
+          migration = Dir["db/better_auth/migrate/*_create_better_auth_tables.sql"].first
+          expect(File.read(migration)).to include("-- Dialect: sqlite")
+        end
+      end
+    end
+  ensure
+    Rake.application = Rake::Application.new
+  end
+
+  it "normalizes common database dialect aliases when generating migrations" do
+    with_env("BETTER_AUTH_DIALECT" => "postgresql", "BETTER_AUTH_DATABASE_DIALECT" => nil) do
+      Dir.mktmpdir("better-auth-sinatra-tasks") do |dir|
+        in_directory(dir) do
+          load_tasks
+
+          Rake::Task["better_auth:generate:migration"].invoke
+
+          migration = Dir["db/better_auth/migrate/*_create_better_auth_tables.sql"].first
+          expect(File.read(migration)).to include("-- Dialect: postgres")
+        end
+      end
+    end
+  ensure
+    Rake.application = Rake::Application.new
+  end
+
   def secret
     "sinatra-secret-that-is-long-enough-for-validation"
   end
@@ -147,6 +181,19 @@ RSpec.describe BetterAuth::Sinatra::Migration do
 
   def load_tasks
     Rake.application = Rake::Application.new
-    require "better_auth/sinatra/tasks"
+    load File.expand_path("../../../lib/better_auth/sinatra/tasks.rb", __dir__)
+  end
+
+  def with_env(values)
+    previous = values.transform_values { |_value| nil }
+    values.each do |key, value|
+      previous[key] = ENV[key]
+      value.nil? ? ENV.delete(key) : ENV[key] = value
+    end
+    yield
+  ensure
+    previous.each do |key, value|
+      value.nil? ? ENV.delete(key) : ENV[key] = value
+    end
   end
 end

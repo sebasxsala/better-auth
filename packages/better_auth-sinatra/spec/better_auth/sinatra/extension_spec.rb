@@ -69,6 +69,22 @@ RSpec.describe "BetterAuth::Sinatra extension" do
     expect(data.fetch("user").fetch("email")).to eq("ada@example.com")
   end
 
+  it "does not reuse a helper session across requests without cookies" do
+    self.app = build_app
+    sign_up_email("ada@example.com")
+
+    get "/dashboard", {}, "HTTP_COOKIE" => cookie_header(last_response["set-cookie"])
+    expect(JSON.parse(last_response.body).fetch("authenticated")).to eq(true)
+
+    clear_cookies
+    get "/dashboard"
+
+    expect(last_response.status).to eq(200)
+    data = JSON.parse(last_response.body)
+    expect(data.fetch("authenticated")).to eq(false)
+    expect(data.fetch("user")).to be_nil
+  end
+
   it "halts protected Sinatra routes with 401 when no Better Auth user is present" do
     self.app = build_app
 
@@ -78,7 +94,16 @@ RSpec.describe "BetterAuth::Sinatra extension" do
     expect(last_response.body).to eq("")
   end
 
-  def build_app(mount_path: "/api/auth", plugins: [])
+  it "keeps the mount path as the core base path when overrides include base_path" do
+    self.app = build_app(mount_path: "/auth", overrides: {base_path: "/api/auth"})
+
+    get "/auth/ok"
+
+    expect(last_response.status).to eq(200)
+    expect(JSON.parse(last_response.body)).to eq("ok" => true)
+  end
+
+  def build_app(mount_path: "/api/auth", plugins: [], overrides: {})
     secret = "sinatra-secret-that-is-long-enough-for-validation"
 
     Class.new(Sinatra::Base) do
@@ -88,7 +113,7 @@ RSpec.describe "BetterAuth::Sinatra extension" do
       set :raise_errors, true
       set :show_exceptions, false
 
-      better_auth at: mount_path do |config|
+      better_auth at: mount_path, **overrides do |config|
         config.secret = secret
         config.base_url = "http://example.org"
         config.database = :memory

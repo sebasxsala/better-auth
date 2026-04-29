@@ -45,6 +45,7 @@ class BetterAuthRoutesSocialTest < Minitest::Test
   end
 
   def test_sign_in_social_returns_authorization_url_and_callback_completes_session
+    verifier_seen = nil
     auth = build_auth(
       social_providers: {
         github: {
@@ -52,7 +53,10 @@ class BetterAuthRoutesSocialTest < Minitest::Test
           create_authorization_url: lambda do |data|
             "https://github.example/oauth?state=#{URI.encode_www_form_component(data[:state])}&redirect_uri=#{URI.encode_www_form_component(data[:redirectURI])}"
           end,
-          validate_authorization_code: ->(_data) { {accessToken: "oauth-access", refreshToken: "oauth-refresh", scopes: ["user"]} },
+          validate_authorization_code: lambda do |data|
+            verifier_seen = data[:codeVerifier]
+            {accessToken: "oauth-access", refreshToken: "oauth-refresh", scopes: ["user"]}
+          end,
           get_user_info: ->(_tokens) {
             {
               user: {
@@ -83,6 +87,7 @@ class BetterAuthRoutesSocialTest < Minitest::Test
     account = auth.context.internal_adapter.find_accounts(user["id"]).find { |entry| entry["providerId"] == "github" }
     assert_equal "oauth-refresh", account["refreshToken"]
     assert_equal "user", account["scope"]
+    assert_match(/\A[0-9a-f]{32}\z/, verifier_seen)
   end
 
   def test_link_social_with_id_token_links_account_to_current_user

@@ -41,6 +41,7 @@ module BetterAuth
       Endpoint.new(path: "/reset-password/:token", method: "GET") do |ctx|
         token = ctx.params[:token].to_s
         callback_url = fetch_value(ctx.query, "callbackURL") || "/error"
+        validate_callback_url!(ctx.context, callback_url)
         verification = ctx.context.internal_adapter.find_verification_value("reset-password:#{token}")
 
         unless verification && !expired_time?(verification["expiresAt"])
@@ -152,6 +153,7 @@ module BetterAuth
     end
 
     def self.absolute_callback(context, callback_url, params)
+      validate_callback_url!(context, callback_url)
       uri = URI.parse(callback_url.to_s)
       origin = Configuration.origin_for(URI.parse(context.base_url))
       url = uri.relative? ? URI.join("#{origin}/", callback_url.to_s.delete_prefix("/")) : uri
@@ -159,6 +161,23 @@ module BetterAuth
       params.each { |key, value| query << [key.to_s, value] }
       url.query = URI.encode_www_form(query)
       url.to_s
+    end
+
+    def self.validate_callback_url!(context, callback_url)
+      return if callback_url.nil? || callback_url.to_s.empty?
+
+      value = callback_url.to_s
+      if value.start_with?("/")
+        return if Configuration.relative_path_allowed?(value)
+      else
+        uri = Configuration.parse_uri(value)
+        base_uri = Configuration.parse_uri(context.base_url.to_s)
+        base_origin = base_uri && Configuration.origin_for(base_uri)
+        return if uri && Configuration.origin_for(uri) == base_origin
+        return if context.trusted_origin?(value)
+      end
+
+      raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["INVALID_CALLBACK_URL"])
     end
   end
 end

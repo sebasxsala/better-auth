@@ -71,6 +71,24 @@ class BetterAuthRoutesPasswordTest < Minitest::Test
     assert_equal "http://localhost:3000/reset?error=INVALID_TOKEN", headers["location"]
   end
 
+  def test_reset_password_callback_rejects_untrusted_callback_url
+    auth = build_auth(email_and_password: {send_reset_password: ->(_data, _request = nil) {}})
+    auth.api.sign_up_email(body: {email: "unsafe-reset@example.com", password: "old-password", name: "Reset"})
+    auth.api.request_password_reset(body: {email: "unsafe-reset@example.com", redirectTo: "/reset"})
+    verification = auth.context.adapter.find_many(model: "verification").first
+    token = verification["identifier"].delete_prefix("reset-password:")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.request_password_reset_callback(
+        params: {token: token},
+        query: {callbackURL: "https://evil.example/reset"}
+      )
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_CALLBACK_URL"], error.message
+  end
+
   def test_verify_password_requires_current_password_for_session_user
     auth = build_auth
     cookie = sign_up_cookie(auth, email: "verify-password@example.com", password: "password123")

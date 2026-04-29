@@ -57,6 +57,41 @@ class BetterAuthRoutesEmailVerificationTest < Minitest::Test
     assert_equal true, user["emailVerified"]
   end
 
+  def test_verify_email_rejects_untrusted_callback_url
+    auth = build_auth
+    auth.api.sign_up_email(body: {email: "unsafe-callback@example.com", password: "password123", name: "Unsafe"})
+    token = BetterAuth::Crypto.sign_jwt({"email" => "unsafe-callback@example.com"}, SECRET, expires_in: 3600)
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_email(query: {token: token, callbackURL: "https://evil.example/callback"})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_CALLBACK_URL"], error.message
+  end
+
+  def test_change_email_verification_updates_email_as_unverified_and_sends_new_verification
+    sent = []
+    auth = build_auth(
+      user: {change_email: {enabled: true}},
+      email_verification: {send_verification_email: ->(data, _request = nil) { sent << data }}
+    )
+    cookie = sign_up_cookie(auth, email: "old-verified@example.com")
+    auth.context.internal_adapter.update_user_by_email("old-verified@example.com", emailVerified: true)
+
+    assert_equal({status: true}, auth.api.change_email(headers: {"cookie" => cookie}, body: {newEmail: "new-verified@example.com"}))
+    first_token = sent.first.fetch(:token)
+
+    auth.api.verify_email(query: {token: first_token})
+
+    old_user = auth.context.internal_adapter.find_user_by_email("old-verified@example.com")
+    new_user = auth.context.internal_adapter.find_user_by_email("new-verified@example.com")[:user]
+    assert_nil old_user
+    assert_equal false, new_user["emailVerified"]
+    assert_equal 2, sent.length
+    assert_equal "new-verified@example.com", sent.last.fetch(:user).fetch("email")
+  end
+
   private
 
   def build_auth(options = {})

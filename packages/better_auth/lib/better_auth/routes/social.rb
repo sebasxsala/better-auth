@@ -25,17 +25,18 @@ module BetterAuth
           })
         end
 
+        code_verifier = SecureRandom.hex(16)
         state = Crypto.sign_jwt(
           {
             "callbackURL" => body["callbackURL"] || body["callbackUrl"] || body["callback_url"] || "/",
             "errorCallbackURL" => body["errorCallbackURL"] || body["errorCallbackUrl"] || body["error_callback_url"],
             "newUserCallbackURL" => body["newUserCallbackURL"] || body["newUserCallbackUrl"] || body["new_user_callback_url"],
-            "requestSignUp" => body["requestSignUp"] || body["request_sign_up"]
+            "requestSignUp" => body["requestSignUp"] || body["request_sign_up"],
+            "codeVerifier" => code_verifier
           },
           ctx.context.secret,
           expires_in: 600
         )
-        code_verifier = SecureRandom.hex(16)
         url = call_provider(provider, :create_authorization_url, {
           state: state,
           codeVerifier: code_verifier,
