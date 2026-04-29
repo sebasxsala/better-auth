@@ -23,6 +23,22 @@ Plans should use checkbox steps so agents can mark progress as work is completed
 
 The `upstream/` submodule is the source of truth for Better Auth behavior. Before porting or modifying a feature, inspect the matching upstream source and tests, then adapt that behavior into Ruby.
 
+When working from a git worktree, `upstream/` may exist but be empty because
+submodules are not initialized automatically. Only initialize it when the task
+requires reading upstream source or tests. The current upstream target is
+Better Auth `v1.6.9`:
+
+```bash
+git submodule update --init --recursive upstream
+cd upstream
+git fetch --tags origin
+git checkout v1.6.9
+cd ..
+```
+
+If the checkout changes the recorded submodule pointer, treat that as an
+intentional repo change and include it in the relevant plan or PR.
+
 ## Testing
 
 - Avoid mocks unless the real dependency is truly impractical

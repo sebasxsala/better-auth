@@ -5,6 +5,8 @@ module BetterAuth
     module_function
 
     def google(client_id:, client_secret:, scopes: ["openid", "email", "profile"], **options)
+      normalized = Base.normalize_options(options)
+      primary_client_id = Base.primary_client_id(client_id)
       {
         id: "google",
         name: "Google",
@@ -13,10 +15,10 @@ module BetterAuth
         create_authorization_url: lambda do |data|
           verifier = data[:code_verifier] || data[:codeVerifier]
           Base.authorization_url(options[:authorization_endpoint] || "https://accounts.google.com/o/oauth2/v2/auth", {
-            client_id: client_id,
+            client_id: primary_client_id,
             redirect_uri: data[:redirect_uri] || data[:redirectURI],
             response_type: "code",
-            scope: data[:scopes] || scopes,
+            scope: Base.selected_scopes(scopes, normalized, data),
             state: data[:state],
             code_challenge: verifier && Base.pkce_challenge(verifier),
             code_challenge_method: verifier && "S256",
@@ -30,7 +32,7 @@ module BetterAuth
         end,
         validate_authorization_code: lambda do |data|
           Base.post_form("https://oauth2.googleapis.com/token", {
-            client_id: client_id,
+            client_id: primary_client_id,
             client_secret: client_secret,
             code: data[:code],
             code_verifier: data[:code_verifier] || data[:codeVerifier],
@@ -38,26 +40,47 @@ module BetterAuth
             redirect_uri: data[:redirect_uri] || data[:redirectURI]
           })
         end,
-        get_user_info: lambda do |tokens|
-          profile = if Base.id_token(tokens)
-            Base.decode_jwt_payload(Base.id_token(tokens))
-          else
-            Base.get_json(
-              "https://openidconnect.googleapis.com/v1/userinfo",
-              "Authorization" => "Bearer #{Base.access_token(tokens)}"
-            )
-          end
+        verify_id_token: normalized[:verify_id_token] || lambda do |token, nonce = nil|
+          return false if normalized[:disable_id_token_sign_in]
 
-          {
-            user: {
+          audiences = Array(client_id)
+          return false if audiences.empty?
+
+          profile = Base.verify_jwt_with_jwks(
+            token,
+            jwks: normalized[:jwks],
+            jwks_endpoint: normalized[:jwks_endpoint] || "https://www.googleapis.com/oauth2/v3/certs",
+            algorithms: ["RS256"],
+            issuers: ["https://accounts.google.com", "accounts.google.com"],
+            audience: audiences,
+            nonce: nonce
+          )
+          !!profile&.fetch("sub", nil)
+        end,
+        get_user_info: lambda do |tokens|
+          custom = normalized[:get_user_info]
+          next custom.call(tokens) if custom
+          next nil unless Base.id_token(tokens)
+
+          profile = Base.decode_jwt_payload(Base.id_token(tokens))
+          user = Base.apply_profile_mapping(
+            {
               id: profile["sub"],
               email: profile["email"],
               name: profile["name"],
               image: profile["picture"],
               emailVerified: !!profile["email_verified"]
             },
+            profile,
+            normalized
+          )
+          {
+            user: user,
             data: profile
           }
+        end,
+        refresh_access_token: options[:refresh_access_token] || options[:refreshAccessToken] || lambda do |refresh_token|
+          Base.refresh_access_token("https://oauth2.googleapis.com/token", refresh_token, client_id: primary_client_id, client_secret: client_secret)
         end
       }
     end

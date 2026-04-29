@@ -222,6 +222,7 @@ class BetterAuthPluginsDeviceAuthorizationTest < Minitest::Test
       secret: SECRET,
       database: :memory,
       secondary_storage: storage,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.device_authorization(
           interval: "5s",
