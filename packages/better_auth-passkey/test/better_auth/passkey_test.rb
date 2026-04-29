@@ -10,6 +10,99 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
   SECRET = "phase-eight-secret-with-enough-entropy-123"
   ORIGIN = "http://localhost:3000"
 
+  def test_generate_passkey_registration_options_returns_upstream_shape_and_cookie
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "register-shape@example.com")
+
+    registration = auth.api.generate_passkey_registration_options(
+      headers: {"cookie" => cookie},
+      return_headers: true
+    )
+    options = registration.fetch(:response)
+
+    assert_includes options.keys, :challenge
+    assert_includes options.keys, :rp
+    assert_includes options.keys, :user
+    assert_includes options.keys, :pubKeyCredParams
+    assert_includes registration.fetch(:headers).fetch("set-cookie"), "better-auth-passkey"
+  end
+
+  def test_generate_passkey_authentication_options_returns_upstream_shape
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "authenticate-shape@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    create_passkey(auth, user_id: user.fetch("id"), name: "Existing")
+
+    options = auth.api.generate_passkey_authentication_options(headers: {"cookie" => cookie})
+
+    assert_includes options.keys, :challenge
+    assert_includes options.keys, :rpId
+    assert_includes options.keys, :allowCredentials
+    assert_includes options.keys, :userVerification
+  end
+
+  def test_generate_passkey_authentication_options_without_session_returns_discoverable_shape
+    auth = build_auth
+
+    options = auth.api.generate_passkey_authentication_options
+
+    assert_includes options.keys, :challenge
+    assert_includes options.keys, :rpId
+    assert_includes options.keys, :userVerification
+    refute_includes options.keys, :allowCredentials
+  end
+
+  def test_list_passkeys_returns_upstream_passkey_shape
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "list-shape@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    create_passkey(auth, user_id: user.fetch("id"), name: "Listed", aaguid: "mockAAGUID")
+
+    passkeys = auth.api.list_passkeys(headers: {"cookie" => cookie})
+
+    assert_instance_of Array, passkeys
+    assert_includes passkeys.first.keys, "id"
+    assert_includes passkeys.first.keys, "userId"
+    assert_includes passkeys.first.keys, "publicKey"
+    assert_includes passkeys.first.keys, "credentialID"
+    assert_includes passkeys.first.keys, "aaguid"
+  end
+
+  def test_registration_challenge_expiration_is_computed_per_request
+    init_time = Time.utc(2026, 1, 1, 12, 0, 0)
+    request_time = init_time + (6 * 60)
+    auth = nil
+
+    with_time_now(init_time) do
+      auth = build_auth
+    end
+
+    with_time_now(request_time) do
+      cookie = sign_up_cookie(auth, email: "registration-expiration@example.com")
+      auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie})
+    end
+
+    verification = latest_passkey_verification(auth)
+    assert_operator Time.parse(verification.fetch("expiresAt").to_s), :>, request_time
+  end
+
+  def test_authentication_challenge_expiration_is_computed_per_request
+    init_time = Time.utc(2026, 1, 1, 12, 0, 0)
+    request_time = init_time + (6 * 60)
+    auth = nil
+
+    with_time_now(init_time) do
+      auth = build_auth
+    end
+
+    with_time_now(request_time) do
+      auth.api.generate_passkey_authentication_options
+    end
+
+    verification = latest_passkey_verification(auth)
+    assert_operator Time.parse(verification.fetch("expiresAt").to_s), :>, request_time
+  end
+
   def test_registers_and_authenticates_with_real_webauthn_challenges
     auth = build_auth
     cookie = sign_up_cookie(auth, email: "passkey@example.com")
@@ -699,7 +792,7 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
     cookie_header(headers.fetch("set-cookie"))
   end
 
-  def create_passkey(auth, user_id:, name:, credential_id: "#{name}-credential", transports: "internal")
+  def create_passkey(auth, user_id:, name:, credential_id: "#{name}-credential", transports: "internal", aaguid: nil)
     auth.context.adapter.create(
       model: "passkey",
       data: {
@@ -711,7 +804,8 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
         deviceType: "singleDevice",
         backedUp: false,
         transports: transports,
-        createdAt: Time.now
+        createdAt: Time.now,
+        aaguid: aaguid
       }
     )
   end
@@ -740,6 +834,18 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
 
   def latest_passkey_verification(auth)
     auth.context.adapter.find_many(model: "verification").max_by { |entry| entry.fetch("createdAt") || Time.at(0) }
+  end
+
+  def with_time_now(fixed_time)
+    singleton = class << Time; self; end
+    original_now = Time.method(:now)
+
+    singleton.remove_method(:now)
+    singleton.define_method(:now) { fixed_time }
+    yield
+  ensure
+    singleton.remove_method(:now)
+    singleton.define_method(:now, original_now)
   end
 
   def cookie_header(set_cookie)
