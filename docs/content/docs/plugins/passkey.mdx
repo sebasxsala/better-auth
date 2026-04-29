@@ -96,7 +96,7 @@ options = auth.api.generate_passkey_registration_options(
 )
 ```
 
-`after_verification` may return `{ user_id: "..." }` during passkey-first registration to link the verified passkey to a concrete user. During session-required registration, returning a different user ID is rejected.
+`after_verification` may return `{ user_id: "..." }` during passkey-first registration to link the verified passkey to a concrete user. Returning `nil` or `""` leaves the resolved user unchanged. Returning any other non-empty-string value (integer, boolean, etc.) raises `RESOLVED_USER_INVALID`. During session-required registration, returning a different user ID is rejected with `YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY`.
 
 ## WebAuthn Extensions
 
@@ -133,6 +133,15 @@ The Ruby gem provides server WebAuthn routes. It does not implement `@better-aut
 ## WebAuthn Configuration
 
 The plugin configures `rp_id`, `rp_name`, and allowed origins per request with `WebAuthn::RelyingParty`. It does not mutate global `WebAuthn.configuration`, so multiple Better Auth instances can use different relying-party settings in the same process.
+
+## Upstream Parity Notes
+
+- `excludeCredentials` entries (registration options) are emitted as `{id, transports?}` to match upstream's `@simplewebauthn/server` output. `allowCredentials` (authentication options) still includes `type: "public-key"`.
+- `transports` is omitted from credential descriptors when the stored value is missing or empty (rather than an empty array).
+- The default storage table is `passkeys` (plural) in the SQL adapters, mapped from the upstream `passkey` model. This is an intentional Ruby-specific adaptation.
+- `rp_id` resolution uses `URI.parse(base_url).host` (port stripped). When `base_url` is empty or unparseable, `rp_id` defaults to `"localhost"`.
+- `update_passkey` accepts `name: ""` to match upstream `z.string()`. Missing or non-string `name` still raises `VALIDATION_ERROR`.
+- Cross-user `delete_passkey` raises `UNAUTHORIZED` with the `PASSKEY_NOT_FOUND` message, mirroring upstream's `requireResourceOwnership` middleware behavior when only `notFoundError` is configured.
 
 ## Support Notes
 

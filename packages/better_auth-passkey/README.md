@@ -98,6 +98,18 @@ This gem provides server WebAuthn routes. It does not ship the upstream browser-
 
 The plugin uses `WebAuthn::RelyingParty` per request for `rp_id`, `rp_name`, and allowed origins. It does not mutate global `WebAuthn.configuration`, so multiple Better Auth instances can use different relying-party settings in the same Ruby process.
 
+## Upstream parity notes
+
+The Ruby plugin tracks Better Auth `v1.6.9` upstream behavior. A few wire-shape and validation details are worth noting:
+
+- `excludeCredentials` entries (registration options) are emitted as `{id, transports?}` to match upstream's `@simplewebauthn/server` output. `allowCredentials` (authentication options) still includes `type: "public-key"` to mirror upstream's authentication wire shape.
+- `transports` is omitted entirely from credential descriptors when the stored value is missing or empty (rather than emitting an empty array).
+- The default storage table is named `passkeys` (plural) in the SQL adapters, mapped from the upstream `passkey` model. Custom SQL adapters that translate the `passkey` model name continue to work.
+- `rp_id` resolution falls back to `URI.parse(base_url).host` (port stripped). When `base_url` is empty or unparseable, `rp_id` defaults to `"localhost"`.
+- For passkey-first registration, the `after_verification` callback may return `{ user_id: nil }` or `{ user_id: "" }` to leave the resolved user unchanged. Returning any other non-empty-string value (integer, boolean, etc.) raises `RESOLVED_USER_INVALID`.
+- `update_passkey` accepts an empty-string `name` to match upstream `z.string()`. Missing or non-string `name` still raises `VALIDATION_ERROR`.
+- Cross-user `delete_passkey` raises `UNAUTHORIZED` with the `PASSKEY_NOT_FOUND` message, mirroring upstream's `requireResourceOwnership` middleware behavior when only `notFoundError` is configured.
+
 ## Notes
 
 This package depends on the maintained `webauthn` gem. Keeping passkeys outside `better_auth` avoids installing WebAuthn dependencies for applications that do not use passkeys.
