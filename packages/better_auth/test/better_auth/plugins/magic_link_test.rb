@@ -319,14 +319,14 @@ class BetterAuthPluginsMagicLinkTest < Minitest::Test
       secondary_storage: expired_storage,
       plugins: [
         BetterAuth::Plugins.magic_link(
-          expires_in: 1,
+          expires_in: 2,
           send_magic_link: ->(data, _ctx = nil) { expired_sent << data }
         )
       ]
     )
     expired_auth.api.sign_in_magic_link(body: {email: "secondary-expired@example.com"})
     expired_token = expired_sent.last[:token]
-    sleep 1.1
+    sleep 2.1
     expired = expired_auth.api.magic_link_verify(query: {token: expired_token, errorCallbackURL: "/error"}, as_response: true)
 
     assert_equal 302, expired.first

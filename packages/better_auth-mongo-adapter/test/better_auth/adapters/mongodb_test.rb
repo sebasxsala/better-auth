@@ -233,6 +233,7 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: ->(options) { BetterAuth::Adapters::MongoDB.new(options, database: client.database, client: client, transaction: false) },
+      email_and_password: {enabled: true},
       session: {cookie_cache: {enabled: false}}
     )
 
@@ -304,6 +305,7 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
       secret: SECRET,
       database: ->(options) { BetterAuth::Adapters::MongoDB.new(options, database: client.database, client: client, transaction: false) },
       email_and_password: {
+        enabled: true,
         password: {
           hash: ->(password) { password },
           verify: ->(data) { data[:hash] == data[:password] || data["hash"] == data["password"] }

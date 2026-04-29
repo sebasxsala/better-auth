@@ -12,7 +12,8 @@ RSpec.describe "BetterAuth::Hanami Sequel base routes" do
     auth = BetterAuth.auth(
       base_url: "http://localhost:2300",
       secret: secret,
-      database: ->(options) { BetterAuth::Hanami::SequelAdapter.new(options, connection: db) }
+      database: ->(options) { BetterAuth::Hanami::SequelAdapter.new(options, connection: db) },
+      email_and_password: {enabled: true}
     )
 
     signup_status, signup_headers, signup_body = auth.call(
