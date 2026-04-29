@@ -147,4 +147,8 @@ Adapters implement:
 The internal adapter builds user, account, session, verification, and plugin
 operations on top of this contract.
 
-{/* Upstream database guide is preserved in upstream/docs/content/docs/concepts/database.mdx. */}
+## Not Supported
+
+- Prisma, Drizzle, Kysely, and other TypeScript-specific upstream adapters.
+- The upstream CLI migration workflow. Rails apps should use the Rails
+  generators; Rack apps should wire schema output into their migration system.

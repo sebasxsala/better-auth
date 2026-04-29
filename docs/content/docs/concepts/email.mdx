@@ -1,218 +1,179 @@
 ---
 title: Email
-description: Learn how to use email with Better Auth.
+description: Learn how to use email with Better Auth Ruby.
 ---
 
-<Callout type="warn">
-This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
-</Callout>
-
-{/*
-Hidden upstream content for Email.
-
-
-<Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
-</Callout>
-
-Email is a key part of Better Auth, required for all users regardless of their authentication method. Better Auth provides email and password authentication out of the box, and a lot of utilities to help you manage email verification, password reset, and more.
-
+Better Auth Ruby does not send email by itself. You provide Ruby callables for
+verification, password reset, and account deletion emails.
 
 ## Email Verification
 
-Email verification is a security feature that ensures users provide a valid email address. It helps prevent spam and abuse by confirming that the email address belongs to the user. In this guide, you'll get a walk through of how to implement token based email verification in your app.
-To use otp based email verification, check out the [OTP Verification](/docs/plugins/email-otp) guide.
-
-### Adding Email Verification to Your App
-
-To enable email verification, you need to pass a function that sends a verification email with a link.
-
-- **sendVerificationEmail**: This function is triggered when email verification starts. It accepts a data object with the following properties:
-  - `user`: The user object containing the email address.
-  - `url`: The verification URL the user must click to verify their email.
-  - `token`: The verification token used to complete the email verification to be used when implementing a custom verification URL.
-
-and a `request` object as the second parameter.
-
-```ts title="auth.ts"
-import { betterAuth } from 'better-auth';
-import { sendEmail } from './email'; // your email sending function
-
-export const auth = betterAuth({
-    emailVerification: {
-        sendVerificationEmail: async ({ user, url, token }, request) => {
-            void sendEmail({
-                to: user.email,
-                subject: 'Verify your email address',
-                text: `Click the link to verify your email: ${url}`
-            })
-        }
-    }
-})
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  base_url: "https://app.example.com/api/auth",
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  email_and_password: {
+    enabled: true,
+    require_email_verification: true
+  },
+  email_verification: {
+    send_on_sign_up: true,
+    send_on_sign_in: true,
+    expires_in: 60 * 60,
+    send_verification_email: lambda do |data, request|
+      UserMailer.with(
+        user: data.fetch(:user),
+        url: data.fetch(:url),
+        token: data.fetch(:token),
+        ip: request&.ip
+      ).verify_email.deliver_later
+    end
+  }
+)
 ```
 
-<Callout type="warn">
-  Avoid awaiting the email sending to prevent 
-  timing attacks. On serverless platforms, use `waitUntil` or similar to ensure the email is sent.
-</Callout>
+The verification payload includes `:user`, `:url`, and `:token`.
 
-### Triggering Email Verification
+Send a verification email manually:
 
-You can initiate email verification in several ways:
-
-#### 1. During Sign-up
-
-To automatically send a verification email at signup, set `emailVerification.sendOnSignUp` to `true`. 
-
-```ts title="auth.ts"
-import { betterAuth } from 'better-auth';
-
-export const auth = betterAuth({
-    emailVerification: {
-        sendOnSignUp: true
-    }
-})
+```ruby title="app/services/email_verification.rb"
+auth.api.send_verification_email(
+  body: {
+    email: "jane@example.com",
+    callback_url: "/dashboard"
+  },
+  headers: {
+    "cookie" => request.get_header("HTTP_COOKIE").to_s
+  }
+)
 ```
 
-This sends a verification email when a user signs up. For social logins, email verification status is read from the SSO.
+Verify an email token:
 
-<Callout>
-    With `sendOnSignUp` enabled, when the user logs in with an SSO that does not claim the email as verified, Better Auth will dispatch a verification email, but the verification is not required to login even when `requireEmailVerification` is enabled.
-</Callout>
+```ruby title="app/controllers/email_verifications_controller.rb"
+auth.api.verify_email(
+  query: {
+    token: params.fetch(:token),
+    callback_url: "/dashboard"
+  },
+  as_response: true
+)
+```
 
-#### 2. Require Email Verification
+## Verification Hooks
 
-If you enable require email verification, users must verify their email before they can log in. And every time a user tries to sign in, `sendVerificationEmail` is called.
-
-<Callout>
-    This only works if you have `sendVerificationEmail` implemented, if `sendOnSignIn` is set to true and if the user is trying to sign in with email and password.
-</Callout>
-
-```ts title="auth.ts"
-export const auth = betterAuth({
-  emailVerification: {
-    sendVerificationEmail: async ({ user, url }) => {
-      void sendEmail({
-        to: user.email,
-        subject: "Verify your email address",
-        text: `Click the link to verify your email: ${url}`,
-      });
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  email_verification: {
+    send_verification_email: ->(data, _request) {
+      UserMailer.verify_email(data).deliver_later
     },
-    sendOnSignIn: true,
+    before_email_verification: ->(user, _request) {
+      Rails.logger.info("Verifying #{user.fetch('email')}")
+    },
+    on_email_verification: ->(user, _request) {
+      Analytics.track("email_verification_started", user_id: user.fetch("id"))
+    },
+    after_email_verification: ->(user, _request) {
+      Analytics.track("email_verified", user_id: user.fetch("id"))
+    },
+    auto_sign_in_after_verification: true
+  }
+)
+```
+
+## Password Reset
+
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  base_url: "https://app.example.com/api/auth",
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  email_and_password: {
+    enabled: true,
+    send_reset_password: lambda do |data, request|
+      UserMailer.with(
+        user: data.fetch(:user),
+        url: data.fetch(:url),
+        token: data.fetch(:token),
+        ip: request&.ip
+      ).reset_password.deliver_later
+    end,
+    reset_password_token_expires_in: 60 * 60,
+    revoke_sessions_on_password_reset: true,
+    on_password_reset: ->(data, _request) {
+      SecurityLog.password_reset(data.fetch(:user).fetch("id"))
+    }
+  }
+)
+```
+
+```ruby title="app/services/password_reset.rb"
+auth.api.request_password_reset(
+  body: {
+    email: "jane@example.com",
+    redirect_to: "/reset-password"
+  }
+)
+
+auth.api.reset_password(
+  body: {
+    token: params.fetch(:token),
+    new_password: "new-password123"
+  }
+)
+```
+
+## Change Email
+
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  user: {
+    change_email: {
+      enabled: true,
+      update_email_without_verification: false
+    }
   },
-  emailAndPassword: {
-    requireEmailVerification: true,
+  email_verification: {
+    send_verification_email: ->(data, _request) {
+      UserMailer.verify_email(data).deliver_later
+    }
+  }
+)
+```
+
+```ruby title="app/services/change_email.rb"
+auth.api.change_email(
+  headers: {
+    "cookie" => request.get_header("HTTP_COOKIE").to_s
   },
-});
+  body: {
+    new_email: "new-email@example.com"
+  }
+)
 ```
 
-If a user tries to sign in without verifying their email, you can handle the error and show a message to the user.
+## Delete Account Email
 
-```ts title="auth-client.ts"
-await authClient.signIn.email({
-    email: "email@example.com",
-    password: "password"
-}, {
-    onError: (ctx) => {
-        // Handle the error
-        if(ctx.error.status === 403) {
-            alert("Please verify your email address")
-        }
-        //you can also show the original error message
-        alert(ctx.error.message)
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  user: {
+    delete_user: {
+      enabled: true,
+      delete_token_expires_in: 60 * 60,
+      send_delete_account_verification: ->(data, _request) {
+        UserMailer.delete_account(data).deliver_later
+      }
     }
-})
+  }
+)
 ```
 
-#### 3. Manually
+## Not Supported
 
-You can also manually trigger email verification by calling `sendVerificationEmail`.
-
-```ts
-await authClient.sendVerificationEmail({
-    email: "user@email.com",
-    callbackURL: "/" // The redirect URL after verification
-})
-```
-
-### Verifying the Email
-
-If the user clicks the provided verification URL, their email is automatically verified, and they are redirected to the `callbackURL`.
-
-For manual verification, you can send the user a custom link with the `token` and call the `verifyEmail` function.
-
-```ts
-await authClient.verifyEmail({
-    query: {
-        token: "" // Pass the token here
-    }
-})
-```
-
-### Auto Sign In After Verification
-
-To sign in the user automatically after they successfully verify their email, set the `autoSignInAfterVerification` option to `true`:
-
-```ts
-const auth = betterAuth({
-    //...your other options
-    emailVerification: {
-        autoSignInAfterVerification: true
-    }
-})
-```
-
-### Callback after successful email verification
-
-You can run custom code immediately after a user verifies their email using the `afterEmailVerification` callback. This is useful for any side-effects you want to trigger, like granting access to special features or logging the event.
-
-The `afterEmailVerification` function runs automatically when a user's email is confirmed, receiving the `user` object and `request` details so you can perform actions for that specific user.
-
-Here's how you can set it up:
-
-```ts title="auth.ts"
-import { betterAuth } from 'better-auth';
-
-export const auth = betterAuth({
-    emailVerification: {
-        async afterEmailVerification(user, request) {
-            // Your custom logic here, e.g., grant access to premium features
-            console.log(`${user.email} has been successfully verified!`);
-        }
-    }
-})
-```
-
-## Password Reset Email
-
-Password reset allows users to reset their password if they forget it. Better Auth provides a simple way to implement password reset functionality.
-
-You can enable password reset by passing a function that sends a password reset email with a link.
-
-```ts title="auth.ts"
-import { betterAuth } from 'better-auth';
-import { sendEmail } from './email'; // your email sending function
-
-export const auth = betterAuth({
-    emailAndPassword: {
-        enabled: true,
-        sendResetPassword: async ({ user, url, token }, request) => {
-            void sendEmail({
-                to: user.email,
-                subject: 'Reset your password',
-                text: `Click the link to reset your password: ${url}`
-            })
-        }
-    }
-})
-```
-
-<Callout type="warn">
-  Avoid awaiting the email sending to prevent 
-  timing attacks. On serverless platforms, use `waitUntil` or similar to ensure the email is sent.
-</Callout>
-
-Check out the [Email and Password](/docs/authentication/email-password#request-password-reset) guide for more details on how to implement password reset in your app.
-Also you can check out the [Otp verification](/docs/plugins/email-otp#reset-password-with-otp) guide for how to implement password reset with OTP in your app.
-
-*/}
+- Built-in email delivery adapters. Use Action Mailer, Mail, or your delivery
+  layer.
+- Upstream browser client helpers in this page. Call HTTP endpoints or
+  server-side `auth.api` methods from Ruby.
