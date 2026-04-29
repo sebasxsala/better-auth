@@ -11,6 +11,8 @@ module BetterAuth
       :schema,
       :migrations,
       :options,
+      :version,
+      :client,
       :rate_limit,
       :error_codes,
       :on_request,
@@ -28,7 +30,8 @@ module BetterAuth
 
     def initialize(data = {}, **keywords)
       data = data.to_h if data.respond_to?(:to_h) && !data.is_a?(Hash)
-      raw = normalize_hash((data || {}).merge(keywords))
+      input = (data || {}).merge(keywords)
+      raw = normalize_hash(input)
 
       @id = raw[:id].to_s
       @init = raw[:init]
@@ -38,6 +41,8 @@ module BetterAuth
       @schema = raw[:schema] || {}
       @migrations = raw[:migrations] || {}
       @options = raw[:options] || {}
+      @version = raw[:version]
+      @client = stringify_hash(input[:client] || input["client"])
       @rate_limit = Array(raw[:rate_limit])
       @error_codes = normalize_error_codes(raw)
       @on_request = raw[:on_request]
@@ -104,6 +109,14 @@ module BetterAuth
 
       value.each_with_object({}) do |(key, object), result|
         result[normalize_key(key)] = object.is_a?(Hash) ? normalize_hash(object) : object
+      end
+    end
+
+    def stringify_hash(value)
+      return nil unless value.is_a?(Hash)
+
+      value.each_with_object({}) do |(key, object), result|
+        result[key.to_s] = object.is_a?(Hash) ? stringify_hash(object) : object
       end
     end
 
