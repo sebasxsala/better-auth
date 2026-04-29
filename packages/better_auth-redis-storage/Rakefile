@@ -8,4 +8,16 @@ Rake::TestTask.new(:test) do |task|
   task.pattern = "test/**/*_test.rb"
 end
 
+namespace :test do
+  Rake::TestTask.new(:redis_integration) do |task|
+    task.libs << "test"
+    task.pattern = "test/better_auth/redis_storage_integration_test.rb"
+  end
+
+  task :integration do
+    ENV["REDIS_INTEGRATION"] = "1"
+    Rake::Task["test:redis_integration"].invoke
+  end
+end
+
 task default: [:test, :standard]

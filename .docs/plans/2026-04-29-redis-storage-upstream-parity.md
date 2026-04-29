@@ -1,6 +1,6 @@
 # Redis Storage Upstream Parity Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Close the remaining Better Auth upstream `@better-auth/redis-storage` (v1.6.9) deltas in the Ruby `better_auth-redis-storage` port so the public API, return contracts, edge-case behavior, and documentation match upstream, with deviations documented and locked behind tests.
 
@@ -56,17 +56,17 @@ The single Ruby source file stays under 100 lines; we will not split it. Tests g
 
 ### Task 1: Save Plan And Establish Baseline
 
-- [ ] Create `.docs/plans/2026-04-29-redis-storage-upstream-parity.md` with this plan.
-- [ ] Run `git status --short --branch` and confirm work is on a dedicated branch (e.g. `codex/redis-storage-upstream-diff`).
-- [ ] Initialize upstream at `v1.6.9`:
+- [x] Create `.docs/plans/2026-04-29-redis-storage-upstream-parity.md` with this plan.
+- [x] Run `git status --short --branch` and confirm work is on a dedicated branch (e.g. `codex/redis-storage-upstream-diff`).
+- [x] Initialize upstream at `v1.6.9`:
 
 ```bash
 git submodule update --init --recursive upstream
 cd upstream && git fetch --tags origin && git checkout v1.6.9 && cd ..
 ```
 
-- [ ] Run baseline package tests: `cd packages/better_auth-redis-storage && rbenv exec bundle exec rake test`.
-- [ ] Record baseline run counts and any pre-existing failures in this plan's Verification Log section.
+- [x] Run baseline package tests: `cd packages/better_auth-redis-storage && rbenv exec bundle exec rake test`.
+- [x] Record baseline run counts and any pre-existing failures in this plan's Verification Log section.
 
 ### Task 2: Module-Level `redis_storage` Builder
 
@@ -75,7 +75,7 @@ cd upstream && git fetch --tags origin && git checkout v1.6.9 && cd ..
 - Modify: `packages/better_auth-redis-storage/test/better_auth/redis_storage_test.rb`
 - Verify: `upstream/packages/redis-storage/src/redis-storage.ts:37-75`
 
-- [ ] **Step 1: Add a failing test for the upstream-compatible call shape**
+- [x] **Step 1: Add a failing test for the upstream-compatible call shape**
 
 ```ruby
 def test_module_level_redis_storage_builder_returns_storage_instance
@@ -96,13 +96,13 @@ def test_camel_case_redis_storage_class_method_alias_matches_upstream_name
 end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd packages/better_auth-redis-storage && rbenv exec bundle exec ruby -Itest test/better_auth/redis_storage_test.rb -n /redis_storage_(builder|class_method_alias)/`
 
 Expected: FAIL with `NoMethodError: undefined method 'redis_storage' for BetterAuth` and `NoMethodError: undefined method 'redisStorage' for BetterAuth::RedisStorage`.
 
-- [ ] **Step 3: Implement the builders**
+- [x] **Step 3: Implement the builders**
 
 In `packages/better_auth-redis-storage/lib/better_auth/redis_storage.rb`:
 
@@ -120,13 +120,13 @@ module BetterAuth
 end
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd packages/better_auth-redis-storage && rbenv exec bundle exec ruby -Itest test/better_auth/redis_storage_test.rb -n /redis_storage_(builder|class_method_alias)/`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit (intentionally skipped; plan assumptions say no commits unless explicitly requested)**
 
 ```bash
 git add packages/better_auth-redis-storage/lib/better_auth/redis_storage.rb \
@@ -141,7 +141,7 @@ git commit -m "feat(redis-storage): expose module-level builder mirroring upstre
 - Modify: `packages/better_auth-redis-storage/test/better_auth/redis_storage_test.rb`
 - Verify: `upstream/packages/redis-storage/src/redis-storage.ts:49-55`
 
-- [ ] **Step 1: Add failing tests**
+- [x] **Step 1: Add failing tests**
 
 ```ruby
 def test_set_treats_string_ttl_as_seconds_when_positive
@@ -169,13 +169,13 @@ def test_set_with_float_positive_ttl_truncates_to_integer
 end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd packages/better_auth-redis-storage && rbenv exec bundle exec ruby -Itest test/better_auth/redis_storage_test.rb -n /set_(treats_string_ttl|falls_back_to_plain_set|with_float_positive)/`
 
 Expected: FAIL on the string-ttl case (Ruby currently treats `"60"` as zero) and the float case (`1.9.to_i.positive?` works but the final value is fine — verify the string-coercion path).
 
-- [ ] **Step 3: Implement TTL coercion**
+- [x] **Step 3: Implement TTL coercion**
 
 ```ruby
 def set(key, value, ttl = nil)
@@ -207,13 +207,13 @@ def coerce_ttl(ttl)
 end
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd packages/better_auth-redis-storage && rbenv exec bundle exec ruby -Itest test/better_auth/redis_storage_test.rb -n /set_(treats_string_ttl|falls_back_to_plain_set|with_float_positive)/`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit (intentionally skipped; plan assumptions say no commits unless explicitly requested)**
 
 ```bash
 git add packages/better_auth-redis-storage/lib/better_auth/redis_storage.rb \
@@ -227,7 +227,7 @@ git commit -m "fix(redis-storage): coerce numeric/string TTLs and lock zero/nega
 - Modify: `packages/better_auth-redis-storage/test/better_auth/redis_storage_test.rb`
 - Verify: `upstream/packages/redis-storage/src/redis-storage.ts:67-70`
 
-- [ ] **Step 1: Add a failing/regression test**
+- [x] **Step 1: Add a failing/regression test**
 
 ```ruby
 def test_clear_does_not_call_del_when_no_keys_match
@@ -238,17 +238,17 @@ def test_clear_does_not_call_del_when_no_keys_match
 end
 ```
 
-- [ ] **Step 2: Run the test**
+- [x] **Step 2: Run the test**
 
 Run: `cd packages/better_auth-redis-storage && rbenv exec bundle exec ruby -Itest test/better_auth/redis_storage_test.rb -n test_clear_does_not_call_del_when_no_keys_match`
 
 Expected: PASS (Ruby already guards against empty `keys`). The point is to lock the deviation from upstream behind a test; if it fails, restore the empty-array guard.
 
-- [ ] **Step 3: Document the deviation in code**
+- [x] **Step 3: Document the deviation in code**
 
 In `packages/better_auth-redis-storage/lib/better_auth/redis_storage.rb#clear`, add a comment that explains why the Ruby version guards `keys.empty?` (avoids `ERR wrong number of arguments for 'del'` when no prefixed keys exist). Keep the implementation as-is.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit (intentionally skipped; plan assumptions say no commits unless explicitly requested)**
 
 ```bash
 git add packages/better_auth-redis-storage/lib/better_auth/redis_storage.rb \
@@ -263,7 +263,7 @@ git commit -m "test(redis-storage): lock empty-keys guard for clear() (intention
 - Modify: `packages/better_auth-redis-storage/test/better_auth/redis_storage_test.rb`
 - Verify: `upstream/packages/redis-storage/src/redis-storage.ts:62-65`
 
-- [ ] **Step 1: Add a failing test for the new `scan_count` option**
+- [x] **Step 1: Add a failing test for the new `scan_count` option**
 
 ```ruby
 def test_list_keys_uses_scan_when_scan_count_is_provided
@@ -282,13 +282,13 @@ end
 
 Add a `ScanCapableFakeRedisClient` near `FakeRedisClient` that supports `#scan(cursor, match:, count:)` returning `[next_cursor_string, [keys]]` and tracks calls under `scan_calls` and `keys_calls`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd packages/better_auth-redis-storage && rbenv exec bundle exec ruby -Itest test/better_auth/redis_storage_test.rb -n test_list_keys_uses_scan_when_scan_count_is_provided`
 
 Expected: FAIL with `NoMethodError: undefined method 'scan_count'` or `keys_calls` non-empty.
 
-- [ ] **Step 3: Implement `scan_count`**
+- [x] **Step 3: Implement `scan_count`**
 
 ```ruby
 def initialize(client:, key_prefix: DEFAULT_KEY_PREFIX, scan_count: nil)
@@ -327,13 +327,13 @@ def clear
 end
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd packages/better_auth-redis-storage && rbenv exec bundle exec ruby -Itest test/better_auth/redis_storage_test.rb -n test_list_keys_uses_scan_when_scan_count_is_provided`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit (intentionally skipped; plan assumptions say no commits unless explicitly requested)**
 
 ```bash
 git add packages/better_auth-redis-storage/lib/better_auth/redis_storage.rb \
@@ -347,7 +347,7 @@ git commit -m "feat(redis-storage): add optional scan_count to use SCAN over KEY
 - Modify: `packages/better_auth-redis-storage/test/better_auth/redis_storage_test.rb`
 - Verify: `upstream/packages/redis-storage/src/redis-storage.ts:71-75`, `packages/better_auth/lib/better_auth/adapters/internal_adapter.rb:30-160`, `packages/better_auth/lib/better_auth/rate_limiter.rb:140-180`
 
-- [ ] **Step 1: Add failing tests against the in-memory adapter**
+- [x] **Step 1: Add failing tests against the in-memory adapter**
 
 ```ruby
 def test_secondary_storage_can_back_session_payload_when_session_not_in_database
@@ -389,17 +389,17 @@ def test_secondary_storage_can_back_rate_limiting
 end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd packages/better_auth-redis-storage && rbenv exec bundle exec ruby -Itest test/better_auth/redis_storage_test.rb -n /secondary_storage_can_back_/`
 
 Expected: FAIL only if Better Auth core's storage key naming changes; otherwise PASS once the key prefix matches the runtime expectation. The test exists to lock the contract.
 
-- [ ] **Step 3: Adjust the rate-limit prefix expectation if necessary**
+- [x] **Step 3: Adjust the rate-limit prefix expectation if necessary**
 
 If the test fails because the actual prefix is different (e.g. `rate-limit:` vs `rl-`), inspect `packages/better_auth/lib/better_auth/rate_limiter.rb` and update the assertion to match the production prefix exactly (do not change runtime behavior).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit (intentionally skipped; plan assumptions say no commits unless explicitly requested)**
 
 ```bash
 git add packages/better_auth-redis-storage/test/better_auth/redis_storage_test.rb
@@ -414,7 +414,7 @@ git commit -m "test(redis-storage): lock secondary-storage compatibility for ses
 - Modify: `packages/better_auth-redis-storage/test/test_helper.rb`
 - Modify: `packages/better_auth-redis-storage/Rakefile`
 
-- [ ] **Step 1: Move the existing real-Redis test into a new file**
+- [x] **Step 1: Move the existing real-Redis test into a new file**
 
 Create `redis_storage_integration_test.rb` as a Minitest::Test that runs only when `ENV["REDIS_INTEGRATION"] == "1"`. Reuse the existing real-Redis assertions but split into:
 
@@ -486,15 +486,15 @@ class RedisStorageIntegrationTest < Minitest::Test
 end
 ```
 
-- [ ] **Step 2: Delete the in-file integration block**
+- [x] **Step 2: Delete the in-file integration block**
 
 Remove `test_real_redis_stores_better_auth_sessions_with_prefix_isolation` from `redis_storage_test.rb`. Add a comment near the top of the unit test file pointing readers at the integration suite.
 
-- [ ] **Step 3: Wire the Rake test loader**
+- [x] **Step 3: Wire the Rake test loader**
 
 Update `packages/better_auth-redis-storage/Rakefile` to load the new file and ensure `bundle exec rake test` runs both files. Also add a separate `rake test:integration` task that sets `REDIS_INTEGRATION=1` before invoking the integration suite.
 
-- [ ] **Step 4: Run the integration tests with Redis available**
+- [x] **Step 4: Run the integration tests with Redis available**
 
 ```bash
 docker compose up -d redis
@@ -504,13 +504,13 @@ REDIS_INTEGRATION=1 REDIS_URL=redis://localhost:6379/15 \
 
 Expected: PASS for all three integration tests.
 
-- [ ] **Step 5: Confirm the unit suite runs without `REDIS_INTEGRATION`**
+- [x] **Step 5: Confirm the unit suite runs without `REDIS_INTEGRATION`**
 
 Run: `cd packages/better_auth-redis-storage && rbenv exec bundle exec rake test`
 
 Expected: PASS, with the integration tests skipped when `REDIS_INTEGRATION` is unset.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit (intentionally skipped; plan assumptions say no commits unless explicitly requested)**
 
 ```bash
 git add packages/better_auth-redis-storage/test/better_auth/redis_storage_integration_test.rb \
@@ -527,26 +527,26 @@ git commit -m "test(redis-storage): split real-Redis integration tests behind RE
 - Modify: `.docs/features/upstream-parity-matrix.md`
 - Modify: `packages/better_auth-redis-storage/CHANGELOG.md`
 
-- [ ] Document the upstream-compatible call shape (`BetterAuth.redis_storage(client: redis)`) and that the canonical Ruby form is `BetterAuth::RedisStorage.new(client: redis)`.
-- [ ] Document `key_prefix` semantics: defaults to `"better-auth:"`, `nil` falls back to the default, and any other value (including the empty string) is honored verbatim. Include the upstream-aligned warning that `key_prefix` is not isolated by Redis databases — applications with shared Redis instances must use distinct prefixes.
-- [ ] Document the optional `scan_count:` constructor argument and recommended values (e.g. `100`-`1000` depending on database size) plus the guarantee that `KEYS` is the default.
-- [ ] Document the `clear` empty-keys safety guard as a Ruby-only deviation from upstream.
-- [ ] Document the `set(key, value, ttl)` TTL coercion table:
+- [x] Document the upstream-compatible call shape (`BetterAuth.redis_storage(client: redis)`) and that the canonical Ruby form is `BetterAuth::RedisStorage.new(client: redis)`.
+- [x] Document `key_prefix` semantics: defaults to `"better-auth:"`, `nil` falls back to the default, and any other value (including the empty string) is honored verbatim. Include the upstream-aligned warning that `key_prefix` is not isolated by Redis databases — applications with shared Redis instances must use distinct prefixes.
+- [x] Document the optional `scan_count:` constructor argument and recommended values (e.g. `100`-`1000` depending on database size) plus the guarantee that `KEYS` is the default.
+- [x] Document the `clear` empty-keys safety guard as a Ruby-only deviation from upstream.
+- [x] Document the `set(key, value, ttl)` TTL coercion table:
   - `nil`, non-numeric strings, `0`, negative numbers → `set` (no expiry).
   - Positive `Integer`, positive `Float` (truncated), positive numeric `String` → `setex(prefixed_key, ttl_int, value)`.
-- [ ] Document that the gem returns `nil` (not `Promise<void>`) from `set`/`delete`/`clear`. Adopters should rely on `get` return values for assertions.
-- [ ] Document the `SecondaryStorage` contract that any custom backend must implement (`get(key)`, `set(key, value, ttl = nil)`, `delete(key)`, optional `list_keys`/`clear`).
-- [ ] Document that `@better-auth/redis-storage` is released as `1.6.x` upstream while `better_auth-redis-storage` versions independently. Pin the upstream parity tag (`v1.6.9`) in the README.
-- [ ] Update `.docs/features/upstream-parity-matrix.md` to mark `redis-storage` as "100%" with the `1.6.9` upstream tag pinned and link this plan as the last verification entry.
-- [ ] Add a CHANGELOG entry under `[Unreleased]` describing the new `scan_count` option, the module-level builder, and the integration test split. Do not bump the gem version unless a release is being prepared.
+- [x] Document that the gem returns `nil` (not `Promise<void>`) from `set`/`delete`/`clear`. Adopters should rely on `get` return values for assertions.
+- [x] Document the `SecondaryStorage` contract that any custom backend must implement (`get(key)`, `set(key, value, ttl = nil)`, `delete(key)`, optional `list_keys`/`clear`).
+- [x] Document that `@better-auth/redis-storage` is released as `1.6.x` upstream while `better_auth-redis-storage` versions independently. Pin the upstream parity tag (`v1.6.9`) in the README.
+- [x] Update `.docs/features/upstream-parity-matrix.md` to mark `redis-storage` as "100%" with the `1.6.9` upstream tag pinned and link this plan as the last verification entry.
+- [x] Add a CHANGELOG entry under `[Unreleased]` describing the new `scan_count` option, the module-level builder, and the integration test split. Do not bump the gem version unless a release is being prepared.
 
 ### Task 9: Final Verification
 
-- [ ] Run `cd packages/better_auth-redis-storage && rbenv exec bundle exec rake test`.
-- [ ] Run `docker compose up -d redis` and `REDIS_INTEGRATION=1 REDIS_URL=redis://localhost:6379/15 cd packages/better_auth-redis-storage && rbenv exec bundle exec rake test`.
-- [ ] Run `cd packages/better_auth-redis-storage && RUBOCOP_CACHE_ROOT=/private/tmp/rubocop_cache rbenv exec bundle exec standardrb`.
-- [ ] Run `cd packages/better_auth && rbenv exec bundle exec rake test` to confirm the broader Better Auth suite still passes when the gem is loaded as a secondary storage backend.
-- [ ] Record exact run counts for every command above in this plan's Verification Log section before marking complete.
+- [x] Run `cd packages/better_auth-redis-storage && rbenv exec bundle exec rake test`.
+- [x] Run `docker compose up -d redis` and `REDIS_INTEGRATION=1 REDIS_URL=redis://localhost:6379/15 cd packages/better_auth-redis-storage && rbenv exec bundle exec rake test`.
+- [x] Run `cd packages/better_auth-redis-storage && RUBOCOP_CACHE_ROOT=/private/tmp/rubocop_cache rbenv exec bundle exec standardrb`.
+- [x] Run `cd packages/better_auth && rbenv exec bundle exec rake test` to confirm the broader Better Auth suite still passes when the gem is loaded as a secondary storage backend.
+- [x] Record exact run counts for every command above in this plan's Verification Log section before marking complete.
 
 ## Assumptions
 
@@ -556,4 +556,11 @@ git commit -m "test(redis-storage): split real-Redis integration tests behind RE
 
 ## Verification Log
 
-- (fill in after each `rake test`, integration run, and `standardrb` run with run counts and elapsed time)
+- 2026-04-29 baseline, `cd packages/better_auth-redis-storage && rbenv exec bundle exec rake test`: 10 runs, 15 assertions, 0 failures, 0 errors, 1 skip, 0.000996s.
+- 2026-04-29 red-path targeted tests, `cd packages/better_auth-redis-storage && rbenv exec bundle exec ruby -Itest test/better_auth/redis_storage_test.rb -n '/redis_storage_(builder|class_method_alias)|set_(treats_string_ttl|falls_back_to_plain_set|with_float_positive)|list_keys_uses_scan|secondary_storage_can_back_/'`: failed as expected for missing builders, missing `scan_count`, and strict TTL coercion. The initial session-active assertion was corrected to match core's string-key user payload.
+- 2026-04-29 green-path targeted tests, same targeted command plus `clear_does_not_call_del`: 10 runs, 27 assertions, 0 failures, 0 errors, 0 skips, 0.072987s.
+- 2026-04-29 unit suite without Redis integration, `cd packages/better_auth-redis-storage && rbenv exec bundle exec rake test`: 24 runs, 46 assertions, 0 failures, 0 errors, 3 skips, 0.077421s.
+- 2026-04-29 real Redis integration, `docker compose up -d redis` then `REDIS_INTEGRATION=1 REDIS_URL=redis://127.0.0.1:6379/15 rbenv exec bundle exec rake test` from `packages/better_auth-redis-storage` with local socket permission: 24 runs, 69 assertions, 0 failures, 0 errors, 0 skips, 0.234241s.
+- 2026-04-29 style, `cd packages/better_auth-redis-storage && RUBOCOP_CACHE_ROOT=/private/tmp/rubocop_cache rbenv exec bundle exec standardrb`: passed with no offenses.
+- 2026-04-29 broader core suite, `docker compose up -d postgres mysql mssql` then `cd packages/better_auth && rbenv exec bundle exec rake test` with local socket permission: first full run reached 571 runs, 2901 assertions, 1 failure in `BetterAuthPluginsMagicLinkTest#test_magic_link_secondary_storage_tracks_attempts_and_deletes_expired_tokens`; the isolated test then passed with 1 run, 12 assertions, 0 failures. Final full rerun passed: 571 runs, 2903 assertions, 0 failures, 0 errors, 0 skips, 26.353493s.
+- Commit steps were intentionally not executed because this plan's Assumptions section says no commits are part of the plan unless explicitly requested, and the repo instructions say not to commit unless asked.
