@@ -198,6 +198,59 @@ class BetterAuthPluginsGenericOAuthTest < Minitest::Test
     assert_equal "openid,email", account["scope"]
   end
 
+  def test_callback_handles_numeric_account_ids_without_duplicate_accounts
+    auth = build_auth(user_info: {id: 123_456_789, email: "numeric@example.com", name: "Numeric User", emailVerified: true})
+
+    sign_in = auth.api.sign_in_with_oauth2(body: {providerId: "custom", callbackURL: "/dashboard", newUserCallbackURL: "/welcome"})
+    state = Rack::Utils.parse_query(URI.parse(sign_in[:url]).query).fetch("state")
+    status, headers, _body = auth.api.o_auth2_callback(
+      params: {providerId: "custom"},
+      query: {code: "oauth-code", state: state},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_equal "/welcome", headers.fetch("location")
+    user = auth.context.internal_adapter.find_user_by_email("numeric@example.com")[:user]
+    accounts = auth.context.internal_adapter.find_accounts(user["id"])
+    assert_equal 1, accounts.length
+    assert_equal "123456789", accounts.first["accountId"]
+
+    second_sign_in = auth.api.sign_in_with_oauth2(body: {providerId: "custom", callbackURL: "/dashboard"})
+    second_state = Rack::Utils.parse_query(URI.parse(second_sign_in[:url]).query).fetch("state")
+    status, headers, _body = auth.api.o_auth2_callback(
+      params: {providerId: "custom"},
+      query: {code: "oauth-code", state: second_state},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_equal "/dashboard", headers.fetch("location")
+    assert_equal 1, auth.context.internal_adapter.find_accounts(user["id"]).length
+  end
+
+  def test_callback_applies_map_profile_to_user_callable
+    auth = build_auth(
+      user_info: {id: "mapped-sub", email: "mapped@example.com", name: "Original Name", emailVerified: false},
+      provider_overrides: {
+        map_profile_to_user: ->(profile) { {name: "Mapped #{profile[:name]}", emailVerified: true} }
+      }
+    )
+    sign_in = auth.api.sign_in_with_oauth2(body: {providerId: "custom", callbackURL: "/dashboard"})
+    state = Rack::Utils.parse_query(URI.parse(sign_in[:url]).query).fetch("state")
+
+    status, _headers, _body = auth.api.o_auth2_callback(
+      params: {providerId: "custom"},
+      query: {code: "oauth-code", state: state},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    user = auth.context.internal_adapter.find_user_by_email("mapped@example.com")[:user]
+    assert_equal "Mapped Original Name", user["name"]
+    assert_equal true, user["emailVerified"]
+  end
+
   def test_state_cookie_is_set_and_cleared_for_database_state_strategy
     auth = build_auth
     status, headers, body = auth.api.sign_in_with_oauth2(
@@ -475,6 +528,19 @@ class BetterAuthPluginsGenericOAuthTest < Minitest::Test
     assert_equal "https://gumroad.com/oauth/authorize", BetterAuth::Plugins.gumroad(client_id: "id", client_secret: "secret")[:authorization_url]
     assert_equal "post", BetterAuth::Plugins.hubspot(client_id: "id", client_secret: "secret")[:authentication]
     assert_equal "https://www.patreon.com/oauth2/authorize", BetterAuth::Plugins.patreon(client_id: "id", client_secret: "secret")[:authorization_url]
+  end
+
+  def test_duplicate_provider_ids_emit_warning
+    _out, err = capture_io do
+      BetterAuth::Plugins.generic_oauth(
+        config: [
+          {provider_id: "dup", client_id: "id", client_secret: "secret", authorization_url: "https://one.example/auth", token_url: "https://one.example/token"},
+          {provider_id: "dup", client_id: "id", client_secret: "secret", authorization_url: "https://two.example/auth", token_url: "https://two.example/token"}
+        ]
+      )
+    end
+
+    assert_includes err, "Duplicate provider IDs found: dup"
   end
 
   def test_generic_oauth_provider_is_available_to_account_info

@@ -96,7 +96,8 @@ class BetterAuthRoutesUserTest < Minitest::Test
       auth.api.delete_user(headers: {"cookie" => cookie}, body: {})
     end
 
-    assert_equal 401, error.status_code
+    assert_equal 403, error.status_code
+    assert_equal "SESSION_NOT_FRESH", error.code
     assert auth.context.internal_adapter.find_user_by_email("stale-delete@example.com")
   end
 

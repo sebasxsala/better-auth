@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "uri"
+require "json"
 require "securerandom"
 
 module BetterAuth
@@ -11,6 +12,9 @@ module BetterAuth
         provider_id = body["provider"].to_s
         provider = social_provider(ctx.context, provider_id)
         raise APIError.new("NOT_FOUND", message: BASE_ERROR_CODES["PROVIDER_NOT_FOUND"]) unless provider
+        validate_social_callback_url!(ctx.context, body["callbackURL"] || body["callbackUrl"] || body["callback_url"], "INVALID_CALLBACK_URL")
+        validate_social_callback_url!(ctx.context, body["errorCallbackURL"] || body["errorCallbackUrl"] || body["error_callback_url"], "INVALID_ERROR_CALLBACK_URL")
+        validate_social_callback_url!(ctx.context, body["newUserCallbackURL"] || body["newUserCallbackUrl"] || body["new_user_callback_url"], "INVALID_NEW_USER_CALLBACK_URL")
 
         id_token = fetch_value(body, "idToken")
         if id_token
@@ -21,7 +25,7 @@ module BetterAuth
             data[:user],
             token_hash_for_storage(ctx, data[:account]),
             callback_url: body["callbackURL"],
-            disable_sign_up: provider_disable_implicit_sign_up?(provider) && !body["requestSignUp"]
+            disable_sign_up: provider_disable_sign_up?(provider) || (provider_disable_implicit_sign_up?(provider) && !body["requestSignUp"])
           )
           raise APIError.new("UNAUTHORIZED", message: session_data[:error], code: "OAUTH_LINK_ERROR") if session_data[:error]
 
@@ -42,7 +46,7 @@ module BetterAuth
             "newUserCallbackURL" => body["newUserCallbackURL"] || body["newUserCallbackUrl"] || body["new_user_callback_url"],
             "requestSignUp" => body["requestSignUp"] || body["request_sign_up"],
             "codeVerifier" => code_verifier
-          },
+          }.merge(safe_additional_state(body)),
           ctx.context.secret,
           expires_in: 600
         )
@@ -79,12 +83,12 @@ module BetterAuth
         provider_id = fetch_value(ctx.params, "providerId").to_s
         provider = social_provider(ctx.context, provider_id)
         state = data["state"].to_s
-        state_data = Crypto.verify_jwt(state, ctx.context.secret) || {}
-        error_url = state_data["errorCallbackURL"] || "#{ctx.context.base_url}/error"
+        state_data = state.empty? ? nil : Crypto.verify_jwt(state, ctx.context.secret)
+        error_url = state_data ? (state_data["errorCallbackURL"] || "#{ctx.context.base_url}/error") : "#{ctx.context.base_url}/error"
 
         raise ctx.redirect(oauth_error_url(error_url, data["error"], data["errorDescription"] || data["error_description"])) if data["error"]
         raise ctx.redirect(oauth_error_url(error_url, "oauth_provider_not_found")) unless provider
-        raise ctx.redirect(oauth_error_url(error_url, "state_not_found")) if state.empty?
+        raise ctx.redirect(oauth_error_url(error_url, "state_not_found")) unless state_data
         raise ctx.redirect(oauth_error_url(error_url, "no_code")) if data["code"].to_s.empty?
 
         tokens = call_provider(provider, :validate_authorization_code, {
@@ -96,7 +100,9 @@ module BetterAuth
         })
         raise ctx.redirect(oauth_error_url(error_url, "invalid_code")) unless tokens
 
-        user_info = call_provider(provider, :get_user_info, token_hash(tokens))
+        token_data = token_hash(tokens)
+        token_data["user"] = parse_json_hash(data["user"]) if data["user"]
+        user_info = call_provider(provider, :get_user_info, token_data)
         user = user_info[:user] || user_info["user"] if user_info
         raise ctx.redirect(oauth_error_url(error_url, "unable_to_get_user_info")) unless user
         raise ctx.redirect(oauth_error_url(error_url, "email_not_found")) if fetch_value(user, "email").to_s.empty?
@@ -116,11 +122,11 @@ module BetterAuth
           user,
           account_info,
           callback_url: state_data["callbackURL"],
-          disable_sign_up: provider_disable_implicit_sign_up?(provider) && !state_data["requestSignUp"]
+          disable_sign_up: provider_disable_sign_up?(provider) || (provider_disable_implicit_sign_up?(provider) && !state_data["requestSignUp"])
         )
         raise ctx.redirect(oauth_error_url(error_url, session_data[:error].tr(" ", "_"))) if session_data[:error]
         Cookies.set_session_cookie(ctx, session_data)
-        callback_url = state_data["callbackURL"] || "/"
+        callback_url = session_data[:new_user] ? (state_data["newUserCallbackURL"] || state_data["callbackURL"] || "/") : (state_data["callbackURL"] || "/")
         raise ctx.redirect(callback_url)
       end
     end
@@ -132,6 +138,8 @@ module BetterAuth
         provider_id = body["provider"].to_s
         provider = social_provider(ctx.context, provider_id)
         raise APIError.new("NOT_FOUND", message: BASE_ERROR_CODES["PROVIDER_NOT_FOUND"]) unless provider
+        validate_social_callback_url!(ctx.context, body["callbackURL"] || body["callbackUrl"] || body["callback_url"], "INVALID_CALLBACK_URL")
+        validate_social_callback_url!(ctx.context, body["errorCallbackURL"] || body["errorCallbackUrl"] || body["error_callback_url"], "INVALID_ERROR_CALLBACK_URL")
 
         id_token = fetch_value(body, "idToken")
         if id_token
@@ -151,6 +159,7 @@ module BetterAuth
           unless existing
             ctx.context.internal_adapter.create_account(token_hash_for_storage(ctx, data[:account]).merge("userId" => session[:user]["id"]))
           end
+          update_verified_email_on_link(ctx, session[:user]["id"], session[:user]["email"], data[:user])
           next ctx.json({url: "", status: true, redirect: false})
         end
 
@@ -185,13 +194,15 @@ module BetterAuth
       valid = call_provider(provider, :verify_id_token, token, fetch_value(id_token, "nonce"))
       raise APIError.new("UNAUTHORIZED", message: BASE_ERROR_CODES["INVALID_TOKEN"]) unless valid
 
+      token_user = parse_json_hash(fetch_value(id_token, "user"))
       user_info = call_provider(provider, :get_user_info, {
-        idToken: token,
-        id_token: token,
-        accessToken: fetch_value(id_token, "accessToken"),
-        access_token: fetch_value(id_token, "accessToken"),
-        refreshToken: fetch_value(id_token, "refreshToken"),
-        refresh_token: fetch_value(id_token, "refreshToken")
+        "idToken" => token,
+        "id_token" => token,
+        "accessToken" => fetch_value(id_token, "accessToken"),
+        "access_token" => fetch_value(id_token, "accessToken"),
+        "refreshToken" => fetch_value(id_token, "refreshToken"),
+        "refresh_token" => fetch_value(id_token, "refreshToken"),
+        "user" => token_user
       })
       user = user_info[:user] || user_info["user"] if user_info
       raise APIError.new("UNAUTHORIZED", message: BASE_ERROR_CODES["FAILED_TO_GET_USER_INFO"]) unless user
@@ -204,7 +215,8 @@ module BetterAuth
           "accountId" => fetch_value(user, "id").to_s,
           "accessToken" => fetch_value(id_token, "accessToken"),
           "refreshToken" => fetch_value(id_token, "refreshToken"),
-          "idToken" => token
+          "idToken" => token,
+          "user" => token_user
         }
       }
     end
@@ -216,12 +228,14 @@ module BetterAuth
 
       if existing && existing[:linked_account]
         user = existing[:user]
+        new_user = false
       elsif existing
         unless linkable_provider?(ctx, provider_id, user_info, implicit: true)
           return {error: "account not linked"}
         end
         user = existing[:user]
         ctx.context.internal_adapter.create_account(account_info.merge("providerId" => provider_id, "accountId" => account_id, "userId" => user["id"]))
+        new_user = false
       else
         return {error: "signup disabled"} if disable_sign_up
 
@@ -235,10 +249,11 @@ module BetterAuth
           account_info.merge("providerId" => provider_id, "accountId" => account_id)
         )
         user = created[:user]
+        new_user = true
       end
 
       session = ctx.context.internal_adapter.create_session(user["id"], false, session_overrides(ctx), true, ctx)
-      {session: session, user: user}
+      {session: session, user: user, new_user: new_user}
     end
 
     def self.oauth_error_url(base_url, error, description = nil)
@@ -252,6 +267,10 @@ module BetterAuth
 
     def self.provider_disable_implicit_sign_up?(provider)
       !!(fetch_value(provider, "disableImplicitSignUp") || fetch_value(provider, "disableSignUp") || fetch_value(fetch_value(provider, "options") || {}, "disableSignUp"))
+    end
+
+    def self.provider_disable_sign_up?(provider)
+      !!(fetch_value(provider, "disableSignUp") || fetch_value(fetch_value(provider, "options") || {}, "disableSignUp"))
     end
 
     def self.linkable_provider?(ctx, provider_id, user_info, implicit: false)
@@ -294,6 +313,7 @@ module BetterAuth
           image: fetch_value(user_info, "image")
         }.compact)
       end
+      update_verified_email_on_link(ctx, user_id, link_email, user_info)
 
       {status: true}
     end
@@ -302,8 +322,46 @@ module BetterAuth
       additional = body["additionalData"] || body["additional_data"]
       return {} unless additional.is_a?(Hash)
 
-      reserved = %w[callbackURL callbackUrl callback_url errorCallbackURL errorCallbackUrl error_callback_url newUserCallbackURL newUserCallbackUrl new_user_callback_url requestSignUp request_sign_up codeVerifier code_verifier link expiresAt expires_at]
+      reserved = %w[callbackURL callbackUrl callback_url errorCallbackURL errorCallbackUrl error_callback_url errorURL error_url newUserCallbackURL newUserCallbackUrl new_user_callback_url newUserURL new_user_url requestSignUp request_sign_up codeVerifier code_verifier link expiresAt expires_at]
       normalize_hash(additional).reject { |key, _value| reserved.include?(key.to_s) }
+    end
+
+    def self.validate_social_callback_url!(context, callback_url, error_code)
+      validate_callback_url!(context, callback_url)
+    rescue APIError => error
+      return if oauth_proxy_callback_url?(context, callback_url)
+      raise error unless error.message == BASE_ERROR_CODES["INVALID_CALLBACK_URL"]
+
+      raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES[error_code])
+    end
+
+    def self.oauth_proxy_callback_url?(context, callback_url)
+      uri = URI.parse(callback_url.to_s)
+      proxy_path = "#{context.options.base_path}/oauth-proxy-callback"
+      return false unless uri.path == proxy_path
+
+      nested = URI.decode_www_form(uri.query.to_s).assoc("callbackURL")&.last
+      validate_callback_url!(context, nested)
+      true
+    rescue APIError, URI::InvalidURIError
+      false
+    end
+
+    def self.update_verified_email_on_link(ctx, user_id, current_email, social_user)
+      return unless fetch_value(social_user, "emailVerified")
+      return unless fetch_value(social_user, "email").to_s.downcase == current_email.to_s.downcase
+
+      ctx.context.internal_adapter.update_user(user_id, {"emailVerified" => true})
+    end
+
+    def self.parse_json_hash(value)
+      return value if value.is_a?(Hash)
+      return {} if value.nil? || value.to_s.empty?
+
+      parsed = JSON.parse(value.to_s)
+      parsed.is_a?(Hash) ? parsed : {}
+    rescue JSON::ParserError
+      {}
     end
   end
 end

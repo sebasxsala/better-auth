@@ -44,6 +44,42 @@ class BetterAuthRoutesSocialTest < Minitest::Test
     assert_equal "access-token", account["accessToken"]
   end
 
+  def test_apple_id_token_sign_in_uses_user_name_from_id_token_body
+    token = fake_jwt(
+      "sub" => "apple-sub",
+      "email" => "apple@example.com",
+      "email_verified" => true
+    )
+    auth = build_auth(
+      social_providers: {
+        apple: BetterAuth::SocialProviders.apple(
+          client_id: "apple-id",
+          client_secret: "apple-secret",
+          verify_id_token: ->(_token, _nonce = nil) { true }
+        )
+      }
+    )
+
+    result = auth.api.sign_in_social(
+      body: {
+        provider: "apple",
+        idToken: {
+          token: token,
+          user: {
+            name: {
+              firstName: "First",
+              lastName: "Last"
+            },
+            email: "apple@example.com"
+          }
+        }
+      }
+    )
+
+    assert_equal false, result.fetch(:redirect)
+    assert_equal "First Last", result.fetch(:user).fetch("name")
+  end
+
   def test_sign_in_social_returns_authorization_url_and_callback_completes_session
     issued_code_verifier = nil
     callback_code_verifier = nil
@@ -125,6 +161,144 @@ class BetterAuthRoutesSocialTest < Minitest::Test
     refute called
   end
 
+  def test_sign_in_social_rejects_untrusted_callback_urls
+    auth = build_auth(
+      trusted_origins: ["http://localhost:3000"],
+      social_providers: {
+        github: {
+          id: "github",
+          create_authorization_url: ->(_data) { "https://github.example/oauth" }
+        }
+      }
+    )
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_in_social(
+        body: {
+          provider: "github",
+          callbackURL: "https://evil.example/app",
+          errorCallbackURL: "/error",
+          newUserCallbackURL: "/welcome"
+        }
+      )
+    end
+
+    assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_CALLBACK_URL"], error.message
+  end
+
+  def test_sign_in_social_uses_specific_callback_url_error_messages
+    auth = build_auth(
+      social_providers: {
+        github: {
+          id: "github",
+          create_authorization_url: ->(_data) { "https://github.example/oauth" }
+        }
+      }
+    )
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_in_social(body: {provider: "github", callbackURL: "/app", errorCallbackURL: "https://evil.example/error"})
+    end
+    assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_ERROR_CALLBACK_URL"], error.message
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_in_social(body: {provider: "github", callbackURL: "/app", newUserCallbackURL: "https://evil.example/new"})
+    end
+    assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_NEW_USER_CALLBACK_URL"], error.message
+  end
+
+  def test_microsoft_id_token_sign_in_uses_custom_verifier
+    token = fake_jwt(
+      "sub" => "ms-sub",
+      "aud" => "microsoft-id",
+      "email" => "microsoft@example.com",
+      "name" => "Microsoft User",
+      "email_verified" => true
+    )
+    auth = build_auth(
+      social_providers: {
+        microsoft: BetterAuth::SocialProviders.microsoft(
+          client_id: "microsoft-id",
+          verify_id_token: ->(_token, _nonce = nil) { true }
+        )
+      }
+    )
+
+    result = auth.api.sign_in_social(
+      body: {
+        provider: "microsoft",
+        idToken: {
+          token: token,
+          accessToken: "microsoft-access"
+        }
+      }
+    )
+
+    assert_equal false, result.fetch(:redirect)
+    assert_equal "microsoft@example.com", result.fetch(:user).fetch("email")
+  end
+
+  def test_link_social_rejects_untrusted_callback_urls
+    auth = build_auth(
+      trusted_origins: ["http://localhost:3000"],
+      social_providers: {
+        github: {
+          id: "github",
+          create_authorization_url: ->(_data) { "https://github.example/oauth" }
+        }
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "link-url@example.com")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.link_social(
+        headers: {"cookie" => cookie},
+        body: {
+          provider: "github",
+          callbackURL: "https://evil.example/app",
+          errorCallbackURL: "/error"
+        }
+      )
+    end
+
+    assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_CALLBACK_URL"], error.message
+  end
+
+  def test_sign_in_social_preserves_safe_additional_state_and_reserved_fields
+    auth = build_auth(
+      social_providers: {
+        github: {
+          id: "github",
+          create_authorization_url: ->(data) { "https://github.example/oauth?state=#{URI.encode_www_form_component(data[:state])}" }
+        }
+      }
+    )
+
+    response = auth.api.sign_in_social(
+      body: {
+        provider: "github",
+        callbackURL: "/app",
+        additionalData: {
+          invitedBy: "user-123",
+          callbackURL: "/evil",
+          errorURL: "/evil-error",
+          newUserURL: "/evil-new-user",
+          codeVerifier: "evil-verifier",
+          requestSignUp: true
+        }
+      }
+    )
+    state = URI.decode_www_form(URI.parse(response[:url]).query).assoc("state").last
+    data = BetterAuth::Crypto.verify_jwt(state, SECRET)
+
+    assert_equal "/app", data.fetch("callbackURL")
+    assert_equal "user-123", data.fetch("invitedBy")
+    refute_equal "evil-verifier", data.fetch("codeVerifier")
+    refute data.key?("errorURL")
+    refute data.key?("newUserURL")
+    refute data["requestSignUp"]
+  end
+
   def test_sign_in_social_rejects_implicit_signup_when_provider_disables_it
     auth = build_auth(
       social_providers: {
@@ -195,6 +369,180 @@ class BetterAuthRoutesSocialTest < Minitest::Test
     assert auth.context.internal_adapter.find_user_by_email("requested-signup@example.com")
   end
 
+  def test_callback_rejects_invalid_signed_state
+    called = false
+    auth = build_auth(
+      social_providers: {
+        github: {
+          id: "github",
+          validate_authorization_code: ->(_data) { called = true },
+          get_user_info: ->(_tokens) { raise "unexpected user info call" }
+        }
+      }
+    )
+
+    status, headers, _body = auth.api.callback_oauth(
+      params: {providerId: "github"},
+      query: {code: "code", state: "not-a-valid-state"},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_includes headers.fetch("location"), "error=state_not_found"
+    refute called
+  end
+
+  def test_callback_redirects_new_social_user_to_new_user_callback_url
+    auth = build_auth(
+      social_providers: {
+        github: {
+          id: "github",
+          create_authorization_url: ->(data) { "https://github.example/oauth?state=#{URI.encode_www_form_component(data[:state])}" },
+          validate_authorization_code: ->(_data) { {accessToken: "oauth-access"} },
+          get_user_info: ->(_tokens) {
+            {
+              user: {
+                id: "gh-new-user-callback",
+                email: "new-user-callback@example.com",
+                name: "New User Callback",
+                emailVerified: true
+              }
+            }
+          }
+        }
+      }
+    )
+
+    response = auth.api.sign_in_social(
+      body: {
+        provider: "github",
+        callbackURL: "/app",
+        newUserCallbackURL: "/welcome",
+        disableRedirect: true
+      }
+    )
+    state = URI.decode_www_form(URI.parse(response[:url]).query).assoc("state").last
+
+    status, headers, _body = auth.api.callback_oauth(
+      params: {providerId: "github"},
+      query: {code: "code", state: state},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_equal "/welcome", headers.fetch("location")
+  end
+
+  def test_callback_rejects_signup_when_provider_disables_signup
+    auth = build_auth(
+      social_providers: {
+        github: {
+          id: "github",
+          disableSignUp: true,
+          create_authorization_url: ->(data) { "https://github.example/oauth?state=#{URI.encode_www_form_component(data[:state])}" },
+          validate_authorization_code: ->(_data) { {accessToken: "oauth-access"} },
+          get_user_info: ->(_tokens) {
+            {
+              user: {
+                id: "gh-signup-disabled",
+                email: "signup-disabled@example.com",
+                name: "Signup Disabled",
+                emailVerified: true
+              }
+            }
+          }
+        }
+      }
+    )
+
+    response = auth.api.sign_in_social(body: {provider: "github", callbackURL: "/app", requestSignUp: true, disableRedirect: true})
+    state = URI.decode_www_form(URI.parse(response[:url]).query).assoc("state").last
+
+    status, headers, _body = auth.api.callback_oauth(
+      params: {providerId: "github"},
+      query: {code: "code", state: state},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_includes headers.fetch("location"), "error=signup_disabled"
+    assert_nil auth.context.internal_adapter.find_user_by_email("signup-disabled@example.com")
+  end
+
+  def test_vercel_callback_creates_user_and_existing_user_uses_callback_url
+    token_exchange = ->(_url, _form, _headers = {}) { {"access_token" => "vercel-access"} }
+    provider = BetterAuth::SocialProviders.vercel(
+      client_id: "vercel-id",
+      client_secret: "vercel-secret",
+      get_user_info: ->(_tokens) {
+        {
+          "sub" => "vercel-sub",
+          "preferred_username" => "vercel-user",
+          "email" => "vercel-callback@example.com",
+          "email_verified" => true
+        }
+      }
+    )
+    auth = build_auth(social_providers: {vercel: provider})
+
+    BetterAuth::SocialProviders::Base.stub(:post_form_json, token_exchange) do
+      response = auth.api.sign_in_social(body: {provider: "vercel", callbackURL: "/app", newUserCallbackURL: "/welcome", disableRedirect: true})
+      state = URI.decode_www_form(URI.parse(response[:url]).query).assoc("state").last
+      status, headers, _body = auth.api.callback_oauth(
+        params: {providerId: "vercel"},
+        query: {code: "code", state: state},
+        as_response: true
+      )
+
+      assert_equal 302, status
+      assert_equal "/welcome", headers.fetch("location")
+      assert_equal "vercel-user", auth.context.internal_adapter.find_user_by_email("vercel-callback@example.com")[:user]["name"]
+
+      second_response = auth.api.sign_in_social(body: {provider: "vercel", callbackURL: "/app", newUserCallbackURL: "/welcome", disableRedirect: true})
+      second_state = URI.decode_www_form(URI.parse(second_response[:url]).query).assoc("state").last
+      status, headers, _body = auth.api.callback_oauth(
+        params: {providerId: "vercel"},
+        query: {code: "code", state: second_state},
+        as_response: true
+      )
+
+      assert_equal 302, status
+      assert_equal "/app", headers.fetch("location")
+    end
+  end
+
+  def test_railway_callback_creates_user_with_unverified_email
+    token_exchange = ->(_url, _form, _headers = {}) { {"access_token" => "railway-access"} }
+    provider = BetterAuth::SocialProviders.railway(
+      client_id: "railway-id",
+      client_secret: "railway-secret",
+      get_user_info: ->(_tokens) {
+        {
+          "sub" => "railway-sub",
+          "name" => "Railway User",
+          "email" => "railway-callback@example.com"
+        }
+      }
+    )
+    auth = build_auth(social_providers: {railway: provider})
+
+    BetterAuth::SocialProviders::Base.stub(:post_form_json, token_exchange) do
+      response = auth.api.sign_in_social(body: {provider: "railway", callbackURL: "/app", disableRedirect: true})
+      state = URI.decode_www_form(URI.parse(response[:url]).query).assoc("state").last
+      status, headers, _body = auth.api.callback_oauth(
+        params: {providerId: "railway"},
+        query: {code: "code", state: state},
+        as_response: true
+      )
+
+      assert_equal 302, status
+      assert_equal "/app", headers.fetch("location")
+      user = auth.context.internal_adapter.find_user_by_email("railway-callback@example.com")[:user]
+      assert_equal "Railway User", user["name"]
+      assert_equal false, user["emailVerified"]
+    end
+  end
+
   def test_sign_in_social_rejects_unverified_implicit_linking_from_untrusted_provider
     auth = build_auth(
       social_providers: {
@@ -256,6 +604,38 @@ class BetterAuthRoutesSocialTest < Minitest::Test
     assert_equal({url: "", status: true, redirect: false}, result)
     account = auth.context.internal_adapter.find_accounts(user_id).find { |entry| entry["providerId"] == "github" }
     assert_equal "gh-linked", account["accountId"]
+  end
+
+  def test_link_social_with_verified_matching_email_marks_user_email_verified
+    auth = build_auth(
+      social_providers: {
+        github: {
+          id: "github",
+          verify_id_token: ->(_token, _nonce = nil) { true },
+          get_user_info: ->(_tokens) {
+            {
+              user: {
+                id: "gh-verified-link",
+                email: "verified-link@example.com",
+                name: "Verified Link",
+                emailVerified: true
+              }
+            }
+          }
+        }
+      },
+      account: {account_linking: {trusted_providers: ["github"]}}
+    )
+    cookie = sign_up_cookie(auth, email: "verified-link@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+
+    auth.api.link_social(
+      headers: {"cookie" => cookie},
+      body: {provider: "github", idToken: {token: "id-token"}}
+    )
+
+    user = auth.context.internal_adapter.find_user_by_id(user_id)
+    assert_equal true, user["emailVerified"]
   end
 
   def test_link_social_redirect_flow_links_account_on_callback
@@ -403,5 +783,11 @@ class BetterAuthRoutesSocialTest < Minitest::Test
       as_response: true
     )
     headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def fake_jwt(payload)
+    encoded_header = Base64.urlsafe_encode64(JSON.generate({"alg" => "none"}), padding: false)
+    encoded_payload = Base64.urlsafe_encode64(JSON.generate(payload), padding: false)
+    "#{encoded_header}.#{encoded_payload}."
   end
 end

@@ -35,9 +35,11 @@ class BetterAuthRoutesAccountTest < Minitest::Test
 
   def test_get_access_token_and_refresh_token_use_configured_provider
     refreshed_at = Time.now + 3600
+    refresh_calls = 0
     provider = {
       id: "github",
       refresh_access_token: ->(_refresh_token) {
+        refresh_calls += 1
         {
           accessToken: "new-access",
           refreshToken: "new-refresh",
@@ -61,13 +63,52 @@ class BetterAuthRoutesAccountTest < Minitest::Test
       scope: "user"
     )
 
-    token_data = auth.api.get_access_token(headers: {"cookie" => cookie}, body: {providerId: "github"})
+    token_data = auth.api.get_access_token(headers: {"cookie" => cookie}, body: {providerId: "github", accountId: "gh-1"})
     assert_equal "new-access", token_data[:accessToken]
     assert_equal ["repo"], token_data[:scopes]
+    assert_equal "new-id", token_data[:idToken]
+    assert_equal 1, refresh_calls
+
+    stored = auth.context.internal_adapter.find_accounts(user_id).find { |entry| entry["id"] == account["id"] }
+    assert_equal "new-id", stored["idToken"]
 
     refresh_data = auth.api.refresh_token(headers: {"cookie" => cookie}, body: {providerId: "github", accountId: account["id"]})
     assert_equal "new-refresh", refresh_data[:refreshToken]
     assert_equal "github", refresh_data[:providerId]
+  end
+
+  def test_get_access_token_selects_requested_same_provider_account
+    auth = build_auth(
+      social_providers: {
+        github: {
+          id: "github",
+          refresh_access_token: ->(_refresh_token) { raise "unexpected refresh" }
+        }
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "multi-provider@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    auth.context.internal_adapter.create_account(
+      userId: user_id,
+      providerId: "github",
+      accountId: "gh-first",
+      accessToken: "first-access",
+      scope: "user"
+    )
+    second = auth.context.internal_adapter.create_account(
+      userId: user_id,
+      providerId: "github",
+      accountId: "gh-second",
+      accessToken: "second-access",
+      scope: "repo"
+    )
+
+    by_provider_account_id = auth.api.get_access_token(headers: {"cookie" => cookie}, body: {providerId: "github", accountId: "gh-second"})
+    by_internal_id = auth.api.get_access_token(headers: {"cookie" => cookie}, body: {providerId: "github", accountId: second["id"]})
+
+    assert_equal "second-access", by_provider_account_id[:accessToken]
+    assert_equal ["repo"], by_provider_account_id[:scopes]
+    assert_equal "second-access", by_internal_id[:accessToken]
   end
 
   def test_account_info_calls_provider_user_info
