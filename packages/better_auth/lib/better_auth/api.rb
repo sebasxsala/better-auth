@@ -16,7 +16,7 @@ module BetterAuth
       input = symbolize_keys(input || {})
       endpoint_context = Endpoint::Context.new(
         path: endpoint.path,
-        method: Array(endpoint.methods).first,
+        method: input[:method] || Array(endpoint.methods).first,
         query: input[:query] || {},
         body: input[:body] || {},
         params: input[:params] || {},

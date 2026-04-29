@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "securerandom"
+require "json"
 require "time"
 
 module BetterAuth
@@ -379,6 +380,7 @@ module BetterAuth
         return value ? 1 : 0 if dialect == :sqlite && attributes[:type] == "boolean"
         return value.iso8601(6) if dialect == :sqlite && attributes[:type] == "date" && value.respond_to?(:iso8601)
         return Time.parse(value) if attributes[:type] == "date" && value.is_a?(String)
+        return JSON.generate(value) if json_like?(attributes) && !value.is_a?(String)
 
         value
       end
@@ -387,7 +389,18 @@ module BetterAuth
         return value if value.nil?
         return coerce_boolean(value) if attributes[:type] == "boolean"
         return Time.parse(value) if attributes[:type] == "date" && value.is_a?(String)
+        return parse_json_value(value) if json_like?(attributes) && value.is_a?(String)
 
+        value
+      end
+
+      def json_like?(attributes)
+        %w[json string[] number[]].include?(attributes[:type])
+      end
+
+      def parse_json_value(value)
+        JSON.parse(value)
+      rescue JSON::ParserError
         value
       end
 

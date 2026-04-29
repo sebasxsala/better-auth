@@ -226,10 +226,14 @@ module BetterAuth
       end
 
       def create_verification_value(data)
+        return create_secondary_verification_value(data) if secondary_verification_storage?
+
         hooks.create(timestamps.merge(stringify_keys(data)), "verification")
       end
 
       def find_verification_value(identifier)
+        return find_secondary_verification_value(identifier) if secondary_verification_storage?
+
         values = adapter.find_many(
           model: "verification",
           where: [{field: "identifier", value: identifier}],
@@ -241,14 +245,20 @@ module BetterAuth
       end
 
       def delete_verification_value(id)
+        return delete_secondary_verification_value(id) if secondary_verification_storage?
+
         hooks.delete([{field: "id", value: id}], "verification")
       end
 
       def delete_verification_by_identifier(identifier)
+        return delete_secondary_verification_by_identifier(identifier) if secondary_verification_storage?
+
         hooks.delete([{field: "identifier", value: identifier}], "verification")
       end
 
       def update_verification_value(id, data)
+        return update_secondary_verification_value(id, data) if secondary_verification_storage?
+
         hooks.update(stringify_keys(data), [{field: "id", value: id}], "verification")
       end
 
@@ -256,6 +266,10 @@ module BetterAuth
 
       def secondary_storage
         options.secondary_storage
+      end
+
+      def secondary_verification_storage?
+        secondary_storage && !options.verification[:store_in_database]
       end
 
       def joins_enabled?
@@ -352,6 +366,71 @@ module BetterAuth
           .sort_by { |entry| entry["expiresAt"] }
         write_active_sessions(merged["userId"], entries)
         merged
+      end
+
+      def create_secondary_verification_value(data)
+        actual = timestamps.merge(stringify_keys(data))
+        actual["id"] ||= SecureRandom.hex(16)
+        store_verification(actual)
+        actual
+      end
+
+      def find_secondary_verification_value(identifier)
+        data = parse_storage(secondary_storage.get(verification_identifier_key(identifier)))
+        return nil unless data
+
+        data = normalize_verification_dates(data)
+        if data["expiresAt"] && data["expiresAt"] < Time.now
+          delete_secondary_verification_value(data["id"]) unless options.verification[:disable_cleanup]
+          return nil
+        end
+        data
+      end
+
+      def update_secondary_verification_value(id, data)
+        current = parse_storage(secondary_storage.get(verification_id_key(id)))
+        return nil unless current
+
+        updated = normalize_verification_dates(current).merge(stringify_keys(data))
+        updated["updatedAt"] = Time.now
+        store_verification(updated)
+        updated
+      end
+
+      def delete_secondary_verification_value(id)
+        current = parse_storage(secondary_storage.get(verification_id_key(id)))
+        secondary_storage.delete(verification_id_key(id))
+        secondary_storage.delete(verification_identifier_key(current["identifier"])) if current && current["identifier"]
+      end
+
+      def delete_secondary_verification_by_identifier(identifier)
+        current = parse_storage(secondary_storage.get(verification_identifier_key(identifier)))
+        secondary_storage.delete(verification_identifier_key(identifier))
+        secondary_storage.delete(verification_id_key(current["id"])) if current && current["id"]
+      end
+
+      def store_verification(data)
+        actual = normalize_verification_dates(data)
+        ttl_value = ttl(millis(actual["expiresAt"]))
+        payload = JSON.generate(actual)
+        secondary_storage.set(verification_identifier_key(actual["identifier"]), payload, ttl_value)
+        secondary_storage.set(verification_id_key(actual["id"]), payload, ttl_value)
+      end
+
+      def normalize_verification_dates(data)
+        stringified = data.transform_keys(&:to_s)
+        %w[createdAt updatedAt expiresAt].each do |key|
+          stringified[key] = normalize_time(stringified[key]) if stringified[key]
+        end
+        stringified
+      end
+
+      def verification_identifier_key(identifier)
+        "verification:identifier:#{identifier}"
+      end
+
+      def verification_id_key(id)
+        "verification:id:#{id}"
       end
 
       def refresh_user_sessions(user)

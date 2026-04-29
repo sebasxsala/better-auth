@@ -34,8 +34,10 @@ This port is active work. Many server-side flows are implemented, but not every 
 | [`better_auth-redis-storage`](packages/better_auth-redis-storage/) | External Redis secondary storage package for session payloads, active-session indexes, and secondary-storage-backed rate limiting. | `gem "better_auth-redis-storage"` |
 | [`better_auth-mongo-adapter`](packages/better_auth-mongo-adapter/) | External MongoDB database adapter package backed by the official `mongo` gem. | `gem "better_auth-mongo-adapter"` |
 | [`better_auth-api-key`](packages/better_auth-api-key/) | External API key plugin package with creation, verification, quotas, metadata, permissions, storage modes, and API-key sessions. | `gem "better_auth-api-key"` |
+| [`better_auth-passkey`](packages/better_auth-passkey/) | External passkey/WebAuthn plugin package with registration, authentication, and credential management routes. | `gem "better_auth-passkey"` |
 | [`better_auth-rails`](packages/better_auth-rails/) | Rails adapter with mounting helpers, ActiveRecord adapter, controller helpers, and generators. | `gem "better_auth-rails"` |
 | [`better_auth-sinatra`](packages/better_auth-sinatra/) | Sinatra adapter with Rack mounting, request helpers, and SQL migration Rake tasks. | `gem "better_auth-sinatra"` |
+| [`better_auth-hanami`](packages/better_auth-hanami/) | Hanami adapter with Rack mounting, action helpers, Sequel adapter, and generators. | `gem "better_auth-hanami"` |
 | [`better_auth-sso`](packages/better_auth-sso/) | External SSO plugin package with OIDC and SAML SSO route support. | `gem "better_auth-sso"` |
 | [`better_auth-scim`](packages/better_auth-scim/) | External SCIM v2 provisioning plugin package. | `gem "better_auth-scim"` |
 | [`better_auth-stripe`](packages/better_auth-stripe/) | External Stripe billing plugin package with subscription, checkout, portal, and webhook support. | `gem "better_auth-stripe"` |
@@ -185,9 +187,9 @@ Upstream Better Auth exposes many provider factories. The Ruby port currently sh
 | Passkey | [x] Supported | External package: install `better_auth-passkey`. WebAuthn registration/authentication, passkey-first registration, WebAuthn extensions, verification callbacks, upstream option shapes, challenge expiration, allow/exclude credential transports, array origins, not-found delete behavior, management routes, session creation, and SQL/Rails schema output are implemented through the package-owned `webauthn` dependency. Browser client package aliases are outside Ruby server scope. |
 | Phone number | [x] Supported | OTP send/verify, sign-in/sign-up, phone updates, password reset safety, attempt limits, uniqueness, additional fields, custom validation, and custom OTP verification are implemented. |
 | SIWE | [x] Supported | Nonce, wallet sign-in, callback verification, ENS hook, account/session creation, EIP-55 checksum casing, duplicate wallet reuse, multi-chain wallets, and custom schema merging are implemented. |
-| SSO | [x] Supported | External package: install `better_auth-sso`. Supports provider CRUD/access, OIDC discovery/callback, SAML ACS/callback/metadata, RelayState safety, replay protection, domain verification, organization assignment, and real SAML XML validation through the package-owned `ruby-saml` dependency. |
-| SCIM | [x] Supported | External package: install `better_auth-scim`. Supports token envelopes, token storage modes, Bearer middleware, metadata, user CRUD, provider/org scoping, mappings, filters, PATCH operations, and organization enforcement. |
-| Stripe | [x] Supported | External package: install `better_auth-stripe`. Fully supported for Ruby server parity after direct upstream Stripe source/test review: official `stripe` gem client support, injected-client checkout/portal flows, reference authorization, plan/seat/trial abuse protection, trial-start callbacks, billing event webhooks, subscription state transitions, organization subscriptions, metadata helpers, customer callbacks, checkout params/options, lookup keys, and webhook construction. |
+| SSO | [x] Supported | External package: install `better_auth-sso`. Supports provider CRUD/access, OIDC discovery/callback, SAML ACS/callback/metadata/SLO, RelayState safety, replay protection, domain verification, organization assignment, and real SAML XML validation through the package-owned `ruby-saml` dependency. |
+| SCIM | [x] Supported | External package: install `better_auth-scim`. Supports token envelopes, token storage modes, Bearer middleware, metadata, user CRUD, provider management, provider ownership, role-gated org token generation, provider/org scoping, mappings, filters, PATCH operations, and organization enforcement. |
+| Stripe | [x] Supported | External package: install `better_auth-stripe`. Fully supported for Ruby server parity after direct upstream Stripe source/test review: official `stripe` gem client support, injected-client checkout/portal flows, reference authorization, plan/seat/trial abuse protection, separate `seatPriceId` billing items, scheduled plan changes, trial-start callbacks, billing event webhooks, subscription state transitions, organization subscriptions, metadata helpers, customer callbacks, checkout params/options, lookup keys, and webhook construction. |
 | Two-factor | [x] Supported | TOTP, OTP, backup codes, trusted devices, cookie max-age options, disable/recovery flows, `rememberMe: false` preservation, and post-login verification are implemented. |
 | Username | [x] Supported | Username sign-up/sign-in, availability, normalization, display username, validation order, duplicate/update behavior, and leak-prevention behavior are implemented. |
 | Expo server integration | [x] Supported | Ruby server parity covers authorization proxy cookies, optional OAuth state cookie, `expo-origin` override/preservation, disabled override, development-only trusted `exp://`, wildcard trusted origins, and full trusted deep-link cookie transfer. Native Expo secure storage, cookie cache, focus/online managers, browser-opening flow, and React Native behavior tests are client-only. |
@@ -231,6 +233,21 @@ rbenv exec bundle exec rake
 
 cd ../better_auth-oauth-provider
 rbenv exec bundle exec rake
+
+cd ../better_auth-passkey
+rbenv exec bundle exec rake
+
+cd ../better_auth-redis-storage
+rbenv exec bundle exec rake
+
+cd ../better_auth-rails
+rbenv exec bundle exec rspec
+
+cd ../better_auth-sinatra
+rbenv exec bundle exec rspec
+
+cd ../better_auth-hanami
+rbenv exec bundle exec rspec
 ```
 
 ## Documentation
@@ -249,8 +266,11 @@ better-auth/
 │   ├── better_auth/            # Core gem, Minitest
 │   ├── better_auth-api-key/    # External API key plugin gem
 │   ├── better_auth-mongo-adapter/ # External MongoDB adapter gem
+│   ├── better_auth-passkey/    # External passkey/WebAuthn plugin gem
+│   ├── better_auth-redis-storage/ # External Redis secondary storage gem
 │   ├── better_auth-rails/      # Rails adapter, RSpec
 │   ├── better_auth-sinatra/    # Sinatra adapter, RSpec
+│   ├── better_auth-hanami/     # Hanami adapter, RSpec
 │   ├── better_auth-sso/        # External SSO plugin gem
 │   ├── better_auth-scim/       # External SCIM plugin gem
 │   ├── better_auth-stripe/     # External Stripe plugin gem
@@ -266,7 +286,7 @@ better-auth/
 ## Git Workflow
 
 - `canary`: day-to-day development; open PRs here.
-- `main`: stable line; releases and CI publish run from here when versions bump.
+- `main`: stable line; release tags are cut from here.
 - `upstream/`: git submodule and reference only.
 
 ```bash
@@ -280,7 +300,7 @@ git push -u origin feat/my-change
 
 ## Release
 
-Releases are automated with GitHub Actions on push to `main` when `version.rb` changes. The Rails adapter is published as both `better_auth-rails` and `better_auth_rails` as a compatibility alias; the Sinatra adapter publishes as `better_auth-sinatra`.
+Releases are automated with GitHub Actions when a release tag matching a package version is pushed. The workflow publishes the tagged package gems, including core, framework adapters, storage/adapters, and external plugin packages. The Rails adapter is published as both `better_auth-rails` and `better_auth_rails` as a compatibility alias.
 
 Details: [RELEASING.md](RELEASING.md).
 

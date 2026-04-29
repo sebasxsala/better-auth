@@ -46,6 +46,30 @@ RSpec.describe BetterAuth::Hanami::Migration do
     expect(migration).to include("index :action, unique: true")
   end
 
+  it "renders json and array schema field types" do
+    plugin = BetterAuth::Plugin.new(
+      id: "typed",
+      schema: {
+        typedRecord: {
+          model_name: "typed_records",
+          fields: {
+            id: {type: "string", required: true},
+            metadata: {type: "json", required: false},
+            tags: {type: "string[]", required: false},
+            scores: {type: "number[]", required: false}
+          }
+        }
+      }
+    )
+    plugin_config = BetterAuth::Configuration.new(secret: secret, database: :memory, plugins: [plugin])
+
+    migration = described_class.render(plugin_config)
+
+    expect(migration).to include("column :metadata, JSON")
+    expect(migration).to include("column :tags, JSON")
+    expect(migration).to include("column :scores, JSON")
+  end
+
   def secret
     "test-secret-that-is-long-enough-for-validation"
   end

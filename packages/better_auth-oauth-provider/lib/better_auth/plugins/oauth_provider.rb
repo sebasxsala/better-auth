@@ -126,8 +126,14 @@ module BetterAuth
 
     def oauth_get_client_endpoint(_config)
       Endpoint.new(path: "/oauth2/client/:id", method: "GET") do |ctx|
-        Routes.current_session(ctx)
-        client = OAuthProtocol.find_client(ctx, "oauthClient", ctx.params["id"] || ctx.params[:id])
+        session = Routes.current_session(ctx)
+        client = ctx.context.adapter.find_one(
+          model: "oauthClient",
+          where: [
+            {field: "clientId", value: ctx.params["id"] || ctx.params[:id]},
+            {field: "userId", value: session[:user]["id"]}
+          ]
+        )
         raise APIError.new("NOT_FOUND", message: "client not found") unless client
 
         ctx.json(OAuthProtocol.client_response(client, include_secret: false))
@@ -154,9 +160,18 @@ module BetterAuth
 
     def oauth_delete_client_endpoint
       Endpoint.new(path: "/oauth2/client", method: "DELETE") do |ctx|
-        Routes.current_session(ctx)
+        session = Routes.current_session(ctx)
         body = OAuthProtocol.stringify_keys(ctx.body)
-        ctx.context.adapter.delete(model: "oauthClient", where: [{field: "clientId", value: body["client_id"]}])
+        client = ctx.context.adapter.find_one(
+          model: "oauthClient",
+          where: [
+            {field: "clientId", value: body["client_id"]},
+            {field: "userId", value: session[:user]["id"]}
+          ]
+        )
+        raise APIError.new("NOT_FOUND", message: "client not found") unless client
+
+        ctx.context.adapter.delete(model: "oauthClient", where: [{field: "id", value: client["id"]}])
         ctx.json({status: true})
       end
     end

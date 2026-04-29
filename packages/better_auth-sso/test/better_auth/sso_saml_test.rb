@@ -290,6 +290,91 @@ class BetterAuthPluginsSSOSAMLTest < Minitest::Test
     assert_equal "member", member.fetch("role")
   end
 
+  def test_saml_single_logout_records_session_and_handles_idp_logout_request
+    auth = build_auth(plugins: [BetterAuth::Plugins.sso(saml: {enableSingleLogout: true})])
+    register_slo_provider(auth)
+    sign_in = auth.api.sign_in_sso(body: {providerId: "saml", callbackURL: "/dashboard"})
+    relay_state = Rack::Utils.parse_query(URI.parse(sign_in.fetch(:url)).query).fetch("RelayState")
+    response = Base64.strict_encode64(JSON.generate({email: "slo@example.com", name: "SLO User", id: "assertion-slo", nameID: "name-id-1", sessionIndex: "session-index-1"}))
+
+    status, headers, _body = auth.api.acs_endpoint(params: {providerId: "saml"}, body: {SAMLResponse: response, RelayState: relay_state}, as_response: true)
+
+    assert_equal 302, status
+    session_token = session_cookie_token(headers)
+    saml_session_key = "saml-session:saml:name-id-1"
+    stored = auth.context.internal_adapter.find_verification_value(saml_session_key)
+    assert stored
+    assert_equal(
+      {
+        "sessionId" => session_token,
+        "providerId" => "saml",
+        "nameID" => "name-id-1",
+        "sessionIndex" => "session-index-1"
+      },
+      JSON.parse(stored.fetch("value"))
+    )
+    assert_equal saml_session_key, auth.context.internal_adapter.find_verification_value("saml-session-by-id:#{session_token}").fetch("value")
+
+    logout_request = Base64.strict_encode64(JSON.generate({id: "logout-request-1", nameID: "name-id-1", sessionIndex: "session-index-1"}))
+    status, logout_headers, _body = auth.api.slo_endpoint(
+      params: {providerId: "saml"},
+      body: {SAMLRequest: logout_request, RelayState: "/signed-out"},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_match %r{\Ahttps://idp.example.com/slo\?}, logout_headers.fetch("location")
+    assert_nil auth.context.internal_adapter.find_session(session_token)
+    assert_nil auth.context.internal_adapter.find_verification_value(saml_session_key)
+    assert_nil auth.context.internal_adapter.find_verification_value("saml-session-by-id:#{session_token}")
+    logout_response = JSON.parse(Base64.decode64(Rack::Utils.parse_query(URI.parse(logout_headers.fetch("location")).query).fetch("SAMLResponse")))
+    assert_equal "logout-request-1", logout_response.fetch("inResponseTo")
+    assert_equal "success", logout_response.fetch("status")
+  end
+
+  def test_saml_sp_initiated_logout_creates_pending_request_and_handles_response
+    auth = build_auth(plugins: [BetterAuth::Plugins.sso(saml: {enableSingleLogout: true})])
+    register_slo_provider(auth)
+    sign_in = auth.api.sign_in_sso(body: {providerId: "saml", callbackURL: "/dashboard"})
+    relay_state = Rack::Utils.parse_query(URI.parse(sign_in.fetch(:url)).query).fetch("RelayState")
+    response = Base64.strict_encode64(JSON.generate({email: "sp-slo@example.com", name: "SP SLO User", id: "assertion-sp-slo", nameID: "name-id-2", sessionIndex: "session-index-2"}))
+    status, headers, _body = auth.api.acs_endpoint(params: {providerId: "saml"}, body: {SAMLResponse: response, RelayState: relay_state}, as_response: true)
+    assert_equal 302, status
+    cookie = headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")
+    session_token = session_cookie_token(headers)
+
+    status, logout_headers, _body = auth.api.initiate_slo(
+      headers: {"cookie" => cookie},
+      params: {providerId: "saml"},
+      body: {callbackURL: "/signed-out"},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    params = Rack::Utils.parse_query(URI.parse(logout_headers.fetch("location")).query)
+    logout_request = JSON.parse(Base64.decode64(params.fetch("SAMLRequest")))
+    assert_equal "name-id-2", logout_request.fetch("nameID")
+    assert_equal "session-index-2", logout_request.fetch("sessionIndex")
+    assert_equal "/signed-out", params.fetch("RelayState")
+    assert auth.context.internal_adapter.find_verification_value("saml-logout-request:#{logout_request.fetch("id")}")
+    assert_nil auth.context.internal_adapter.find_session(session_token)
+    assert_nil auth.context.internal_adapter.find_verification_value("saml-session:saml:name-id-2")
+    assert_nil auth.context.internal_adapter.find_verification_value("saml-session-by-id:#{session_token}")
+
+    logout_response = Base64.strict_encode64(JSON.generate({inResponseTo: logout_request.fetch("id"), status: "success"}))
+    status, response_headers, _body = auth.api.slo_endpoint(
+      params: {providerId: "saml"},
+      body: {SAMLResponse: logout_response, RelayState: "/signed-out"},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_equal "/signed-out", response_headers.fetch("location")
+    assert_includes response_headers.fetch("set-cookie"), "better-auth.session_token="
+    assert_includes response_headers.fetch("set-cookie"), "Max-Age=0"
+    assert_nil auth.context.internal_adapter.find_verification_value("saml-logout-request:#{logout_request.fetch("id")}")
+  end
+
   private
 
   def build_auth(options = {})
@@ -298,6 +383,7 @@ class BetterAuthPluginsSSOSAMLTest < Minitest::Test
         base_url: "http://localhost:3000",
         secret: SECRET,
         database: :memory,
+        email_and_password: {enabled: true},
         plugins: [BetterAuth::Plugins.sso]
       }.merge(options)
     )
@@ -309,6 +395,32 @@ class BetterAuthPluginsSSOSAMLTest < Minitest::Test
       as_response: true
     )
     headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def register_slo_provider(auth)
+    cookie = sign_up_cookie(auth)
+    auth.api.register_sso_provider(
+      headers: {"cookie" => cookie},
+      body: {
+        providerId: "saml",
+        issuer: "https://idp.example.com",
+        domain: "example.com",
+        samlConfig: {
+          entryPoint: "https://idp.example.com/sso",
+          cert: "test-cert",
+          audience: "better-auth-ruby",
+          idpMetadata: {
+            singleLogoutService: [
+              {binding: "redirect", location: "https://idp.example.com/slo"}
+            ]
+          }
+        }
+      }
+    )
+  end
+
+  def session_cookie_token(headers)
+    headers.fetch("set-cookie").match(/better-auth\.session_token=([^;]+)/)[1].split(".").first
   end
 
   def saml_algorithm_xml(signature_algorithm: nil, digest_algorithm: nil, key_encryption_algorithm: nil, data_encryption_algorithm: nil)

@@ -128,8 +128,9 @@ module BetterAuth
       end
 
       scheme = request.get_header("rack.url_scheme") || request.scheme
+      scheme = "https" unless valid_proxy_proto?(scheme.to_s)
       host_header = request.get_header("HTTP_HOST")
-      return "#{scheme}://#{host_header}" if host_header && !host_header.empty?
+      return "#{scheme}://#{host_header}" if host_header && valid_proxy_host?(host_header.to_s)
 
       host = request.get_header("SERVER_NAME") || request.host
       port = (request.get_header("SERVER_PORT") || request.port).to_i

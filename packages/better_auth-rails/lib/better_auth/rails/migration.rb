@@ -84,6 +84,7 @@ module BetterAuth
         when "boolean" then "boolean"
         when "date" then "datetime"
         when "number" then attributes[:bigint] ? "bigint" : "integer"
+        when "json", "string[]", "number[]" then "json"
         else "string"
         end
       end

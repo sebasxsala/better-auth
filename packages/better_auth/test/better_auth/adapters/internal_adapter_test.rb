@@ -133,6 +133,23 @@ class BetterAuthInternalAdapterTest < Minitest::Test
     assert_includes calls, [:after_delete, "verify-1"]
   end
 
+  def test_verification_lifecycle_uses_secondary_storage_unless_database_storage_enabled
+    storage = MemoryStorage.new
+    internal = internal_adapter(secondary_storage: storage)
+
+    created = internal.create_verification_value(identifier: "email:one", value: "token", expiresAt: Time.now + 60)
+
+    assert_equal "email:one", created["identifier"]
+    assert_equal "token", internal.find_verification_value("email:one")["value"]
+    assert_empty internal.adapter.find_many(model: "verification")
+
+    internal.update_verification_value(created["id"], value: "updated")
+    assert_equal "updated", internal.find_verification_value("email:one")["value"]
+
+    internal.delete_verification_value(created["id"])
+    assert_nil internal.find_verification_value("email:one")
+  end
+
   def test_user_and_account_helpers
     internal = internal_adapter
     user = internal.create_user(name: "Ada", email: "ADA@example.com")

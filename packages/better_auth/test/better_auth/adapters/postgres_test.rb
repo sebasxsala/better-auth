@@ -48,6 +48,7 @@ class BetterAuthPostgresAdapterTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: ->(options) { BetterAuth::Adapters::Postgres.new(options, connection: connection) },
+      email_and_password: {enabled: true},
       session: {cookie_cache: {enabled: false}}
     )
 

@@ -213,6 +213,61 @@ class BetterAuthPluginsSCIMTest < Minitest::Test
     assert_kind_of String, token.fetch(:scimToken)
   end
 
+  def test_scim_org_tokens_require_privileged_role_and_management_filters_by_role
+    auth = build_auth(plugins: [BetterAuth::Plugins.organization, BetterAuth::Plugins.scim])
+    owner_cookie = sign_up_cookie(auth, "owner@example.com")
+    member_cookie = sign_up_cookie(auth, "member@example.com")
+    admin_cookie = sign_up_cookie(auth, "admin@example.com")
+    org = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Role Org", slug: "role-org"})
+    member = auth.context.internal_adapter.find_user_by_email("member@example.com").fetch(:user)
+    admin = auth.context.internal_adapter.find_user_by_email("admin@example.com").fetch(:user)
+    auth.context.adapter.create(model: "member", data: {organizationId: org.fetch("id"), userId: member.fetch("id"), role: "member", createdAt: Time.now})
+    auth.context.adapter.create(model: "member", data: {organizationId: org.fetch("id"), userId: admin.fetch("id"), role: "admin", createdAt: Time.now})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.generate_scim_token(headers: {"cookie" => member_cookie}, body: {providerId: "member-attempt", organizationId: org.fetch("id")})
+    end
+    assert_equal 403, error.status_code
+    assert_equal "Insufficient role for this operation", error.message
+
+    token = auth.api.generate_scim_token(headers: {"cookie" => admin_cookie}, body: {providerId: "admin-provider", organizationId: org.fetch("id")})
+    assert_kind_of String, token.fetch(:scimToken)
+    assert_empty auth.api.list_scim_provider_connections(headers: {"cookie" => member_cookie}).fetch(:providers)
+    assert_equal ["admin-provider"], auth.api.list_scim_provider_connections(headers: {"cookie" => admin_cookie}).fetch(:providers).map { |provider| provider.fetch("providerId") }
+  end
+
+  def test_scim_provider_management_enforces_personal_provider_ownership
+    auth = build_auth(provider_ownership: {enabled: true})
+    owner_cookie = sign_up_cookie(auth, "owner@example.com")
+    other_cookie = sign_up_cookie(auth, "other@example.com")
+    token = auth.api.generate_scim_token(headers: {"cookie" => owner_cookie}, body: {providerId: "owned-provider"}).fetch(:scimToken)
+
+    owner_list = auth.api.list_scim_provider_connections(headers: {"cookie" => owner_cookie}).fetch(:providers)
+    assert_equal ["owned-provider"], owner_list.map { |provider| provider.fetch("providerId") }
+    assert_empty auth.api.list_scim_provider_connections(headers: {"cookie" => other_cookie}).fetch(:providers)
+
+    fetched = auth.api.get_scim_provider_connection(headers: {"cookie" => owner_cookie}, query: {providerId: "owned-provider"})
+    assert_equal "owned-provider", fetched.fetch("providerId")
+    assert_nil fetched.fetch("organizationId")
+
+    forbidden = assert_raises(BetterAuth::APIError) do
+      auth.api.get_scim_provider_connection(headers: {"cookie" => other_cookie}, query: {providerId: "owned-provider"})
+    end
+    assert_equal 403, forbidden.status_code
+    assert_equal "You must be the owner to access this provider", forbidden.message
+
+    assert_raises(BetterAuth::APIError) do
+      auth.api.generate_scim_token(headers: {"cookie" => other_cookie}, body: {providerId: "owned-provider"})
+    end
+    deleted = auth.api.delete_scim_provider_connection(headers: {"cookie" => owner_cookie}, body: {providerId: "owned-provider"})
+    assert_equal true, deleted.fetch(:success)
+
+    invalid = assert_raises(BetterAuth::APIError) do
+      auth.api.list_scim_users(headers: bearer(token))
+    end
+    assert_equal 401, invalid.status_code
+  end
+
   def test_scim_scopes_user_access_by_provider_and_deletes_users
     auth = build_auth
     cookie = sign_up_cookie(auth)
@@ -277,6 +332,7 @@ class BetterAuthPluginsSCIMTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: plugins || [BetterAuth::Plugins.scim(options)]
     )
   end

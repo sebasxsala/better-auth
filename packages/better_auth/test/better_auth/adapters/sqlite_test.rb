@@ -29,6 +29,7 @@ class BetterAuthSQLiteAdapterTest < Minitest::Test
         base_url: "http://localhost:3000",
         secret: SECRET,
         database: ->(options) { BetterAuth::Adapters::SQLite.new(options, connection: connection) },
+        email_and_password: {enabled: true},
         session: {cookie_cache: {enabled: false}}
       )
 
@@ -51,6 +52,52 @@ class BetterAuthSQLiteAdapterTest < Minitest::Test
       assert_equal token, session[:session]["token"]
       assert_equal user_id, session[:session]["userId"]
       assert_equal "SQLite Direct Update", session[:user]["name"]
+    ensure
+      connection&.close
+    end
+  rescue LoadError
+    skip "sqlite3 gem is not installed"
+  end
+
+  def test_sqlite_adapter_round_trips_json_and_array_fields
+    require "sqlite3"
+
+    Tempfile.create(["better-auth-typed", ".sqlite3"]) do |file|
+      plugin = BetterAuth::Plugin.new(
+        id: "typed",
+        schema: {
+          typedRecord: {
+            model_name: "typed_records",
+            fields: {
+              id: {type: "string", required: true},
+              metadata: {type: "json", required: false},
+              tags: {type: "string[]", required: false},
+              scores: {type: "number[]", required: false}
+            }
+          }
+        }
+      )
+      config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [plugin])
+      connection = SQLite3::Database.new(file.path)
+      connection.results_as_hash = true
+      create_schema(connection, config)
+      adapter = BetterAuth::Adapters::SQLite.new(config, connection: connection)
+
+      adapter.create(
+        model: "typedRecord",
+        data: {
+          id: "typed-1",
+          metadata: {"nested" => {"enabled" => true}},
+          tags: ["alpha", "beta"],
+          scores: [1, 2, 3]
+        },
+        force_allow_id: true
+      )
+      record = adapter.find_one(model: "typedRecord", where: [{field: "id", value: "typed-1"}])
+
+      assert_equal({"nested" => {"enabled" => true}}, record.fetch("metadata"))
+      assert_equal ["alpha", "beta"], record.fetch("tags")
+      assert_equal [1, 2, 3], record.fetch("scores")
     ensure
       connection&.close
     end

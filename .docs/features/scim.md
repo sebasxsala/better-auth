@@ -17,12 +17,13 @@ To match upstream `@better-auth/scim`, Ruby SCIM lives in `better_auth-scim`.
 ## Ruby Adaptation
 
 - Implemented in `packages/better_auth-scim` as a plugin package.
-- Adds `scimProvider` schema fields: `providerId`, `scimToken`, and `organizationId`.
+- Adds `scimProvider` schema fields: `providerId`, `scimToken`, `organizationId`, and optional `userId` for upstream provider ownership.
 - Extends user schema with `active` and `externalId` for SCIM provisioning.
-- Adds `/scim/generate-token`, `/scim/v2/Users`, `/scim/v2/Users/:userId`, `/scim/v2/ServiceProviderConfig`, `/scim/v2/Schemas`, `/scim/v2/Schemas/:schemaId`, `/scim/v2/ResourceTypes`, and `/scim/v2/ResourceTypes/:resourceTypeId`.
+- Adds `/scim/generate-token`, `/scim/list-provider-connections`, `/scim/get-provider-connection`, `/scim/delete-provider-connection`, `/scim/v2/Users`, `/scim/v2/Users/:userId`, `/scim/v2/ServiceProviderConfig`, `/scim/v2/Schemas`, `/scim/v2/Schemas/:schemaId`, `/scim/v2/ResourceTypes`, and `/scim/v2/ResourceTypes/:resourceTypeId`.
 - Supports upstream base64url SCIM token envelopes with provider and optional organization binding.
 - Supports plain, SHA-256 hashed, encrypted, custom hash, and custom encrypt/decrypt token storage.
 - Creates SCIM provider accounts for provisioned users, links existing users by email, scopes list/get/update/patch/delete by provider, and enforces organization membership for organization-scoped tokens.
+- Enforces upstream role-gated organization token generation and provider management. The default privileged roles are `admin` and the organization creator role. `provider_ownership: {enabled: true}` restricts personal provider management to the owner while leaving legacy ownerless providers readable for compatibility.
 - Supports primary email selection, formatted/given/family name mapping, external ID/account ID mapping, slash and dot PATCH paths, and no-path value object PATCH operations.
 
 ## Key Differences

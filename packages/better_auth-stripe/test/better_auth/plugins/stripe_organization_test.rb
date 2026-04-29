@@ -10,6 +10,7 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.stripe(
           stripe_client: BetterAuthPluginsStripeTest::FakeStripeClient.new,
@@ -35,10 +36,12 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.organization,
         BetterAuth::Plugins.stripe(
           stripe_client: stripe,
+          stripe_webhook_secret: "whsec_test",
           organization: {enabled: true},
           subscription: {
             enabled: true,
@@ -98,6 +101,7 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.organization,
         BetterAuth::Plugins.stripe(
@@ -141,6 +145,7 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.organization,
         BetterAuth::Plugins.stripe(
@@ -184,6 +189,97 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
     assert_equal [subscription.fetch("id")], deleted_callbacks
   end
 
+  def test_organization_seat_price_checkout_and_webhook_quantity
+    stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.stripe(
+          stripe_client: stripe,
+          stripe_webhook_secret: "whsec_test",
+          organization: {enabled: true},
+          subscription: {
+            enabled: true,
+            plans: [{name: "team", price_id: "price_team_base", seat_price_id: "price_team_seat"}],
+            authorize_reference: ->(_data, _ctx) { true }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, "seat-owner@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Seats", slug: "seats"})
+    2.times do |index|
+      user = auth.context.internal_adapter.create_user(email: "seat-#{index}@example.com", name: "Seat #{index}", emailVerified: true)
+      auth.context.adapter.create(model: "member", data: {organizationId: organization.fetch("id"), userId: user.fetch("id"), role: "member", createdAt: Time.now})
+    end
+
+    auth.api.upgrade_subscription(
+      headers: {"cookie" => cookie},
+      body: {plan: "team", customerType: "organization", referenceId: organization.fetch("id"), successUrl: "/success", cancelUrl: "/cancel"}
+    )
+
+    line_items = stripe.checkout.created.last.fetch(:line_items)
+    assert_equal [{price: "price_team_base", quantity: 1}, {price: "price_team_seat", quantity: 3}], line_items
+    subscription = auth.context.adapter.find_one(model: "subscription", where: [{field: "referenceId", value: organization.fetch("id")}])
+    assert_equal 3, subscription.fetch("seats")
+
+    auth.api.stripe_webhook(
+      headers: {"stripe-signature" => "valid"},
+      body: {
+        type: "customer.subscription.updated",
+        data: {object: stripe_subscription(id: "sub_seats", customer: subscription.fetch("stripeCustomerId"), price_id: "price_team_base", status: "active", quantity: 1, seat_price_id: "price_team_seat", seat_quantity: 5)}
+      }
+    )
+
+    updated = auth.context.adapter.find_one(model: "subscription", where: [{field: "id", value: subscription.fetch("id")}])
+    assert_equal 5, updated.fetch("seats")
+  end
+
+  def test_organization_subscription_upgrade_can_be_scheduled_at_period_end
+    stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.stripe(
+          stripe_client: stripe,
+          organization: {enabled: true},
+          subscription: {
+            enabled: true,
+            plans: [{name: "team", price_id: "price_team"}, {name: "enterprise", price_id: "price_enterprise"}],
+            authorize_reference: ->(_data, _ctx) { true }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, "schedule-owner@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Schedule", slug: "schedule"})
+    auth.context.adapter.update(model: "organization", where: [{field: "id", value: organization.fetch("id")}], update: {stripeCustomerId: "cus_schedule"})
+    subscription = auth.context.adapter.create(
+      model: "subscription",
+      data: {plan: "team", referenceId: organization.fetch("id"), stripeCustomerId: "cus_schedule", stripeSubscriptionId: "sub_schedule", status: "active", seats: 1, periodEnd: Time.now + 3600}
+    )
+    stripe.subscriptions.list_data = [stripe_subscription(id: "sub_schedule", customer: "cus_schedule", price_id: "price_team", status: "active")]
+
+    result = auth.api.upgrade_subscription(
+      headers: {"cookie" => cookie},
+      body: {plan: "enterprise", customerType: "organization", referenceId: organization.fetch("id"), scheduleAtPeriodEnd: true, returnUrl: "/billing", successUrl: "/success", cancelUrl: "/cancel"}
+    )
+
+    assert_equal "http://localhost:3000/api/auth/billing", result.fetch(:url)
+    assert_equal "sub_schedule", stripe.subscription_schedules.created.last.fetch(:from_subscription)
+    assert_equal "sched_1", stripe.subscription_schedules.updated.last.fetch(:id)
+    updated = auth.context.adapter.find_one(model: "subscription", where: [{field: "id", value: subscription.fetch("id")}])
+    assert_equal "sched_1", updated.fetch("stripeScheduleId")
+  end
+
   private
 
   def sign_up_cookie(auth, email)
@@ -198,7 +294,7 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
     set_cookie.to_s.lines.map { |line| line.split(";").first }.join("; ")
   end
 
-  def stripe_subscription(id:, customer: "cus_test", price_id: "price_team", lookup_key: nil, status: "active", quantity: 1, current_period_start: 1_700_000_000, current_period_end: 1_700_086_400, cancel_at_period_end: false, cancel_at: nil, canceled_at: nil, ended_at: nil, trial_start: nil, trial_end: nil, metadata: {})
+  def stripe_subscription(id:, customer: "cus_test", price_id: "price_team", lookup_key: nil, status: "active", quantity: 1, seat_price_id: nil, seat_quantity: 1, current_period_start: 1_700_000_000, current_period_end: 1_700_086_400, cancel_at_period_end: false, cancel_at: nil, canceled_at: nil, ended_at: nil, trial_start: nil, trial_end: nil, metadata: {})
     {
       id: id,
       customer: customer,
@@ -218,8 +314,15 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
             current_period_start: current_period_start,
             current_period_end: current_period_end,
             price: {id: price_id, lookup_key: lookup_key}
-          }
-        ]
+          },
+          (seat_price_id ? {
+            id: "si_seat_#{id}",
+            quantity: seat_quantity,
+            current_period_start: current_period_start,
+            current_period_end: current_period_end,
+            price: {id: seat_price_id}
+          } : nil)
+        ].compact
       }
     }
   end

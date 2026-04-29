@@ -37,7 +37,7 @@ module BetterAuth
         updated = ctx.context.internal_adapter.update_session(session[:session]["token"], body)
         merged = session[:session].merge(updated || body)
         Cookies.set_session_cookie(ctx, {session: merged, user: session[:user]}, Cookies.dont_remember?(ctx))
-        ctx.json({status: true})
+        ctx.json(parsed_session_response(ctx, {session: merged, user: session[:user]}))
       end
     end
 
@@ -90,6 +90,7 @@ module BetterAuth
       return nil if allow_nil && data.nil?
 
       raise APIError.new("UNAUTHORIZED") unless data
+      ensure_fresh_session!(ctx, data) if sensitive
 
       {
         session: stringify_keys(data[:session] || data["session"]),
@@ -116,6 +117,18 @@ module BetterAuth
         query[snake_key] ||
         query[snake_key.to_sym]
       value == true || value.to_s == "true"
+    end
+
+    def self.ensure_fresh_session!(ctx, data)
+      fresh_age = ctx.context.session_config[:fresh_age].to_i
+      return if fresh_age.zero?
+
+      session = stringify_keys(data[:session] || data["session"])
+      created_at = Session.normalize_time(session["createdAt"])
+      return unless created_at
+      return if Time.now - created_at < fresh_age
+
+      raise APIError.new("FORBIDDEN", code: "SESSION_NOT_FRESH", message: BASE_ERROR_CODES["SESSION_NOT_FRESH"])
     end
 
     def self.stringify_keys(value)

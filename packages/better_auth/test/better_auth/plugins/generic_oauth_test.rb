@@ -677,6 +677,7 @@ class BetterAuthPluginsGenericOAuthTest < Minitest::Test
         base_url: "http://localhost:3000",
         secret: SECRET,
         database: :memory,
+        email_and_password: {enabled: true},
         plugins: [
           BetterAuth::Plugins.generic_oauth(
             config: [

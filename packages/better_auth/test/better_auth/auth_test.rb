@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../test_helper"
+require "stringio"
 
 class BetterAuthAuthTest < Minitest::Test
   SECRET = "test-secret-that-is-long-enough-for-validation"
@@ -48,5 +49,55 @@ class BetterAuthAuthTest < Minitest::Test
 
     assert_equal "User not found", auth.error_codes["USER_NOT_FOUND"]
     assert_equal "Custom error message", auth.error_codes["CUSTOM_ERROR"]
+  end
+
+  def test_inferred_base_url_uses_valid_trusted_proxy_headers
+    auth = BetterAuth.auth(
+      secret: SECRET,
+      advanced: {trusted_proxy_headers: true}
+    )
+
+    status, = auth.call(rack_env("GET", "/api/auth/ok", headers: {
+      "HTTP_X_FORWARDED_HOST" => "preview.example.com:8443",
+      "HTTP_X_FORWARDED_PROTO" => "https",
+      "HTTP_HOST" => "localhost:3000"
+    }))
+
+    assert_equal 200, status
+    assert_equal "https://preview.example.com:8443/api/auth", auth.context.base_url
+  end
+
+  def test_inferred_base_url_rejects_malicious_forwarded_and_host_headers
+    auth = BetterAuth.auth(
+      secret: SECRET,
+      advanced: {trusted_proxy_headers: true}
+    )
+
+    status, = auth.call(rack_env("GET", "/api/auth/ok", headers: {
+      "HTTP_X_FORWARDED_HOST" => "../../../etc/passwd",
+      "HTTP_X_FORWARDED_PROTO" => "https",
+      "HTTP_HOST" => "<script>alert('xss')</script>",
+      "SERVER_NAME" => "localhost",
+      "SERVER_PORT" => "3000"
+    }))
+
+    assert_equal 200, status
+    assert_equal "http://localhost:3000/api/auth", auth.context.base_url
+  end
+
+  private
+
+  def rack_env(method, path, headers: {})
+    {
+      "REQUEST_METHOD" => method,
+      "PATH_INFO" => path,
+      "QUERY_STRING" => "",
+      "SERVER_NAME" => "localhost",
+      "SERVER_PORT" => "3000",
+      "REMOTE_ADDR" => "127.0.0.1",
+      "rack.url_scheme" => "http",
+      "rack.input" => StringIO.new(""),
+      "CONTENT_LENGTH" => "0"
+    }.merge(headers)
   end
 end

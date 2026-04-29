@@ -97,6 +97,36 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
     assert_equal false, inactive[:active]
   end
 
+  def test_client_management_requires_owner_session_for_get_and_delete
+    auth = build_auth
+    owner_cookie = sign_up_cookie(auth, email: "oauth-owner@example.com")
+    other_cookie = sign_up_cookie(auth, email: "oauth-other@example.com")
+    client = auth.api.register_o_auth_client(
+      headers: {"cookie" => owner_cookie},
+      body: {
+        redirect_uris: ["https://resource.example/callback"],
+        token_endpoint_auth_method: "client_secret_post",
+        grant_types: ["client_credentials"],
+        response_types: [],
+        client_name: "Owned Client",
+        scope: "read"
+      }
+    )
+
+    get_error = assert_raises(BetterAuth::APIError) do
+      auth.api.get_o_auth_client(headers: {"cookie" => other_cookie}, params: {id: client[:client_id]})
+    end
+    assert_equal 404, get_error.status_code
+
+    delete_error = assert_raises(BetterAuth::APIError) do
+      auth.api.delete_o_auth_client(headers: {"cookie" => other_cookie}, body: {client_id: client[:client_id]})
+    end
+    assert_equal 404, delete_error.status_code
+
+    assert_equal "Owned Client", auth.api.get_o_auth_client(headers: {"cookie" => owner_cookie}, params: {id: client[:client_id]})[:client_name]
+    assert_equal({status: true}, auth.api.delete_o_auth_client(headers: {"cookie" => owner_cookie}, body: {client_id: client[:client_id]}))
+  end
+
   def test_authorization_code_flow_requires_and_records_consent
     auth = build_auth(consent_page: "/consent")
     cookie = sign_up_cookie(auth)
@@ -197,13 +227,14 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [BetterAuth::Plugins.oauth_provider({scopes: ["read", "write"]}.merge(options))]
     )
   end
 
-  def sign_up_cookie(auth)
+  def sign_up_cookie(auth, email: "oauth-provider@example.com")
     _status, headers, _body = auth.api.sign_up_email(
-      body: {email: "oauth-provider@example.com", password: "password123", name: "OAuth Owner"},
+      body: {email: email, password: "password123", name: "OAuth Owner"},
       as_response: true
     )
     headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")

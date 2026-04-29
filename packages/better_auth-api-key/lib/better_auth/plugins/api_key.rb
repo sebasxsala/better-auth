@@ -743,6 +743,11 @@ module BetterAuth
       storage.set("api-key:#{record["key"]}", serialized, ttl)
       storage.set("api-key:by-id:#{record["id"]}", serialized, ttl)
       user_key = "api-key:by-ref:#{reference_id}"
+      if config[:fallback_to_database]
+        storage.delete(user_key)
+        return
+      end
+
       ids = JSON.parse(storage.get(user_key).to_s)
       ids << record["id"] unless ids.include?(record["id"])
       storage.set(user_key, JSON.generate(ids))
@@ -759,6 +764,11 @@ module BetterAuth
       storage.delete("api-key:key:#{record["key"]}")
       storage.delete("api-key:id:#{record["id"]}")
       user_key = "api-key:by-ref:#{api_key_record_reference_id(record)}"
+      if config[:fallback_to_database]
+        storage.delete(user_key)
+        return
+      end
+
       ids = JSON.parse(storage.get(user_key).to_s).reject { |id| id == record["id"] }
       ids.empty? ? storage.delete(user_key) : storage.set(user_key, JSON.generate(ids))
     rescue JSON::ParserError

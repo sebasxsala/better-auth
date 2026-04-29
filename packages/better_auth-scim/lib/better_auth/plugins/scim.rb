@@ -17,6 +17,9 @@ module BetterAuth
         schema: scim_schema,
         endpoints: {
           generate_scim_token: scim_generate_token_endpoint(config),
+          list_scim_provider_connections: scim_list_provider_connections_endpoint(config),
+          get_scim_provider_connection: scim_get_provider_connection_endpoint(config),
+          delete_scim_provider_connection: scim_delete_provider_connection_endpoint(config),
           create_scim_user: scim_create_user_endpoint(config),
           update_scim_user: scim_update_user_endpoint(config),
           patch_scim_user: scim_patch_user_endpoint(config),
@@ -39,7 +42,8 @@ module BetterAuth
           fields: {
             providerId: {type: "string", required: true, unique: true},
             scimToken: {type: "string", required: true, unique: true},
-            organizationId: {type: "string", required: false}
+            organizationId: {type: "string", required: false},
+            userId: {type: "string", required: false}
           }
         },
         user: {
@@ -62,15 +66,11 @@ module BetterAuth
           raise APIError.new("BAD_REQUEST", message: "Restricting a token to an organization requires the organization plugin")
         end
 
+        required_roles = scim_required_roles(ctx, config)
         if organization_id
-          member = ctx.context.adapter.find_one(
-            model: "member",
-            where: [
-              {field: "userId", value: session.fetch(:user).fetch("id")},
-              {field: "organizationId", value: organization_id}
-            ]
-          )
+          member = scim_find_organization_member(ctx, session.fetch(:user).fetch("id"), organization_id)
           raise APIError.new("FORBIDDEN", message: "You are not a member of the organization") unless member
+          raise APIError.new("FORBIDDEN", message: "Insufficient role for this operation") unless scim_has_required_role?(member.fetch("role"), required_roles)
         end
 
         base_token = Crypto.random_string(24)
@@ -79,10 +79,52 @@ module BetterAuth
         where = [{field: "providerId", value: provider_id}]
         where << {field: "organizationId", value: organization_id} if organization_id
         existing = ctx.context.adapter.find_one(model: "scimProvider", where: where)
+        scim_assert_provider_access!(ctx, session.fetch(:user).fetch("id"), existing, required_roles) if existing
         data = {providerId: provider_id, scimToken: stored, organizationId: organization_id}
+        data[:userId] = session.fetch(:user).fetch("id") if scim_provider_ownership_enabled?(config)
         ctx.context.adapter.delete(model: "scimProvider", where: [{field: "id", value: existing.fetch("id")}]) if existing
         ctx.context.adapter.create(model: "scimProvider", data: data)
         ctx.json({scimToken: token}, status: 201)
+      end
+    end
+
+    def scim_list_provider_connections_endpoint(config)
+      Endpoint.new(path: "/scim/list-provider-connections", method: "GET") do |ctx|
+        session = Routes.current_session(ctx)
+        user_id = session.fetch(:user).fetch("id")
+        required_roles = scim_required_roles(ctx, config)
+        memberships = scim_organization_memberships(ctx, user_id)
+        providers = ctx.context.adapter.find_many(model: "scimProvider").select do |provider|
+          organization_id = provider["organizationId"]
+          if organization_id
+            roles = memberships[organization_id] || []
+            roles.any? { |role| required_roles.empty? || required_roles.include?(role) }
+          else
+            provider["userId"].to_s.empty? || provider["userId"] == user_id
+          end
+        end
+        ctx.json({providers: providers.map { |provider| scim_provider_connection(provider) }})
+      end
+    end
+
+    def scim_get_provider_connection_endpoint(config)
+      Endpoint.new(path: "/scim/get-provider-connection", method: "GET") do |ctx|
+        session = Routes.current_session(ctx)
+        query = normalize_hash(ctx.query)
+        provider = scim_find_provider_connection!(ctx, query[:provider_id])
+        scim_assert_provider_access!(ctx, session.fetch(:user).fetch("id"), provider, scim_required_roles(ctx, config))
+        ctx.json(scim_provider_connection(provider))
+      end
+    end
+
+    def scim_delete_provider_connection_endpoint(config)
+      Endpoint.new(path: "/scim/delete-provider-connection", method: "POST") do |ctx|
+        session = Routes.current_session(ctx)
+        body = normalize_hash(ctx.body)
+        provider = scim_find_provider_connection!(ctx, body[:provider_id])
+        scim_assert_provider_access!(ctx, session.fetch(:user).fetch("id"), provider, scim_required_roles(ctx, config))
+        ctx.context.adapter.delete(model: "scimProvider", where: [{field: "providerId", value: provider.fetch("providerId")}])
+        ctx.json({success: true})
       end
     end
 
@@ -250,6 +292,70 @@ module BetterAuth
         ctx.context.apply_plugin_context!(scim_provider: provider)
         nil
       end
+    end
+
+    def scim_required_roles(ctx, config)
+      configured = config[:required_role] || config[:required_roles]
+      return Array(configured).map(&:to_s) if configured
+
+      organization = ctx.context.options.plugins.find { |plugin| plugin.id == "organization" }
+      ["admin", organization&.options&.fetch(:creator_role, nil) || "owner"].uniq
+    end
+
+    def scim_has_required_role?(member_role, required_roles)
+      required_roles.empty? || member_role.to_s.split(",").map(&:strip).any? { |role| required_roles.include?(role) }
+    end
+
+    def scim_provider_ownership_enabled?(config)
+      ownership = normalize_hash(config[:provider_ownership] || {})
+      ownership[:enabled] == true || ownership[:enabled].to_s == "true"
+    end
+
+    def scim_find_organization_member(ctx, user_id, organization_id)
+      ctx.context.adapter.find_one(
+        model: "member",
+        where: [
+          {field: "userId", value: user_id},
+          {field: "organizationId", value: organization_id}
+        ]
+      )
+    end
+
+    def scim_organization_memberships(ctx, user_id)
+      return {} unless scim_has_organization_plugin?(ctx)
+
+      ctx.context.adapter.find_many(model: "member", where: [{field: "userId", value: user_id}]).each_with_object({}) do |member, result|
+        result[member.fetch("organizationId")] = member.fetch("role").to_s.split(",").map(&:strip)
+      end
+    end
+
+    def scim_assert_provider_access!(ctx, user_id, provider, required_roles)
+      return unless provider
+
+      if provider["organizationId"]
+        raise APIError.new("FORBIDDEN", message: "Organization plugin is required to access this SCIM provider") unless scim_has_organization_plugin?(ctx)
+
+        member = scim_find_organization_member(ctx, user_id, provider.fetch("organizationId"))
+        raise APIError.new("FORBIDDEN", message: "You must be a member of the organization to access this provider") unless member
+        raise APIError.new("FORBIDDEN", message: "Insufficient role for this operation") unless scim_has_required_role?(member.fetch("role"), required_roles)
+      elsif !provider["userId"].to_s.empty? && provider["userId"] != user_id
+        raise APIError.new("FORBIDDEN", message: "You must be the owner to access this provider")
+      end
+    end
+
+    def scim_find_provider_connection!(ctx, provider_id)
+      provider = ctx.context.adapter.find_one(model: "scimProvider", where: [{field: "providerId", value: provider_id.to_s}])
+      raise APIError.new("NOT_FOUND", message: "SCIM provider not found") unless provider
+
+      provider
+    end
+
+    def scim_provider_connection(provider)
+      {
+        "id" => provider.fetch("id"),
+        "providerId" => provider.fetch("providerId"),
+        "organizationId" => provider["organizationId"]
+      }
     end
 
     def scim_store_token(ctx, config, token)

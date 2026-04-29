@@ -35,6 +35,15 @@ Update the version constant in the relevant package(s):
 - Core: `packages/better_auth/lib/better_auth/version.rb`
 - Rails: `packages/better_auth-rails/lib/better_auth/rails/version.rb`
 - Sinatra: `packages/better_auth-sinatra/lib/better_auth/sinatra/version.rb`
+- Hanami: `packages/better_auth-hanami/lib/better_auth/hanami/version.rb`
+- Redis storage: `packages/better_auth-redis-storage/lib/better_auth/redis_storage/version.rb`
+- Mongo adapter: `packages/better_auth-mongo-adapter/lib/better_auth/mongo_adapter/version.rb`
+- API key: `packages/better_auth-api-key/lib/better_auth/api_key/version.rb`
+- Passkey: `packages/better_auth-passkey/lib/better_auth/passkey/version.rb`
+- OAuth provider: `packages/better_auth-oauth-provider/lib/better_auth/oauth_provider/version.rb`
+- SCIM: `packages/better_auth-scim/lib/better_auth/scim/version.rb`
+- SSO: `packages/better_auth-sso/lib/better_auth/sso/version.rb`
+- Stripe: `packages/better_auth-stripe/lib/better_auth/stripe/version.rb`
 
 ### 3. Update Changelog
 
@@ -66,7 +75,7 @@ git push origin v0.x
 
 ### 7. Publish to RubyGems
 
-GitHub Actions handles this automatically when a tag is pushed. The workflow at `.github/workflows/release.yml` builds and publishes the gem(s).
+GitHub Actions handles this automatically when a release tag is pushed. The workflow at `.github/workflows/release.yml` builds and publishes the package gem(s) that match the tag and version files.
 
 Manual publish (if needed):
 
@@ -111,5 +120,14 @@ Each gem has independent versioning:
 | `better_auth` | `packages/better_auth/lib/better_auth/version.rb` |
 | `better_auth-rails` | `packages/better_auth-rails/lib/better_auth/rails/version.rb` |
 | `better_auth-sinatra` | `packages/better_auth-sinatra/lib/better_auth/sinatra/version.rb` |
+| `better_auth-hanami` | `packages/better_auth-hanami/lib/better_auth/hanami/version.rb` |
+| `better_auth-redis-storage` | `packages/better_auth-redis-storage/lib/better_auth/redis_storage/version.rb` |
+| `better_auth-mongo-adapter` | `packages/better_auth-mongo-adapter/lib/better_auth/mongo_adapter/version.rb` |
+| `better_auth-api-key` | `packages/better_auth-api-key/lib/better_auth/api_key/version.rb` |
+| `better_auth-passkey` | `packages/better_auth-passkey/lib/better_auth/passkey/version.rb` |
+| `better_auth-oauth-provider` | `packages/better_auth-oauth-provider/lib/better_auth/oauth_provider/version.rb` |
+| `better_auth-scim` | `packages/better_auth-scim/lib/better_auth/scim/version.rb` |
+| `better_auth-sso` | `packages/better_auth-sso/lib/better_auth/sso/version.rb` |
+| `better_auth-stripe` | `packages/better_auth-stripe/lib/better_auth/stripe/version.rb` |
 
 The Rails and Sinatra adapters depend on `better_auth ~> 0.1` (pessimistic constraint). Update this when bumping major/minor versions of the core gem.

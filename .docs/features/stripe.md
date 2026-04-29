@@ -12,7 +12,7 @@ Adds `BetterAuth::Plugins.stripe` with injected Stripe client support, customer 
 
 - Implemented inside the core gem as a plugin with no required Stripe gem dependency.
 - Uses an injected `stripe_client` object so apps can provide the official Stripe SDK, a wrapper, or a fake in tests.
-- Adds `user.stripeCustomerId`; adds `subscription` when subscription mode is enabled; adds `organization.stripeCustomerId` when organization mode is configured.
+- Adds `user.stripeCustomerId`; adds `subscription` when subscription mode is enabled, including `stripeScheduleId`; adds `organization.stripeCustomerId` when organization mode is configured.
 - Adds `/subscription/upgrade`, `/subscription/cancel`, `/subscription/cancel/callback`, `/subscription/restore`, `/subscription/list`, `/subscription/success`, `/subscription/billing-portal`, and `/stripe/webhook`.
 - Preserves upstream route JSON keys while accepting Ruby-style snake_case options.
 - Supports public metadata helpers, custom customer-create params, user and organization customer-create callbacks, checkout session params/options, lookup-key price resolution with upstream error handling, trial-start callbacks, synchronous webhook construction, and async-style injected webhook clients when provided by the application wrapper.
@@ -28,7 +28,7 @@ Adds `BetterAuth::Plugins.stripe` with injected Stripe client support, customer 
 
 - Checkout creation, billing portal creation, subscription list/cancel/cancel callback/restore/success routes.
 - Reference authorization for user and organization subscriptions, including cross-reference rejection.
-- Plan lookup, annual price IDs, lookup-key resolution failures, seat quantity changes, duplicate active subscription rejection, one-trial-per-reference protection across plans, and `free_trial.on_trial_start` callbacks.
+- Plan lookup, annual price IDs, lookup-key resolution failures, seat quantity changes, organization `seatPriceId` billing with separate base/seat line items, duplicate active subscription rejection, `scheduleAtPeriodEnd` subscription schedules, one-trial-per-reference protection across plans, and `free_trial.on_trial_start` callbacks.
 - Customer de-duplication by Stripe search, custom customer-create params, user and organization `on_customer_create` callbacks, user email sync, organization customer creation, organization name sync, and active-subscription deletion guard.
 - Public customer/subscription metadata helpers that protect internal fields while preserving custom metadata keys.
 - Checkout customization through `get_checkout_session_params`, including additional session params, request options, custom metadata, lookup-key resolved prices, and rejection when no price ID can be resolved.

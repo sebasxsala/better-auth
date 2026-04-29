@@ -160,6 +160,7 @@ class BetterAuthPluginsOAuthProxyTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       social_providers: {
         google: {
           create_authorization_url: ->(data) { "https://accounts.google.com/o/oauth2/v2/auth?state=#{Rack::Utils.escape(data[:state])}" },

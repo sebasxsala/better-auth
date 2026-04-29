@@ -488,6 +488,7 @@ class BetterAuthPluginsStripeTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.stripe(plugin_options)
       ]
@@ -547,13 +548,14 @@ class BetterAuthPluginsStripeTest < Minitest::Test
   end
 
   class FakeStripeClient
-    attr_reader :customers, :checkout, :billing_portal, :subscriptions, :webhooks, :prices
+    attr_reader :customers, :checkout, :billing_portal, :subscriptions, :subscription_schedules, :webhooks, :prices
 
     def initialize
       @customers = Customers.new
       @checkout = Checkout.new
       @billing_portal = BillingPortal.new
       @subscriptions = Subscriptions.new
+      @subscription_schedules = SubscriptionSchedules.new
       @webhooks = Webhooks.new
       @prices = Prices.new
     end
@@ -665,6 +667,35 @@ class BetterAuthPluginsStripeTest < Minitest::Test
           params[:customer].nil? || (subscription[:customer] || subscription["customer"]) == params[:customer]
         end
         {"data" => data}
+      end
+    end
+
+    class SubscriptionSchedules
+      attr_reader :created, :updated, :released
+
+      def initialize
+        @created = []
+        @updated = []
+        @released = []
+      end
+
+      def create(params)
+        created << params
+        {"id" => "sched_1", "phases" => [{"items" => [{"price" => "price_team", "quantity" => 1}], "start_date" => 1_700_000_000, "end_date" => 1_700_086_400}]}
+      end
+
+      def update(id, params)
+        updated << {id: id, params: params}
+        {"id" => id}.merge(params)
+      end
+
+      def list(**_params)
+        {"data" => []}
+      end
+
+      def release(id)
+        released << id
+        {"id" => id, "status" => "released"}
       end
     end
 

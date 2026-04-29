@@ -134,6 +134,7 @@ module BetterAuth
             cancelAt: {type: "date", required: false},
             canceledAt: {type: "date", required: false},
             endedAt: {type: "date", required: false},
+            stripeScheduleId: {type: "string", required: false},
             seats: {type: "number", required: false},
             limits: {type: "json", required: false}
           }
@@ -264,11 +265,14 @@ module BetterAuth
 
         price_id = stripe_price_id(config, plan, body[:annual])
         raise APIError.new("BAD_REQUEST", message: "Price ID not found for the selected plan") if price_id.to_s.empty?
+        auto_managed_seats = customer_type == "organization" && !plan[:seat_price_id].to_s.empty?
+        member_count = auto_managed_seats ? stripe_member_count(ctx, reference_id) : nil
+        seats = auto_managed_seats ? member_count : (body[:seats] || 1)
 
-        active_stripe_item = stripe_subscription_item(active_stripe || {})
+        active_stripe_item = stripe_subscription_plan_item(config, active_stripe || {})
         stripe_price_id_value = stripe_fetch(stripe_fetch(active_stripe_item || {}, "price") || {}, "id")
         same_plan = active_or_trialing && active_or_trialing["plan"].to_s.downcase == body[:plan].to_s.downcase
-        same_seats = active_or_trialing && active_or_trialing["seats"].to_i == (body[:seats] || 1).to_i
+        same_seats = auto_managed_seats || (active_or_trialing && active_or_trialing["seats"].to_i == seats.to_i)
         same_price = !active_stripe || stripe_price_id_value == price_id
         valid_period = !active_or_trialing || !active_or_trialing["periodEnd"] || active_or_trialing["periodEnd"] > Time.now
         if active_or_trialing&.fetch("status", nil) == "active" && same_plan && same_seats && same_price && valid_period
@@ -276,6 +280,49 @@ module BetterAuth
         end
 
         if active_stripe
+          if body[:schedule_at_period_end]
+            schedules = stripe_client(config).subscription_schedules
+            schedule = schedules.create(from_subscription: stripe_fetch(active_stripe, "id"))
+            phase = Array(stripe_fetch(schedule, "phases")).first
+            raise APIError.new("BAD_REQUEST", message: "Subscription schedule has no phases") unless phase
+
+            current_items = Array(stripe_fetch(phase, "items")).map do |item|
+              price = stripe_fetch(item, "price")
+              price_id_value = if price.respond_to?(:[]) && !price.is_a?(String)
+                stripe_fetch(price, "id")
+              else
+                price
+              end
+              {price: price_id_value, quantity: stripe_fetch(item, "quantity")}.compact
+            end
+            next_items = current_items.map do |item|
+              if item[:price] == stripe_price_id_value
+                {price: price_id, quantity: auto_managed_seats ? 1 : seats}
+              else
+                item
+              end
+            end
+            if auto_managed_seats && plan[:seat_price_id] != price_id
+              existing_seat = next_items.find { |item| item[:price] == plan[:seat_price_id] }
+              if existing_seat
+                existing_seat[:quantity] = member_count
+              else
+                next_items << {price: plan[:seat_price_id], quantity: member_count}
+              end
+            end
+            schedules.update(
+              stripe_fetch(schedule, "id"),
+              metadata: {source: "@better-auth/stripe"},
+              end_behavior: "release",
+              phases: [
+                {items: current_items, start_date: stripe_fetch(phase, "start_date"), end_date: stripe_fetch(phase, "end_date")},
+                {items: next_items, start_date: stripe_fetch(phase, "end_date"), proration_behavior: "none"}
+              ]
+            )
+            ctx.context.adapter.update(model: "subscription", where: [{field: "id", value: (active_or_trialing || subscription_to_update).fetch("id")}], update: {stripeScheduleId: stripe_fetch(schedule, "id")}) if active_or_trialing || subscription_to_update
+            next ctx.json({url: stripe_url(ctx, body[:return_url] || "/"), redirect: stripe_redirect?(body)})
+          end
+
           portal = stripe_client(config).billing_portal.sessions.create(
             customer: customer_id,
             return_url: stripe_url(ctx, body[:return_url] || "/"),
@@ -294,12 +341,12 @@ module BetterAuth
         incomplete = subscriptions.find { |entry| entry["status"] == "incomplete" }
         subscription = active_or_trialing || incomplete
         if subscription
-          update = {plan: plan[:name].to_s.downcase, seats: body[:seats] || 1}
+          update = {plan: plan[:name].to_s.downcase, seats: seats}
           subscription = ctx.context.adapter.update(model: "subscription", where: [{field: "id", value: subscription.fetch("id")}], update: update) || subscription.merge(update.transform_keys { |key| Schema.storage_key(key) })
         else
           subscription = ctx.context.adapter.create(
             model: "subscription",
-            data: {plan: plan[:name].to_s.downcase, referenceId: reference_id, stripeCustomerId: customer_id, status: "incomplete", seats: body[:seats] || 1, limits: plan[:limits]}
+            data: {plan: plan[:name].to_s.downcase, referenceId: reference_id, stripeCustomerId: customer_id, status: "incomplete", seats: seats, limits: plan[:limits]}
           )
         end
 
@@ -325,7 +372,7 @@ module BetterAuth
           locale: body[:locale],
           success_url: stripe_url(ctx, "#{ctx.context.base_url}/subscription/success?callbackURL=#{Rack::Utils.escape(body[:success_url] || "/")}&subscriptionId=#{Rack::Utils.escape(subscription.fetch("id"))}"),
           cancel_url: stripe_url(ctx, body[:cancel_url] || "/"),
-          line_items: [{price: price_id, quantity: body[:seats] || 1}],
+          line_items: stripe_checkout_line_items(plan, price_id, seats, auto_managed_seats),
           subscription_data: free_trial.merge(metadata: subscription_metadata),
           mode: "subscription",
           client_reference_id: reference_id,
@@ -483,7 +530,7 @@ module BetterAuth
 
         stripe_subscription = stripe_active_subscriptions(config || {}, customer_id).first
         if stripe_subscription
-          item = stripe_subscription_item(stripe_subscription)
+          item = stripe_subscription_plan_item(config || {}, stripe_subscription)
           plan = item && stripe_plan_by_price_info(config || {}, stripe_fetch(stripe_fetch(item, "price") || {}, "id"), stripe_fetch(stripe_fetch(item, "price") || {}, "lookup_key"))
           if item && plan
             ctx.context.adapter.update(
@@ -491,7 +538,7 @@ module BetterAuth
               where: [{field: "id", value: subscription.fetch("id")}],
               update: stripe_subscription_state(stripe_subscription, include_status: true).merge(
                 plan: plan[:name].to_s.downcase,
-                seats: stripe_fetch(item, "quantity") || 1,
+                seats: stripe_subscription_quantity(stripe_subscription, item, plan),
                 stripeSubscriptionId: stripe_fetch(stripe_subscription, "id")
               )
             )
@@ -551,7 +598,7 @@ module BetterAuth
       return if object[:mode] == "setup" || !config.dig(:subscription, :enabled)
 
       stripe_subscription = stripe_client(config).subscriptions.retrieve(object[:subscription])
-      item = stripe_subscription_item(stripe_subscription)
+      item = stripe_subscription_plan_item(config, stripe_subscription)
       return unless item
 
       plan = stripe_plan_by_price_info(config, stripe_fetch(stripe_fetch(item, "price") || {}, "id"), stripe_fetch(stripe_fetch(item, "price") || {}, "lookup_key"))
@@ -563,7 +610,7 @@ module BetterAuth
       update = stripe_subscription_state(stripe_subscription, include_status: true).merge(
         plan: plan[:name].to_s.downcase,
         stripeSubscriptionId: object[:subscription],
-        seats: stripe_fetch(item, "quantity"),
+        seats: stripe_subscription_quantity(stripe_subscription, item, plan),
         trialStart: stripe_time(stripe_fetch(stripe_subscription, "trial_start")),
         trialEnd: stripe_time(stripe_fetch(stripe_subscription, "trial_end"))
       ).compact
@@ -588,7 +635,7 @@ module BetterAuth
 
       reference = stripe_reference_by_customer(ctx, config, customer_id) || ((metadata[:reference_id] && metadata[:plan]) ? {reference_id: metadata[:reference_id], customer_type: metadata[:customer_type] || "user"} : nil)
       return unless reference
-      item = stripe_subscription_item(object)
+      item = stripe_subscription_plan_item(config, object)
       return unless item
       plan = stripe_plan_by_price_info(config, stripe_fetch(stripe_fetch(item, "price") || {}, "id"), stripe_fetch(stripe_fetch(item, "price") || {}, "lookup_key")) || (metadata[:plan] && stripe_plan_by_name(config, metadata[:plan]))
       return unless plan
@@ -600,7 +647,7 @@ module BetterAuth
           stripeCustomerId: customer_id,
           stripeSubscriptionId: object[:id],
           plan: plan[:name].to_s.downcase,
-          seats: stripe_fetch(item, "quantity"),
+          seats: stripe_subscription_quantity(object, item, plan),
           limits: plan[:limits]
         ).compact
       )
@@ -610,7 +657,7 @@ module BetterAuth
     def stripe_on_subscription_updated(ctx, event)
       config = ctx.context.options.plugins.find { |plugin| plugin.id == "stripe" }&.options || {}
       object = normalize_hash(event.dig(:data, :object) || {})
-      item = stripe_subscription_item(object)
+      item = stripe_subscription_plan_item(config, object)
       return unless item
 
       metadata = normalize_hash(object[:metadata] || {})
@@ -633,7 +680,7 @@ module BetterAuth
       was_pending = stripe_pending_cancel?(subscription)
       update = stripe_subscription_state(object, include_status: true).merge(
         stripeSubscriptionId: object[:id],
-        seats: stripe_fetch(item, "quantity")
+        seats: stripe_subscription_quantity(object, item, plan)
       )
       update[:plan] = plan[:name].to_s.downcase if plan
       update[:limits] = plan[:limits] if plan&.key?(:limits)
@@ -830,6 +877,37 @@ module BetterAuth
 
     def stripe_subscription_item(subscription)
       Array(stripe_fetch(stripe_fetch(subscription, "items") || {}, "data")).first
+    end
+
+    def stripe_subscription_plan_item(config, subscription)
+      items = Array(stripe_fetch(stripe_fetch(subscription, "items") || {}, "data"))
+      items.find do |item|
+        price = stripe_fetch(item, "price") || {}
+        stripe_plan_by_price_info(config, stripe_fetch(price, "id"), stripe_fetch(price, "lookup_key"))
+      end || items.first
+    end
+
+    def stripe_subscription_quantity(subscription, plan_item, plan)
+      if plan && plan[:seat_price_id]
+        seat_item = Array(stripe_fetch(stripe_fetch(subscription, "items") || {}, "data")).find do |item|
+          stripe_fetch(stripe_fetch(item, "price") || {}, "id") == plan[:seat_price_id]
+        end
+        return stripe_fetch(seat_item, "quantity") || 1 if seat_item
+      end
+
+      stripe_fetch(plan_item, "quantity") || 1
+    end
+
+    def stripe_checkout_line_items(plan, price_id, seats, auto_managed_seats)
+      items = [{price: price_id, quantity: auto_managed_seats ? 1 : seats}]
+      if auto_managed_seats && plan[:seat_price_id] && plan[:seat_price_id] != price_id
+        items << {price: plan[:seat_price_id], quantity: seats}
+      end
+      items
+    end
+
+    def stripe_member_count(ctx, organization_id)
+      ctx.context.adapter.find_many(model: "member", where: [{field: "organizationId", value: organization_id}]).length
     end
 
     def stripe_subscription_state(subscription, include_status: true)

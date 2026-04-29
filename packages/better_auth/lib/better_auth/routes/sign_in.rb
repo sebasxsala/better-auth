@@ -17,7 +17,7 @@ module BetterAuth
       ) do |ctx|
         options = ctx.context.options
         email_config = options.email_and_password
-        if email_config[:enabled] == false
+        if email_config[:enabled] != true
           raise APIError.new("BAD_REQUEST", message: "Email and password is not enabled")
         end
 

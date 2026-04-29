@@ -32,4 +32,14 @@ BetterAuth.auth(
 )
 ```
 
+## SAML Single Logout
+
+SAML SLO follows upstream route shapes when `saml.enableSingleLogout` is enabled:
+
+- `POST /sso/saml2/logout/:providerId` starts SP-initiated logout for the current session.
+- `GET|POST /sso/saml2/sp/slo/:providerId` handles IdP LogoutRequest and LogoutResponse payloads.
+- ACS stores SAML `NameID` and `SessionIndex` lookup records so IdP-initiated logout can revoke the matching Better Auth session.
+
+Ruby keeps the lightweight JSON/base64 fallback used by the local SAML test adapter, and real XML deployments should configure `BetterAuth::SSO::SAML.sso_options` or compatible SAML hooks.
+
 SCIM is a separate provisioning feature and lives in `better_auth-scim`.

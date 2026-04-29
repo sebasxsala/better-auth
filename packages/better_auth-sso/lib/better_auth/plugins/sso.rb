@@ -17,8 +17,19 @@ module BetterAuth
     SSO_ERROR_CODES = {
       "PROVIDER_NOT_FOUND" => "No provider found",
       "INVALID_STATE" => "Invalid state",
-      "SAML_RESPONSE_REPLAYED" => "SAML response has already been used"
+      "SAML_RESPONSE_REPLAYED" => "SAML response has already been used",
+      "SINGLE_LOGOUT_NOT_ENABLED" => "Single logout is not enabled",
+      "INVALID_LOGOUT_REQUEST" => "Invalid LogoutRequest",
+      "INVALID_LOGOUT_RESPONSE" => "Invalid LogoutResponse",
+      "LOGOUT_FAILED_AT_IDP" => "Logout failed at IdP",
+      "IDP_SLO_NOT_SUPPORTED" => "IdP does not support Single Logout"
     }.freeze
+
+    SSO_SAML_SESSION_KEY_PREFIX = "saml-session:"
+    SSO_SAML_SESSION_BY_ID_PREFIX = "saml-session-by-id:"
+    SSO_SAML_LOGOUT_REQUEST_KEY_PREFIX = "saml-logout-request:"
+    SSO_SAML_LOGOUT_STATUS_SUCCESS = "success"
+    SSO_SAML_LOGOUT_REQUEST_TTL = 300
 
     SSO_SAML_SIGNATURE_ALGORITHMS = {
       "rsa-sha1" => "http://www.w3.org/2000/09/xmldsig#rsa-sha1",
@@ -60,7 +71,7 @@ module BetterAuth
       config = normalize_hash(options)
       Plugin.new(
         id: "sso",
-        init: ->(_ctx) { {options: {advanced: {disable_origin_check: ["/sso/saml2/callback", "/sso/saml2/sp/acs"]}}} },
+        init: ->(_ctx) { {options: {advanced: {disable_origin_check: ["/sso/saml2/callback", "/sso/saml2/sp/acs", "/sso/saml2/sp/slo"]}}} },
         schema: sso_schema(config),
         endpoints: {
           sp_metadata: sso_sp_metadata_endpoint,
@@ -69,6 +80,8 @@ module BetterAuth
           callback_sso: sso_oidc_callback_endpoint,
           callback_sso_saml: sso_saml_callback_endpoint(config),
           acs_endpoint: sso_saml_acs_endpoint(config),
+          slo_endpoint: sso_saml_slo_endpoint(config),
+          initiate_slo: sso_saml_initiate_slo_endpoint(config),
           list_sso_providers: sso_list_providers_endpoint,
           get_sso_provider: sso_get_provider_endpoint,
           update_sso_provider: sso_update_provider_endpoint,
@@ -299,13 +312,111 @@ module BetterAuth
     def sso_sp_metadata_endpoint
       Endpoint.new(path: "/sso/saml2/sp/metadata", method: "GET") do |ctx|
         provider = sso_find_provider!(ctx, sso_fetch(ctx.query, :provider_id))
-        metadata = "<EntityDescriptor entityID=\"#{ctx.context.base_url}/sso/saml2/sp/metadata\"><SPSSODescriptor /></EntityDescriptor>"
+        provider_id = provider.fetch("providerId")
+        slo_service = if sso_single_logout_enabled?(ctx.context.options.plugins.find { |plugin| plugin.id == "sso" }&.options || {})
+          "<SingleLogoutService Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\" Location=\"#{ctx.context.base_url}/sso/saml2/sp/slo/#{URI.encode_www_form_component(provider_id)}\" />"
+        end
+        metadata = "<EntityDescriptor entityID=\"#{ctx.context.base_url}/sso/saml2/sp/metadata\"><SPSSODescriptor>#{slo_service}</SPSSODescriptor></EntityDescriptor>"
         if (ctx.query[:format] || ctx.query["format"]) == "json"
-          ctx.json({providerId: provider.fetch("providerId"), metadata: metadata})
+          ctx.json({providerId: provider_id, metadata: metadata})
         else
           ctx.set_header("content-type", "application/samlmetadata+xml")
           ctx.json(metadata)
         end
+      end
+    end
+
+    def sso_saml_slo_endpoint(config)
+      Endpoint.new(path: "/sso/saml2/sp/slo/:providerId", method: ["GET", "POST"], metadata: {allowed_media_types: ["application/json", "application/x-www-form-urlencoded"]}) do |ctx|
+        raise APIError.new("BAD_REQUEST", message: SSO_ERROR_CODES.fetch("SINGLE_LOGOUT_NOT_ENABLED")) unless sso_single_logout_enabled?(config)
+
+        provider = sso_find_provider!(ctx, sso_fetch(ctx.params, :provider_id))
+        saml_request = sso_saml_param(ctx.body, "SAMLRequest") || sso_saml_param(ctx.query, "SAMLRequest")
+        saml_response = sso_saml_param(ctx.body, "SAMLResponse") || sso_saml_param(ctx.query, "SAMLResponse")
+        relay_state = sso_saml_param(ctx.body, "RelayState") || sso_saml_param(ctx.query, "RelayState")
+        unless saml_request || saml_response
+          fallback = "#{ctx.context.base_url}/sso/saml2/sp/slo/#{provider.fetch("providerId")}"
+          next sso_redirect(ctx, "#{sso_safe_redirect(ctx, relay_state, fallback: fallback)}?error=invalid_request&error_description=missing_logout_data")
+        end
+
+        if saml_response
+          assertion = sso_parse_saml_logout_response(saml_response, config, provider, ctx)
+          status = sso_fetch(assertion, :status_code) || sso_fetch(assertion, :status)
+          if status && status.to_s != SSO_SAML_LOGOUT_STATUS_SUCCESS
+            raise APIError.new("BAD_REQUEST", message: SSO_ERROR_CODES.fetch("LOGOUT_FAILED_AT_IDP"))
+          end
+          in_response_to = sso_fetch(assertion, :in_response_to)
+          ctx.context.internal_adapter.delete_verification_by_identifier("#{SSO_SAML_LOGOUT_REQUEST_KEY_PREFIX}#{in_response_to}") if in_response_to
+          Cookies.delete_session_cookie(ctx)
+          next sso_redirect(ctx, sso_safe_redirect(ctx, relay_state, fallback: ctx.context.base_url))
+        end
+
+        request = sso_parse_saml_logout_request(saml_request, config, provider, ctx)
+        name_id = sso_fetch(request, :name_id)
+        raise APIError.new("BAD_REQUEST", message: SSO_ERROR_CODES.fetch("INVALID_LOGOUT_REQUEST")) if name_id.to_s.empty?
+
+        session_index = sso_fetch(request, :session_index)
+        saml_session_key = "#{SSO_SAML_SESSION_KEY_PREFIX}#{provider.fetch("providerId")}:#{name_id}"
+        stored = ctx.context.internal_adapter.find_verification_value(saml_session_key)
+        if stored
+          data = sso_parse_json(stored.fetch("value"))
+          if data && (session_index.to_s.empty? || sso_fetch(data, :session_index).to_s.empty? || session_index.to_s == sso_fetch(data, :session_index).to_s)
+            session_id = sso_fetch(data, :session_id)
+            ctx.context.internal_adapter.delete_session(session_id) unless session_id.to_s.empty?
+            ctx.context.internal_adapter.delete_verification_by_identifier("#{SSO_SAML_SESSION_BY_ID_PREFIX}#{session_id}") unless session_id.to_s.empty?
+          end
+          ctx.context.internal_adapter.delete_verification_by_identifier(saml_session_key)
+        end
+
+        current = begin
+          Routes.current_session(ctx, allow_nil: true)
+        rescue APIError
+          nil
+        end
+        ctx.context.internal_adapter.delete_session(current[:session]["token"]) if current && current[:session]
+        Cookies.delete_session_cookie(ctx)
+        request_id = sso_fetch(request, :id)
+        sso_redirect(ctx, sso_saml_logout_response_url(provider, request_id, relay_state, ctx, config))
+      end
+    end
+
+    def sso_saml_initiate_slo_endpoint(config)
+      Endpoint.new(path: "/sso/saml2/logout/:providerId", method: "POST") do |ctx|
+        raise APIError.new("BAD_REQUEST", message: SSO_ERROR_CODES.fetch("SINGLE_LOGOUT_NOT_ENABLED")) unless sso_single_logout_enabled?(config)
+
+        session = Routes.current_session(ctx)
+        provider = sso_find_provider!(ctx, sso_fetch(ctx.params, :provider_id))
+        raise APIError.new("BAD_REQUEST", message: SSO_ERROR_CODES.fetch("IDP_SLO_NOT_SUPPORTED")) unless sso_idp_slo_url(provider)
+
+        body = normalize_hash(ctx.body)
+        callback_url = sso_safe_redirect(ctx, body[:callback_url] || ctx.context.base_url, fallback: ctx.context.base_url)
+        session_token = session.fetch(:session).fetch("token")
+        session_lookup_key = "#{SSO_SAML_SESSION_BY_ID_PREFIX}#{session_token}"
+        session_lookup = ctx.context.internal_adapter.find_verification_value(session_lookup_key)
+        saml_session_key = session_lookup&.fetch("value", nil)
+        name_id = session.fetch(:user).fetch("email")
+        session_index = nil
+        if saml_session_key
+          stored = ctx.context.internal_adapter.find_verification_value(saml_session_key)
+          data = stored && sso_parse_json(stored.fetch("value"))
+          if data
+            name_id = sso_fetch(data, :name_id) || name_id
+            session_index = sso_fetch(data, :session_index)
+          end
+        end
+
+        request_id = "_#{SecureRandom.hex(16)}"
+        url = sso_saml_logout_request_url(provider, request_id, name_id, session_index, callback_url, ctx, config)
+        ctx.context.internal_adapter.create_verification_value(
+          identifier: "#{SSO_SAML_LOGOUT_REQUEST_KEY_PREFIX}#{request_id}",
+          value: provider.fetch("providerId"),
+          expiresAt: Time.now + (sso_fetch(config[:saml] || {}, :logout_request_ttl) || SSO_SAML_LOGOUT_REQUEST_TTL).to_i
+        )
+        ctx.context.internal_adapter.delete_verification_by_identifier(saml_session_key) if saml_session_key
+        ctx.context.internal_adapter.delete_verification_by_identifier(session_lookup_key)
+        ctx.context.internal_adapter.delete_session(session_token)
+        Cookies.delete_session_cookie(ctx)
+        sso_redirect(ctx, url)
       end
     end
 
@@ -350,6 +461,7 @@ module BetterAuth
       user = sso_find_or_create_user(ctx, provider, assertion, config)
       session = ctx.context.internal_adapter.create_session(user.fetch("id"))
       Cookies.set_session_cookie(ctx, {session: session, user: user})
+      sso_store_saml_session(ctx, provider, assertion, session, config)
       callback_url = state["callbackURL"] || "/"
       callback_url = "/" unless ctx.context.trusted_origin?(callback_url, allow_relative_paths: true)
       sso_redirect(ctx, callback_url)
@@ -406,9 +518,113 @@ module BetterAuth
         return normalize_hash(parsed)
       end
 
-      JSON.parse(Base64.decode64(value.to_s), symbolize_names: true)
+      normalize_hash(JSON.parse(Base64.decode64(value.to_s)))
     rescue
       raise APIError.new("BAD_REQUEST", message: "Invalid SAML response")
+    end
+
+    def sso_store_saml_session(ctx, provider, assertion, session, config)
+      return unless sso_single_logout_enabled?(config)
+
+      name_id = sso_fetch(assertion, :name_id)
+      return if name_id.to_s.empty?
+
+      session_token = session.fetch("token")
+      saml_session_key = "#{SSO_SAML_SESSION_KEY_PREFIX}#{provider.fetch("providerId")}:#{name_id}"
+      data = {
+        sessionId: session_token,
+        providerId: provider.fetch("providerId"),
+        nameID: name_id,
+        sessionIndex: sso_fetch(assertion, :session_index)
+      }.compact
+      ctx.context.internal_adapter.delete_verification_by_identifier(saml_session_key)
+      ctx.context.internal_adapter.create_verification_value(identifier: saml_session_key, value: JSON.generate(data), expiresAt: session.fetch("expiresAt"))
+      ctx.context.internal_adapter.delete_verification_by_identifier("#{SSO_SAML_SESSION_BY_ID_PREFIX}#{session_token}")
+      ctx.context.internal_adapter.create_verification_value(identifier: "#{SSO_SAML_SESSION_BY_ID_PREFIX}#{session_token}", value: saml_session_key, expiresAt: session.fetch("expiresAt"))
+    rescue
+      nil
+    end
+
+    def sso_parse_saml_logout_request(value, config = {}, provider = nil, ctx = nil)
+      parser = config.dig(:saml, :parse_logout_request)
+      parsed = if parser.respond_to?(:call)
+        parser.call(raw_request: value.to_s, provider: provider, context: ctx)
+      else
+        JSON.parse(Base64.decode64(value.to_s))
+      end
+      normalize_hash(parsed)
+    rescue
+      raise APIError.new("BAD_REQUEST", message: SSO_ERROR_CODES.fetch("INVALID_LOGOUT_REQUEST"))
+    end
+
+    def sso_parse_saml_logout_response(value, config = {}, provider = nil, ctx = nil)
+      parser = config.dig(:saml, :parse_logout_response)
+      parsed = if parser.respond_to?(:call)
+        parser.call(raw_response: value.to_s, provider: provider, context: ctx)
+      else
+        JSON.parse(Base64.decode64(value.to_s))
+      end
+      normalize_hash(parsed)
+    rescue
+      raise APIError.new("BAD_REQUEST", message: SSO_ERROR_CODES.fetch("INVALID_LOGOUT_RESPONSE"))
+    end
+
+    def sso_saml_logout_request_url(provider, request_id, name_id, session_index, relay_state, ctx, config = {})
+      generator = config.dig(:saml, :logout_request_url)
+      if generator.respond_to?(:call)
+        return generator.call(provider: provider, request_id: request_id, name_id: name_id, session_index: session_index, relay_state: relay_state, context: ctx)
+      end
+
+      query = {
+        SAMLRequest: Base64.strict_encode64(JSON.generate({id: request_id, nameID: name_id, sessionIndex: session_index}.compact)),
+        RelayState: relay_state
+      }
+      "#{sso_idp_slo_url(provider)}?#{URI.encode_www_form(query)}"
+    end
+
+    def sso_saml_logout_response_url(provider, request_id, relay_state, ctx, config = {})
+      generator = config.dig(:saml, :logout_response_url)
+      if generator.respond_to?(:call)
+        return generator.call(provider: provider, request_id: request_id, relay_state: relay_state, context: ctx)
+      end
+
+      query = {
+        SAMLResponse: Base64.strict_encode64(JSON.generate({inResponseTo: request_id, status: SSO_SAML_LOGOUT_STATUS_SUCCESS}.compact)),
+        RelayState: relay_state
+      }
+      "#{sso_idp_slo_url(provider) || normalize_hash(provider["samlConfig"] || {})[:entry_point]}?#{URI.encode_www_form(query)}"
+    end
+
+    def sso_single_logout_enabled?(config)
+      saml = normalize_hash(config[:saml] || {})
+      value = sso_fetch(saml, :enable_single_logout)
+      value == true || value.to_s == "true"
+    end
+
+    def sso_idp_slo_url(provider)
+      saml_config = normalize_hash(provider["samlConfig"] || {})
+      metadata = normalize_hash(saml_config[:idp_metadata] || {})
+      service = Array(metadata[:single_logout_service]).first
+      service = normalize_hash(service || {})
+      service[:location] || (metadata[:metadata].to_s.include?("SingleLogoutService") && saml_config[:entry_point])
+    end
+
+    def sso_safe_redirect(ctx, url, fallback:)
+      value = url.to_s
+      return fallback if value.empty?
+      return value if ctx.context.trusted_origin?(value, allow_relative_paths: true)
+
+      fallback
+    end
+
+    def sso_parse_json(value)
+      normalize_hash(JSON.parse(value.to_s))
+    rescue
+      nil
+    end
+
+    def sso_saml_param(data, key)
+      data[key] || data[key.to_sym] || data[key.downcase] || data[key.downcase.to_sym] || sso_fetch(data, key.gsub(/([a-z])([A-Z])/, "\\1_\\2").downcase.to_sym)
     end
 
     def sso_validate_single_saml_assertion!(saml_response)

@@ -54,6 +54,7 @@ class BetterAuthPluginsDeviceAuthorizationTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.device_authorization(
           verification_uri: "/activate",
@@ -96,6 +97,7 @@ class BetterAuthPluginsDeviceAuthorizationTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.device_authorization(
           validate_client: ->(client_id) { %w[valid-client valid-client-2].include?(client_id) }
@@ -164,6 +166,7 @@ class BetterAuthPluginsDeviceAuthorizationTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.device_authorization(generate_device_code: -> { "device-code-forbidden" }, generate_user_code: -> { "DENYCODE" })
       ]
@@ -187,6 +190,7 @@ class BetterAuthPluginsDeviceAuthorizationTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.device_authorization(generate_device_code: -> { "device-code-hook" }, generate_user_code: -> { "HOOKCODE" }),
         BetterAuth::Plugins.one_time_token(set_ott_header_on_new_session: true)
@@ -293,6 +297,7 @@ class BetterAuthPluginsDeviceAuthorizationTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.device_authorization(
           interval: "5s",

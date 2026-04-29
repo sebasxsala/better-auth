@@ -157,7 +157,7 @@ export const authClient = createAuthClient({
 Add to your Gemfile:
 
 ```ruby
-gem 'better_auth', require: 'better_auth/rails'
+gem "better_auth-rails"
 ```
 
 Then in your ApplicationController:
@@ -172,7 +172,7 @@ Now you have access to `current_user` and authentication methods:
 
 ```ruby
 class PostsController < ApplicationController
-  before_action :authenticate_user!
+  before_action :require_authentication
 
   def index
     @posts = current_user.posts
