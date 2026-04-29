@@ -43,6 +43,16 @@ class BetterAuthMemoryAdapterTest < Minitest::Test
     assert_equal 3, @adapter.count(model: "user", where: [{field: "email", operator: "contains", value: "@example.com"}])
   end
 
+  def test_find_many_preserves_false_where_values
+    verified = @adapter.create(model: "user", data: {id: "user-true", name: "Verified", email: "verified@example.com"}, force_allow_id: true)
+    unverified = @adapter.create(model: "user", data: {id: "user-false", name: "Unverified", email: "unverified@example.com"}, force_allow_id: true)
+    @adapter.update(model: "user", where: [{field: "id", value: verified.fetch("id")}], update: {emailVerified: true})
+
+    matches = @adapter.find_many(model: "user", where: [{"field" => "emailVerified", "value" => false}])
+
+    assert_equal [unverified.fetch("id")], matches.map { |user| user.fetch("id") }
+  end
+
   def test_update_delete_many_and_transaction_rollback
     user = @adapter.create(model: "user", data: {name: "Ada", email: "ada@example.com"})
 

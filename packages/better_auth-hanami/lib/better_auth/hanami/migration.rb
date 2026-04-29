@@ -66,7 +66,7 @@ module BetterAuth
         case attributes[:type]
         when "boolean" then "TrueClass"
         when "date" then "DateTime"
-        when "number" then "Integer"
+        when "number" then attributes[:bigint] ? ":Bignum" : "Integer"
         else "String"
         end
       end

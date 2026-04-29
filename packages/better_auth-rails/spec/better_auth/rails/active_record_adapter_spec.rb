@@ -6,12 +6,15 @@ class BetterAuthRailsFakeRelation
   include Enumerable
 
   attr_reader :records
+  attr_reader :where_calls
 
-  def initialize(records)
+  def initialize(records, where_calls = [])
     @records = records
+    @where_calls = where_calls
   end
 
-  def where(*)
+  def where(*args)
+    where_calls << args
     self
   end
 
@@ -116,6 +119,15 @@ RSpec.describe BetterAuth::Rails::ActiveRecordAdapter do
 
     expect(created.attributes).to include("email_verified" => false)
     expect(user).to include("id" => "user-1", "email" => "ada@example.com", "emailVerified" => false)
+  end
+
+  it "preserves false where values for boolean predicates" do
+    relation = BetterAuthRailsFakeRelation.new([])
+    adapter.send(:model_class, "user").relation = relation
+
+    adapter.find_many(model: "user", where: [{"field" => "emailVerified", "value" => false}])
+
+    expect(relation.where_calls).to include([{"email_verified" => false}])
   end
 
   it "wraps work in an ActiveRecord transaction" do

@@ -16,12 +16,10 @@ module BetterAuth
 
       def mounted_path_info(env)
         path_info = normalize_path(env["PATH_INFO"])
-        script_name = normalize_path(env["SCRIPT_NAME"])
-        prefix = (script_name == "/") ? @mount_path : script_name
 
-        return path_info if path_info == prefix || path_info.start_with?("#{prefix}/")
+        return path_info if path_info == @mount_path || path_info.start_with?("#{@mount_path}/")
 
-        normalize_path("#{prefix}/#{path_info.delete_prefix("/")}")
+        normalize_path("#{@mount_path}/#{path_info.delete_prefix("/")}")
       end
 
       def normalize_path(path)

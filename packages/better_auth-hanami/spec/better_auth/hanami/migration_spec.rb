@@ -46,6 +46,15 @@ RSpec.describe BetterAuth::Hanami::Migration do
     expect(migration).to include("index :action, unique: true")
   end
 
+  it "renders bigint number fields for database rate limit millisecond timestamps" do
+    rate_limit_config = BetterAuth::Configuration.new(secret: secret, database: :memory, rate_limit: {storage: "database"})
+
+    migration = described_class.render(rate_limit_config)
+
+    expect(migration).to include("create_table :rate_limits do")
+    expect(migration).to include("column :last_request, :Bignum, null: false")
+  end
+
   def secret
     "test-secret-that-is-long-enough-for-validation"
   end

@@ -33,7 +33,47 @@ RSpec.describe BetterAuth::Hanami::Generators::InstallGenerator do
     expect(File.read(users_relation)).to include("schema :users, infer: true")
     expect(File.read(user_repo)).to include("class UserRepo < Repo[:users]")
     expect(File.read(File.join(@destination, "config/routes.rb"))).to include("better_auth")
+    expect(File.read(File.join(@destination, "config/routes.rb"))).to include(%(require "better_auth/hanami"))
     expect(File.read(File.join(@destination, "config/settings.rb"))).to include("setting :better_auth_secret")
+  end
+
+  it "mounts routes when the routing module is already included" do
+    File.write(File.join(@destination, "config/routes.rb"), <<~RUBY)
+      # frozen_string_literal: true
+
+      require "better_auth/hanami"
+
+      module Bookshelf
+        class Routes < Hanami::Routes
+          include BetterAuth::Hanami::Routing
+        end
+      end
+    RUBY
+
+    described_class.new(destination_root: @destination).run
+
+    routes = File.read(File.join(@destination, "config/routes.rb"))
+    expect(routes).to include("include BetterAuth::Hanami::Routing")
+    expect(routes).to include("better_auth")
+  end
+
+  it "upgrades the old routing-only require" do
+    File.write(File.join(@destination, "config/routes.rb"), <<~RUBY)
+      # frozen_string_literal: true
+
+      require "better_auth/hanami/routing"
+
+      module Bookshelf
+        class Routes < Hanami::Routes
+        end
+      end
+    RUBY
+
+    described_class.new(destination_root: @destination).run
+
+    routes = File.read(File.join(@destination, "config/routes.rb"))
+    expect(routes).to include(%(require "better_auth/hanami"))
+    expect(routes).not_to include(%(require "better_auth/hanami/routing"))
   end
 
   it "does not overwrite an existing provider" do

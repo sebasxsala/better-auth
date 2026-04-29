@@ -67,6 +67,43 @@ RSpec.describe BetterAuth::Hanami::Routing do
     expect(response["set-cookie"]).to include("hanami_probe=1")
   end
 
+  it "supports the generated route require path on its own" do
+    ruby = <<~RUBY
+      $LOAD_PATH.unshift("#{File.expand_path("../../../lib", __dir__)}")
+      require "better_auth/hanami"
+      require "hanami/routes"
+
+      Class.new(Hanami::Routes) do
+        include BetterAuth::Hanami::Routing
+        better_auth auth: BetterAuth.auth(secret: "#{secret}", database: :memory)
+      end
+    RUBY
+
+    output = IO.popen([RbConfig.ruby, "-e", ruby], err: [:child, :out], &:read)
+    status = $?
+
+    expect(status).to be_success, output
+  end
+
+  it "forwards requests under the auth mount path when Rack script name is non-root" do
+    auth = BetterAuth.auth(secret: secret, database: :memory)
+    app = BetterAuth::Hanami::MountedApp.new(auth, mount_path: "/api/auth")
+
+    status, _headers, body = app.call(
+      "REQUEST_METHOD" => "GET",
+      "PATH_INFO" => "/api/auth/ok",
+      "SCRIPT_NAME" => "/myapp",
+      "QUERY_STRING" => "",
+      "SERVER_NAME" => "localhost",
+      "SERVER_PORT" => "2300",
+      "rack.url_scheme" => "http",
+      "rack.input" => StringIO.new("")
+    )
+
+    expect(status).to eq(200)
+    expect(JSON.parse(body.join)).to eq("ok" => true)
+  end
+
   def secret
     "test-secret-that-is-long-enough-for-validation"
   end

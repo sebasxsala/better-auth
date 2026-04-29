@@ -50,6 +50,16 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     assert_equal 2, @adapter.count(model: "user", where: [{field: "email", operator: "ends_with", value: "example.com"}])
   end
 
+  def test_mongodb_adapter_preserves_false_where_values
+    verified = @adapter.create(model: "user", data: {id: "user-true", name: "Verified", email: "verified@example.com"}, force_allow_id: true)
+    unverified = @adapter.create(model: "user", data: {id: "user-false", name: "Unverified", email: "unverified@example.com"}, force_allow_id: true)
+    @adapter.update(model: "user", where: [{field: "id", value: verified.fetch("id")}], update: {emailVerified: true})
+
+    matches = @adapter.find_many(model: "user", where: [{"field" => "emailVerified", "value" => false}])
+
+    assert_equal [unverified.fetch("id")], matches.map { |user| user.fetch("id") }
+  end
+
   def test_mongodb_adapter_supports_core_joins
     user = @adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
     session = @adapter.create(model: "session", data: {id: "session-1", token: "token-1", userId: user["id"], expiresAt: Time.now + 60}, force_allow_id: true)

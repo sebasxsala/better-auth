@@ -225,7 +225,10 @@ module BetterAuth
       end
 
       def fetch_key(hash, key)
-        hash[key] || hash[key.to_s] || hash[Schema.storage_key(key)] || hash[Schema.storage_key(key).to_sym]
+        [key, key.to_s, Schema.storage_key(key), Schema.storage_key(key).to_sym].each do |candidate|
+          return hash[candidate] if hash.key?(candidate)
+        end
+        nil
       end
     end
   end

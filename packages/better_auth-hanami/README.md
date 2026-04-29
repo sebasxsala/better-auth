@@ -81,7 +81,7 @@ end
 The generated `config/routes.rb` includes:
 
 ```ruby
-require "better_auth/hanami/routing"
+require "better_auth/hanami"
 
 module Bookshelf
   class Routes < Hanami::Routes

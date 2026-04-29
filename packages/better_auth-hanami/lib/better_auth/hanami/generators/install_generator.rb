@@ -46,10 +46,10 @@ module BetterAuth
           return unless File.exist?(path)
 
           content = File.read(path)
-          content = %(require "better_auth/hanami/routing"\n) + content unless content.include?(%("better_auth/hanami/routing"))
-          unless content.include?("include BetterAuth::Hanami::Routing")
-            content = content.sub("class Routes < Hanami::Routes\n", "class Routes < Hanami::Routes\n    include BetterAuth::Hanami::Routing\n    better_auth\n")
-          end
+          content = content.gsub(%(require "better_auth/hanami/routing"), %(require "better_auth/hanami"))
+          content = %(require "better_auth/hanami"\n) + content unless content.include?(%("better_auth/hanami"))
+          content = content.sub("class Routes < Hanami::Routes\n", "class Routes < Hanami::Routes\n    include BetterAuth::Hanami::Routing\n") unless content.include?("include BetterAuth::Hanami::Routing")
+          content = content.sub(/(include BetterAuth::Hanami::Routing\n)(?!\s*better_auth)/, "\\1    better_auth\n") unless content.match?(/^\s*better_auth\b/)
           File.write(path, content)
         end
 

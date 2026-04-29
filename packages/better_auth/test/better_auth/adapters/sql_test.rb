@@ -157,6 +157,17 @@ class BetterAuthSQLAdapterTest < Minitest::Test
     assert_equal [["ada@example.com", "Ada"]], connection.params
   end
 
+  def test_sql_adapter_preserves_false_where_values
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+    connection = RecordingConnection.new([])
+    adapter = BetterAuth::Adapters::SQL.new(config, connection: connection, dialect: :postgres)
+
+    adapter.find_many(model: "user", where: [{"field" => "emailVerified", "value" => false}])
+
+    assert_includes connection.sql.first, 'WHERE "users"."email_verified" = $1'
+    assert_equal [[false]], connection.params
+  end
+
   def test_sql_adapter_uses_top_for_mssql_find_one
     config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
     connection = RecordingConnection.new([])

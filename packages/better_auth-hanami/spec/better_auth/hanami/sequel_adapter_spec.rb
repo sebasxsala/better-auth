@@ -47,6 +47,19 @@ RSpec.describe BetterAuth::Hanami::SequelAdapter do
     expect(adapter.find_one(model: "auditLog", where: [{field: "id", value: "audit-1"}])).to be_nil
   end
 
+  it "preserves false where values for boolean predicates" do
+    db = Sequel.sqlite
+    apply_migration(db, config)
+    adapter = described_class.new(config, connection: db)
+    verified = adapter.create(model: "user", data: {id: "user-true", name: "Verified", email: "verified@example.com"}, force_allow_id: true)
+    unverified = adapter.create(model: "user", data: {id: "user-false", name: "Unverified", email: "unverified@example.com"}, force_allow_id: true)
+    adapter.update(model: "user", where: [{field: "id", value: verified.fetch("id")}], update: {emailVerified: true})
+
+    matches = adapter.find_many(model: "user", where: [{"field" => "emailVerified", "value" => false}])
+
+    expect(matches.map { |user| user.fetch("id") }).to eq([unverified.fetch("id")])
+  end
+
   # rubocop:disable Security/Eval
   def apply_migration(db, config)
     require "rom-sql"
