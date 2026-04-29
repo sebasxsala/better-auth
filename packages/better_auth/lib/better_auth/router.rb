@@ -64,6 +64,7 @@ module BetterAuth
 
       body = parse_body(request)
       endpoint_context = build_endpoint_context(request, route_path, query, body, params)
+      return run_on_response_chain(forbidden) if server_only?(endpoint)
 
       response = @origin_check.call(endpoint_context)
       return run_on_response_chain(response) if response
@@ -352,6 +353,14 @@ module BetterAuth
 
     def unsupported_media_type
       [415, {"content-type" => "application/json"}, [JSON.generate({error: "Unsupported Media Type"})]]
+    end
+
+    def forbidden
+      [403, {"content-type" => "application/json"}, [JSON.generate({error: "Forbidden"})]]
+    end
+
+    def server_only?(endpoint)
+      endpoint.metadata[:server_only] || endpoint.metadata[:SERVER_ONLY] || endpoint.metadata["SERVER_ONLY"]
     end
 
     def error_response(error, headers: {})

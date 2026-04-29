@@ -97,10 +97,11 @@ module BetterAuth
         value.to_s.split(",").map(&:strip).reject(&:empty?)
       end
 
-      def create_client(ctx, model:, body:, owner_session: nil, default_auth_method: "client_secret_basic", store_client_secret: "plain", unauthenticated: false, default_scopes: nil, allowed_scopes: nil, prefix: {}, dynamic_registration: false)
+      def create_client(ctx, model:, body:, owner_session: nil, default_auth_method: "client_secret_basic", store_client_secret: "plain", unauthenticated: false, default_scopes: nil, allowed_scopes: nil, prefix: {}, dynamic_registration: false, admin: false)
         body = stringify_keys(body || {})
         requested_auth_method = body["token_endpoint_auth_method"] || default_auth_method
         validate_client_metadata_enums!(requested_auth_method, body)
+        validate_admin_only_fields!(body, admin: admin)
         auth_method = unauthenticated ? "none" : requested_auth_method
         public_client = auth_method == "none"
         client_id = Crypto.random_string(32)
@@ -126,6 +127,7 @@ module BetterAuth
         metadata["tos_uri"] = body["tos_uri"] if body["tos_uri"]
         metadata["policy_uri"] = body["policy_uri"] if body["policy_uri"]
         require_pkce = body.key?("require_pkce") ? body["require_pkce"] : body["requirePKCE"]
+        require_pkce = true if dynamic_registration && require_pkce.nil?
 
         client_type = if unauthenticated && public_client && body["type"] == "web"
           nil
@@ -149,6 +151,7 @@ module BetterAuth
           "redirectUris" => redirects,
           "redirectUrls" => redirects.join(","),
           "postLogoutRedirectUris" => Array(body["post_logout_redirect_uris"]).map(&:to_s),
+          "clientSecretExpiresAt" => admin ? (body["client_secret_expires_at"] || 0) : nil,
           "tokenEndpointAuthMethod" => auth_method,
           "grantTypes" => grant_types,
           "responseTypes" => response_types,
@@ -197,7 +200,8 @@ module BetterAuth
           policy_uri: data["policy"],
           software_id: data["softwareId"],
           software_version: data["softwareVersion"],
-          software_statement: data["softwareStatement"]
+          software_statement: data["softwareStatement"],
+          client_secret_expires_at: data["clientSecretExpiresAt"]
         }
         response[:skip_consent] = true if data["skipConsent"]
         metadata.each { |key, value| response[key.to_sym] = value }
@@ -238,6 +242,14 @@ module BetterAuth
         client_type = body["type"]
         if client_type && !["web", "native", "user-agent-based"].include?(client_type)
           raise APIError.new("BAD_REQUEST", message: "invalid type")
+        end
+      end
+
+      def validate_admin_only_fields!(body, admin:)
+        return if admin
+
+        %w[client_secret_expires_at clientSecretExpiresAt].each do |key|
+          raise APIError.new("BAD_REQUEST", message: "field #{key} is server-only") if body.key?(key)
         end
       end
 
@@ -369,16 +381,12 @@ module BetterAuth
         end
         unless jwt_access_token && audience
           record = {
-            "accessToken" => access_token_value,
             "token" => access_token_value,
-            "refreshToken" => refresh_token_value,
-            "accessTokenExpiresAt" => expires_at,
             "expiresAt" => expires_at,
             "clientId" => client_data["clientId"],
             "userId" => user["id"],
             "subject" => subject,
             "sessionId" => session_data["id"],
-            "scope" => scope,
             "scopes" => parse_scopes(scope),
             "revoked" => nil,
             "referenceId" => token_reference_id,
@@ -482,7 +490,7 @@ module BetterAuth
         record = token_record(store, token, prefix: prefix)
         raise APIError.new("UNAUTHORIZED", message: "invalid_token") unless record
         user = stringify_keys(record["user"])
-        scopes = parse_scopes(record["scope"] || record["scopes"])
+        scopes = parse_scopes(record["scopes"])
         raise APIError.new("FORBIDDEN", message: "openid scope is required") unless scopes.include?("openid")
 
         response = {sub: record["subject"] || user["id"]}
@@ -523,7 +531,16 @@ module BetterAuth
         client_id = refresh_record["clientId"]
         user_id = refresh_record["userId"]
         store[:refresh_tokens].delete_if { |_token, record| record["clientId"] == client_id && record["userId"] == user_id }
+        store[:tokens].delete_if { |_token, record| record["clientId"] == client_id && record["userId"] == user_id }
         if schema_model?(ctx, "oauthRefreshToken")
+          refresh_ids = ctx.context.adapter.find_many(
+            model: "oauthRefreshToken",
+            where: [
+              {field: "clientId", value: client_id},
+              {field: "userId", value: user_id}
+            ]
+          ).map { |entry| stringify_keys(entry)["id"] }
+
           ctx.context.adapter.delete_many(
             model: "oauthRefreshToken",
             where: [
@@ -531,6 +548,12 @@ module BetterAuth
               {field: "userId", value: user_id}
             ]
           )
+
+          if schema_model?(ctx, "oauthAccessToken")
+            refresh_ids.each do |refresh_id|
+              ctx.context.adapter.delete_many(model: "oauthAccessToken", where: [{field: "refreshId", value: refresh_id}])
+            end
+          end
         end
       end
 
@@ -590,7 +613,17 @@ module BetterAuth
         data = stringify_keys(client)
         return user_id unless data["subjectType"] == "pairwise" && pairwise_secret && user_id
 
-        OpenSSL::HMAC.hexdigest("SHA256", pairwise_secret.to_s, "#{data["clientId"]}:#{user_id}")
+        OpenSSL::HMAC.hexdigest("SHA256", pairwise_secret.to_s, "#{sector_identifier(data)}.#{user_id}")
+      end
+
+      def sector_identifier(client)
+        data = stringify_keys(client)
+        uri = client_redirect_uris(data).first
+        raise APIError.new("BAD_REQUEST", message: "pairwise subject_type requires redirect_uris") if uri.to_s.empty?
+
+        URI.parse(uri.to_s).host || data["clientId"]
+      rescue URI::InvalidURIError
+        data["clientId"]
       end
 
       def session_auth_time(session)

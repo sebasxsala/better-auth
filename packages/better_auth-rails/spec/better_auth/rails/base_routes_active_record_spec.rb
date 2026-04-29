@@ -66,6 +66,7 @@ RSpec.describe "BetterAuth::Rails ActiveRecord base routes" do
     BetterAuth.auth(
       base_url: "http://localhost:3000",
       secret: secret,
+      email_and_password: {enabled: true},
       database: ->(options) { BetterAuth::Rails::ActiveRecordAdapter.new(options, connection: ActiveRecord::Base) }
     )
   end

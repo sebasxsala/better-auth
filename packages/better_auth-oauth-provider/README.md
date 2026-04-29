@@ -66,25 +66,31 @@ When `resource` is present and valid, access tokens are JWTs. Without `resource`
 | `GET` | `/.well-known/openid-configuration` | `auth.api.get_open_id_config` |
 | `POST` | `/oauth2/register` | `auth.api.register_o_auth_client` |
 | `POST` | `/oauth2/create-client` | `auth.api.create_o_auth_client` |
-| `GET` | `/oauth2/client/:id` | `auth.api.get_o_auth_client` |
-| `GET` | `/oauth2/client` | `auth.api.get_o_auth_client_public` |
-| `GET` | `/oauth2/public-client-prelogin` | `auth.api.get_o_auth_client_public_prelogin` |
-| `GET` | `/oauth2/clients` | `auth.api.list_o_auth_clients` |
-| `PATCH` | `/oauth2/client` | `auth.api.update_o_auth_client` |
-| `DELETE` | `/oauth2/client` | `auth.api.delete_o_auth_client` |
+| `POST` | `/admin/oauth2/create-client` | `auth.api.admin_create_o_auth_client` |
+| `PATCH` | `/admin/oauth2/update-client` | `auth.api.admin_update_o_auth_client` |
+| `GET` | `/oauth2/get-client?client_id=...` | `auth.api.get_o_auth_client` |
+| `GET` | `/oauth2/get-clients` | `auth.api.get_o_auth_clients` |
+| `POST` | `/oauth2/update-client` | `auth.api.update_o_auth_client` |
+| `POST` | `/oauth2/delete-client` | `auth.api.delete_o_auth_client` |
+| `GET` | `/oauth2/public-client?client_id=...` | `auth.api.get_o_auth_client_public` |
+| `POST` | `/oauth2/public-client-prelogin` | `auth.api.get_o_auth_client_public_prelogin` |
 | `POST` | `/oauth2/client/rotate-secret` | `auth.api.rotate_o_auth_client_secret` |
 | `GET` | `/oauth2/authorize` | `auth.api.o_auth2_authorize` |
 | `POST` | `/oauth2/continue` | `auth.api.o_auth2_continue` |
 | `POST` | `/oauth2/consent` | `auth.api.o_auth2_consent` |
-| `GET` | `/oauth2/consents` | `auth.api.list_o_auth_consents` |
-| `GET` | `/oauth2/consent` | `auth.api.get_o_auth_consent` |
-| `PATCH` | `/oauth2/consent` | `auth.api.update_o_auth_consent` |
-| `DELETE` | `/oauth2/consent` | `auth.api.delete_o_auth_consent` |
+| `GET` | `/oauth2/get-consent?id=...` | `auth.api.get_o_auth_consent` |
+| `GET` | `/oauth2/get-consents` | `auth.api.get_o_auth_consents` |
+| `POST` | `/oauth2/update-consent` | `auth.api.update_o_auth_consent` |
+| `POST` | `/oauth2/delete-consent` | `auth.api.delete_o_auth_consent` |
 | `POST` | `/oauth2/token` | `auth.api.o_auth2_token` |
 | `POST` | `/oauth2/introspect` | `auth.api.o_auth2_introspect` |
 | `POST` | `/oauth2/revoke` | `auth.api.o_auth2_revoke` |
 | `GET` | `/oauth2/userinfo` | `auth.api.o_auth2_user_info` |
 | `GET`, `POST` | `/oauth2/end-session` | `auth.api.o_auth2_end_session` |
+
+Deprecated aliases remain for one minor release: `GET /oauth2/client/:id` -> `/oauth2/get-client`, `GET /oauth2/clients` -> `/oauth2/get-clients`, `PATCH /oauth2/client` -> `/oauth2/update-client`, `DELETE /oauth2/client` -> `/oauth2/delete-client`, `GET /oauth2/client` -> `/oauth2/public-client`, and `GET/PATCH/DELETE /oauth2/consent` plus `GET /oauth2/consents` -> the `get/update/delete/get-consents` consent routes.
+
+Admin client routes are server-only. They are available through `auth.api.*` and return `403` through the Rack handler.
 
 ## Options
 
@@ -116,5 +122,46 @@ Common options accepted by `BetterAuth::Plugins.oauth_provider`:
 - `jwks_uri`
 - `disable_jwt_plugin`
 - `store`
+
+`rate_limit` accepts per-route overrides:
+
+```ruby
+rate_limit: {
+  token: {window: 60, max: 20},
+  authorize: {window: 60, max: 30},
+  introspect: {window: 60, max: 100},
+  revoke: {window: 60, max: 30},
+  register: {window: 60, max: 5},
+  userinfo: false
+}
+```
+
+Use `false` to disable a route-specific rule.
+
+## Schema Migration
+
+`oauthAccessToken` now uses the upstream canonical columns `token`, `expiresAt`, `scopes`, `clientId`, `sessionId`, `userId`, `referenceId`, and `refreshId`. Legacy `access_token`, `refresh_token`, `access_token_expires_at`, and `scope` columns should be copied forward then dropped. `oauthConsent#consent_given` is also removed; a consent row means consent was granted.
+
+For non-Rails SQL apps, run the equivalent of:
+
+```sql
+UPDATE better_auth_oauth_access_tokens
+SET token = COALESCE(token, access_token),
+    expires_at = COALESCE(expires_at, access_token_expires_at),
+    scopes = COALESCE(scopes, scope)
+WHERE token IS NULL OR scopes IS NULL;
+
+DELETE FROM better_auth_oauth_consents WHERE consent_given = false;
+```
+
+Then drop the legacy access-token and consent columns. Rails apps using `better_auth-rails` generate migrations from the active plugin schema, so regenerating after this change emits only the canonical columns.
+
+## Ruby Adaptations
+
+When the JWT plugin is registered, OIDC metadata advertises its configured `jwks.key_pair_config.alg`, defaulting to `EdDSA` like upstream. If `disable_jwt_plugin: true` is set, Ruby intentionally falls back to HS256 ID tokens signed with the Better Auth secret.
+
+Route OpenAPI metadata blocks from upstream TypeScript are intentionally not ported into this package. Use the Ruby `open_api` plugin for generated OpenAPI output.
+
+The upstream `@better-auth/oauth-provider/client`, React/Solid client plugins, dashboard UI, and browser helpers are not ported. Ruby apps call the JSON endpoints directly or wrap `auth.api.*`.
 
 OIDC provider remains a core `better_auth` plugin because upstream still exposes it from `better-auth/plugins`. OAuth provider is the newer standalone provider package.
