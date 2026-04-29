@@ -28,6 +28,53 @@ auth = BetterAuth.auth(
 )
 ```
 
+Enable subscription routes by passing `subscription.enabled` and a plan list:
+
+```ruby title="config/auth.rb"
+BetterAuth::Plugins.stripe(
+  stripe_api_key: ENV.fetch("STRIPE_SECRET_KEY"),
+  stripe_webhook_secret: ENV.fetch("STRIPE_WEBHOOK_SECRET"),
+  subscription: {
+    enabled: true,
+    plans: [
+      {
+        name: "pro",
+        price_id: "price_monthly",
+        annual_discount_price_id: "price_yearly",
+        limits: { projects: 10 },
+        free_trial: { days: 14 }
+      }
+    ]
+  }
+)
+```
+
+For organization seat billing, enable the organization plugin and configure `seat_price_id`:
+
+```ruby title="config/auth.rb"
+plugins: [
+  BetterAuth::Plugins.organization,
+  BetterAuth::Plugins.stripe(
+    stripe_api_key: ENV.fetch("STRIPE_SECRET_KEY"),
+    stripe_webhook_secret: ENV.fetch("STRIPE_WEBHOOK_SECRET"),
+    organization: { enabled: true },
+    subscription: {
+      enabled: true,
+      plans: [
+        {
+          name: "team",
+          price_id: "price_team_base",
+          seat_price_id: "price_team_seat",
+          line_items: [{ price: "price_metered_events" }],
+          proration_behavior: "create_prorations"
+        }
+      ],
+      authorize_reference: ->(_data, _ctx) { true }
+    }
+  )
+]
+```
+
 ## Usage
 
 ```ruby title="server.rb"
@@ -55,6 +102,21 @@ Current Ruby options accepted by `BetterAuth::Plugins.stripe`:
 - `stripe_webhook_secret`
 - `stripe_client`
 - `client`
+- `subscription.enabled`
+- `subscription.plans`
+- `subscription.authorize_reference`
+- `subscription.get_checkout_session_params`
+- `subscription.on_subscription_complete`
+- `subscription.on_subscription_created`
+- `subscription.on_subscription_update`
+- `subscription.on_subscription_cancel`
+- `subscription.on_subscription_deleted`
+- `on_event`
+- `organization.enabled`
+- `organization.get_customer_create_params`
+- `organization.on_customer_create`
+
+Plan entries support `name`, `price_id`, `lookup_key`, `annual_discount_price_id`, `annual_discount_lookup_key`, `limits`, `free_trial`, `seat_price_id`, `line_items`, and `proration_behavior`.
 
 ## Support Notes
 

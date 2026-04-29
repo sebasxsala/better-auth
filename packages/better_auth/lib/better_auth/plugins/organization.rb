@@ -370,6 +370,8 @@ module BetterAuth
           ctx.context.adapter.create(model: "teamMember", data: {teamId: team_id, userId: session[:user]["id"], createdAt: Time.now})
         end
         updated = ctx.context.adapter.update(model: "invitation", where: [{field: "id", value: invitation["id"]}], update: {status: "accepted"})
+        organization = organization_by_id(ctx, invitation["organizationId"])
+        run_org_hook(config, :after_accept_invitation, {invitation: invitation_wire(ctx, updated), member: member_wire(ctx, member), user: session[:user], organization: organization_wire(ctx, organization)}, ctx)
         ctx.json({invitation: invitation_wire(ctx, updated), member: member_wire(ctx, member)})
       end
     end
@@ -452,8 +454,11 @@ module BetterAuth
         raise APIError.new("BAD_REQUEST", message: ORGANIZATION_ERROR_CODES.fetch("MEMBER_NOT_FOUND")) unless member
         require_org_permission!(ctx, config, session, member["organizationId"], {member: ["delete"]}, ORGANIZATION_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_DELETE_THIS_MEMBER"))
         ensure_not_last_owner!(ctx, member)
+        organization = organization_by_id(ctx, member["organizationId"])
+        user = ctx.context.internal_adapter.find_user_by_id(member["userId"])
         ctx.context.adapter.delete(model: "member", where: [{field: "id", value: member["id"]}])
         ctx.context.adapter.delete_many(model: "teamMember", where: [{field: "userId", value: member["userId"]}]) if org_truthy?(config.dig(:teams, :enabled))
+        run_org_hook(config, :after_remove_member, {member: member_wire(ctx, member), user: user, organization: organization_wire(ctx, organization)}, ctx)
         ctx.json({status: true})
       end
     end
