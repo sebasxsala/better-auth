@@ -166,11 +166,15 @@ module BetterAuth
       request.body.rewind
       return {} if raw.empty?
 
-      if request.media_type == "application/json"
+      if json_media_type?(request.media_type)
         JSON.parse(raw)
       else
         request.POST
       end
+    end
+
+    def json_media_type?(media_type)
+      media_type == "application/json" || media_type.to_s.end_with?("+json")
     end
 
     def allowed_media_type?(request, endpoint)

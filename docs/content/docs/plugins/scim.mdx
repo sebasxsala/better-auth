@@ -30,8 +30,8 @@ auth = BetterAuth.auth(
 ## Usage
 
 ```ruby title="server.rb"
-token = auth.api.generate_scim_token(headers: { "cookie" => admin_cookie }, body: { organizationId: organization_id })
-user = auth.api.create_scim_user(headers: { "authorization" => "Bearer #{token[:token]}" }, body: { userName: "ada@example.com", active: true })
+token = auth.api.generate_scim_token(headers: { "cookie" => admin_cookie }, body: { providerId: "okta", organizationId: organization_id })
+user = auth.api.create_scim_user(headers: { "authorization" => "Bearer #{token[:scimToken]}" }, body: { userName: "ada@example.com" })
 ```
 
 ## Routes
@@ -39,6 +39,9 @@ user = auth.api.create_scim_user(headers: { "authorization" => "Bearer #{token[:
 | Method | Path | Ruby API method |
 | --- | --- | --- |
 | `POST` | `/scim/generate-token` | `auth.api.generate_scim_token` |
+| `GET` | `/scim/list-provider-connections` | `auth.api.list_scim_provider_connections` |
+| `GET` | `/scim/get-provider-connection` | `auth.api.get_scim_provider_connection` |
+| `POST` | `/scim/delete-provider-connection` | `auth.api.delete_scim_provider_connection` |
 | `POST` | `/scim/v2/Users` | `auth.api.create_scim_user` |
 | `GET` | `/scim/v2/Users` | `auth.api.list_scim_users` |
 | `GET` | `/scim/v2/Users/:userId` | `auth.api.get_scim_user` |
@@ -46,12 +49,43 @@ user = auth.api.create_scim_user(headers: { "authorization" => "Bearer #{token[:
 | `PATCH` | `/scim/v2/Users/:userId` | `auth.api.patch_scim_user` |
 | `DELETE` | `/scim/v2/Users/:userId` | `auth.api.delete_scim_user` |
 | `GET` | `/scim/v2/ServiceProviderConfig` | `auth.api.get_scim_service_provider_config` |
+| `GET` | `/scim/v2/Schemas` | `auth.api.get_scim_schemas` |
+| `GET` | `/scim/v2/Schemas/:schemaId` | `auth.api.get_scim_schema` |
+| `GET` | `/scim/v2/ResourceTypes` | `auth.api.get_scim_resource_types` |
+| `GET` | `/scim/v2/ResourceTypes/:resourceTypeId` | `auth.api.get_scim_resource_type` |
 
 ## Options
 
 Current Ruby options accepted by `BetterAuth::Plugins.scim`:
 
 - `store_scim_token`
+- `default_scim`
+- `provider_ownership`
+- `required_role`
+- `before_scim_token_generated`
+- `after_scim_token_generated`
+
+`store_scim_token` accepts `"plain"`, `"hashed"`, `"encrypted"`, `{ hash: ->(token) { ... } }`, or `{ encrypt: ->(token) { ... }, decrypt: ->(stored) { ... } }`.
+
+`provider_ownership: { enabled: true }` stores the user that generated non-organization provider tokens and restricts provider connection management to that owner.
+
+`required_role` controls which organization roles can generate, list, view, or delete organization-scoped SCIM providers. When omitted, Ruby follows upstream and allows `admin` plus the organization creator role.
+
+`default_scim` accepts provider hashes for tests or static providers:
+
+```ruby
+BetterAuth::Plugins.scim(
+  default_scim: [
+    { providerId: "okta", scimToken: "secret-token", organizationId: "org-id" }
+  ]
+)
+```
+
+## Plugin Surface
+
+`BetterAuth::Plugins.scim` exposes `version` and `client` metadata. The client descriptor uses the upstream id `scim-client` and points back to the server plugin id `scim`.
+
+When combined with `BetterAuth::Plugins.open_api`, provider management routes are included in the generated schema, while SCIM protocol routes under `/scim/v2/*` are hidden to match upstream `HIDE_METADATA`.
 
 ## Support Notes
 

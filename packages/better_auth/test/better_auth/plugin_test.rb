@@ -11,6 +11,8 @@ class BetterAuthPluginTest < Minitest::Test
     plugin = BetterAuth::Plugin.new(
       "id" => "sample",
       "endpoints" => {"sampleAction" => endpoint},
+      "version" => "1.2.3",
+      "client" => {"id" => "sample-client", "version" => "1.2.3"},
       "onRequest" => ->(request, _context) { {request: request} },
       "onResponse" => ->(response, _context) { {response: response} },
       "rateLimit" => [{pathMatcher: ->(path) { path == "/plugin" }, window: 10, max: 2}],
@@ -20,6 +22,8 @@ class BetterAuthPluginTest < Minitest::Test
     assert_equal "sample", plugin.id
     assert_equal endpoint, plugin.endpoints[:sample_action]
     assert_equal endpoint, plugin[:endpoints][:sample_action]
+    assert_equal "1.2.3", plugin.version
+    assert_equal({"id" => "sample-client", "version" => "1.2.3"}, plugin.client)
     assert_equal 1, plugin.rate_limit.length
     assert_equal({"PLUGIN_FAILURE" => "Plugin failed"}, plugin.error_codes)
     assert plugin.on_request
