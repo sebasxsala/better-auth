@@ -169,6 +169,89 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
     assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("RESOLVED_USER_INVALID"), invalid.message
   end
 
+  def test_passkey_first_registration_allows_after_verification_user_id_override
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.passkey(
+          registration: {
+            require_session: false,
+            resolve_user: ->(_data) { {id: "pending-user-id", name: "pending@example.com"} },
+            after_verification: ->(_data) { {user_id: @linked_user.fetch("id")} }
+          }
+        )
+      ]
+    )
+    @linked_user = auth.context.internal_adapter.create_user(email: "linked-passkey@example.com", name: "Linked User", emailVerified: true)
+    client = WebAuthn::FakeClient.new(ORIGIN)
+    registration = auth.api.generate_passkey_registration_options(return_headers: true)
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+
+    passkey = auth.api.verify_passkey_registration(
+      headers: {"cookie" => cookie_header(registration.fetch(:headers).fetch("set-cookie")), "origin" => ORIGIN},
+      body: {response: response}
+    )
+
+    assert_equal @linked_user.fetch("id"), passkey.fetch("userId")
+  end
+
+  def test_passkey_first_registration_with_optional_stale_session_does_not_require_fresh_session
+    auth = build_auth(
+      session: {fresh_age: 1},
+      plugins: [
+        BetterAuth::Plugins.passkey(
+          registration: {
+            require_session: false
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "optional-stale-session@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    session = auth.context.adapter.find_many(model: "session", where: [{field: "userId", value: user.fetch("id")}]).first
+    auth.context.adapter.update(
+      model: "session",
+      where: [{field: "id", value: session.fetch("id")}],
+      update: {createdAt: Time.now - 120}
+    )
+    client = WebAuthn::FakeClient.new(ORIGIN)
+    registration = auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie}, return_headers: true)
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+
+    passkey = auth.api.verify_passkey_registration(
+      headers: {"cookie" => [cookie, cookie_header(registration.fetch(:headers).fetch("set-cookie"))].join("; "), "origin" => ORIGIN},
+      body: {response: response}
+    )
+
+    assert_equal user.fetch("id"), passkey.fetch("userId")
+  end
+
+  def test_session_registration_rejects_after_verification_user_id_mismatch
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.passkey(
+          registration: {
+            after_verification: ->(_data) { {user_id: "different-user-id"} }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "session-mismatch@example.com")
+    client = WebAuthn::FakeClient.new(ORIGIN)
+    registration = auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie}, return_headers: true)
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_passkey_registration(
+        headers: {"cookie" => [cookie, cookie_header(registration.fetch(:headers).fetch("set-cookie"))].join("; "), "origin" => ORIGIN},
+        body: {response: response}
+      )
+    end
+
+    assert_equal 401, error.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY"), error.message
+    assert_empty auth.context.adapter.find_many(model: "passkey")
+  end
+
   def test_authentication_extensions_callback_and_array_origin
     captured = {}
     auth = build_auth(
@@ -236,6 +319,13 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
       auth.api.delete_passkey(headers: {"cookie" => first_cookie}, body: {id: second.fetch("id")})
     end
     assert_equal 401, unauthorized.status_code
+    assert auth.context.adapter.find_one(model: "passkey", where: [{field: "id", value: second.fetch("id")}])
+
+    update_unauthorized = assert_raises(BetterAuth::APIError) do
+      auth.api.update_passkey(headers: {"cookie" => first_cookie}, body: {id: second.fetch("id"), name: "Hacked"})
+    end
+    assert_equal 401, update_unauthorized.status_code
+    assert_equal "Second", auth.context.adapter.find_one(model: "passkey", where: [{field: "id", value: second.fetch("id")}]).fetch("name")
 
     deleted = auth.api.delete_passkey(headers: {"cookie" => first_cookie}, body: {id: first.fetch("id")})
 
@@ -259,6 +349,7 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
     registration_verification = latest_passkey_verification(auth)
 
     assert_equal "Work laptop", registration_options.fetch(:user).fetch(:name)
+    assert_equal "none", registration_options.fetch(:attestation)
     assert_equal "platform", registration_options.fetch(:authenticatorSelection).fetch(:authenticatorAttachment)
     assert_equal [{id: "credential-one", type: "public-key", transports: ["internal", "usb"]}], registration_options.fetch(:excludeCredentials)
     assert_operator Time.parse(registration_verification.fetch("expiresAt").to_s), :>, before_registration
@@ -270,6 +361,112 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
     assert_equal [{id: "credential-one", type: "public-key", transports: ["internal", "usb"]}], authentication.fetch(:allowCredentials)
     assert_equal "preferred", authentication.fetch(:userVerification)
     assert_operator Time.parse(authentication_verification.fetch("expiresAt").to_s), :>, before_authentication
+
+    discoverable = auth.api.generate_passkey_authentication_options
+    refute_includes discoverable.keys, :allowCredentials
+  end
+
+  def test_custom_schema_deep_merges_with_base_passkey_schema
+    plugin = BetterAuth::Plugins.passkey(
+      schema: {
+        passkey: {
+          fields: {
+            name: {required: true},
+            publicKey: {required: false}
+          }
+        }
+      }
+    )
+
+    fields = plugin.schema.fetch(:passkey).fetch(:fields)
+
+    assert_equal true, fields.fetch(:name).fetch(:required)
+    assert_equal({type: "string", required: false}, fields.fetch(:public_key))
+    assert_equal({type: "number", required: true}, fields.fetch(:counter))
+  end
+
+  def test_passkey_uses_scoped_webauthn_relying_party_per_auth_instance
+    WebAuthn.configuration.rp_id = "global.example"
+    WebAuthn.configuration.rp_name = "Global App"
+    WebAuthn.configuration.allowed_origins = ["https://global.example"]
+
+    first = build_auth(
+      base_url: "https://first.example",
+      plugins: [
+        BetterAuth::Plugins.passkey(
+          rp_id: "first.example",
+          rp_name: "First App",
+          origin: "https://first.example"
+        )
+      ]
+    )
+    second = build_auth(
+      base_url: "https://second.example",
+      plugins: [
+        BetterAuth::Plugins.passkey(
+          rp_id: "second.example",
+          rp_name: "Second App",
+          origin: "https://second.example"
+        )
+      ]
+    )
+    first_cookie = sign_up_cookie(first, email: "first-scoped-passkey@example.com")
+    second_cookie = sign_up_cookie(second, email: "second-scoped-passkey@example.com")
+
+    first_options = first.api.generate_passkey_registration_options(headers: {"cookie" => first_cookie})
+    second_options = second.api.generate_passkey_registration_options(headers: {"cookie" => second_cookie})
+    second_auth_options = second.api.generate_passkey_authentication_options
+
+    assert_equal({id: "first.example", name: "First App"}, first_options.fetch(:rp))
+    assert_equal({id: "second.example", name: "Second App"}, second_options.fetch(:rp))
+    assert_equal "second.example", second_auth_options.fetch(:rpId)
+    assert_equal "global.example", WebAuthn.configuration.rp_id
+    assert_equal "Global App", WebAuthn.configuration.rp_name
+    assert_equal ["https://global.example"], WebAuthn.configuration.allowed_origins
+  ensure
+    WebAuthn.configuration.rp_id = nil
+    WebAuthn.configuration.rp_name = nil
+    WebAuthn.configuration.allowed_origins = []
+  end
+
+  def test_update_passkey_requires_name
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "update-validation@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    passkey = create_passkey(auth, user_id: user.fetch("id"), name: "Original")
+
+    missing_name = assert_raises(BetterAuth::APIError) do
+      auth.api.update_passkey(headers: {"cookie" => cookie}, body: {id: passkey.fetch("id")})
+    end
+
+    assert_equal 400, missing_name.status_code
+    assert_equal "Original", auth.context.adapter.find_one(model: "passkey", where: [{field: "id", value: passkey.fetch("id")}]).fetch("name")
+  end
+
+  def test_validates_passkey_request_shapes
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "validation@example.com")
+
+    invalid_attachment = assert_raises(BetterAuth::APIError) do
+      auth.api.generate_passkey_registration_options(
+        headers: {"cookie" => cookie},
+        query: {authenticatorAttachment: "phone"}
+      )
+    end
+    assert_equal 400, invalid_attachment.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES.fetch("VALIDATION_ERROR"), invalid_attachment.message
+
+    missing_delete_id = assert_raises(BetterAuth::APIError) do
+      auth.api.delete_passkey(headers: {"cookie" => cookie}, body: {})
+    end
+    assert_equal 400, missing_delete_id.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES.fetch("VALIDATION_ERROR"), missing_delete_id.message
+
+    missing_auth_response = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_passkey_authentication(headers: {"origin" => ORIGIN}, body: {})
+    end
+    assert_equal 400, missing_auth_response.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES.fetch("VALIDATION_ERROR"), missing_auth_response.message
   end
 
   def test_sql_schema_includes_passkey_table
@@ -346,6 +543,24 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
     end
     assert_equal 401, wrong_user.status_code
     assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY"), wrong_user.message
+  end
+
+  def test_registration_missing_origin_uses_failed_registration_error
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "missing-origin@example.com")
+    client = WebAuthn::FakeClient.new(ORIGIN)
+    registration = auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie}, return_headers: true)
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_passkey_registration(
+        headers: {"cookie" => [cookie, cookie_header(registration.fetch(:headers).fetch("set-cookie"))].join("; ")},
+        body: {response: response}
+      )
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("FAILED_TO_VERIFY_REGISTRATION"), error.message
   end
 
   private

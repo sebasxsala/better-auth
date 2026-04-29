@@ -91,10 +91,32 @@ module BetterAuth
 
       raise APIError.new("UNAUTHORIZED") unless data
 
+      session = stringify_keys(data[:session] || data["session"])
+      ensure_fresh_session!(ctx, session) if sensitive
+
       {
-        session: stringify_keys(data[:session] || data["session"]),
+        session: session,
         user: stringify_keys(data[:user] || data["user"])
       }
+    end
+
+    def self.ensure_fresh_session!(ctx, session)
+      fresh_age = ctx.context.session_config[:fresh_age].to_i
+      return if fresh_age.zero?
+
+      created_at = normalize_time(session["createdAt"])
+      return unless created_at && Time.now - created_at >= fresh_age
+
+      raise APIError.new("FORBIDDEN", message: BASE_ERROR_CODES.fetch("SESSION_NOT_FRESH"))
+    end
+
+    def self.normalize_time(value)
+      return value if value.is_a?(Time)
+      return nil if value.nil? || value.to_s.empty?
+
+      Time.parse(value.to_s)
+    rescue ArgumentError
+      nil
     end
 
     def self.parsed_session_response(ctx, session)
