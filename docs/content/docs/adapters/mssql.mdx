@@ -3,13 +3,14 @@ title: MS SQL
 description: Use Better Auth Ruby with Microsoft SQL Server.
 ---
 
-Better Auth Ruby includes a direct MSSQL adapter for Rack applications backed by
-Microsoft SQL Server.
+Microsoft SQL Server is supported by the core `better_auth` gem through the
+direct MSSQL adapter for Rack applications.
 
 <Callout type="info">
 MSSQL support uses Sequel internally for safer parameter binding over TinyTDS.
 This does not expose a public Sequel adapter; configure
-`BetterAuth::Adapters::MSSQL` directly.
+`BetterAuth::Adapters::MSSQL` directly with a URL or an existing Sequel
+database object.
 </Callout>
 
 ## Install Dependencies
@@ -24,7 +25,7 @@ gem "tiny_tds"
 bundle install
 ```
 
-## Configure The Adapter
+## Example Usage
 
 ```ruby title="config/auth.rb"
 require "better_auth"
@@ -32,9 +33,12 @@ require "better_auth"
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   base_url: ENV.fetch("BETTER_AUTH_URL"),
-  database: BetterAuth::Adapters::MSSQL.new(
-    url: ENV.fetch("DATABASE_URL")
-  )
+  database: ->(options) {
+    BetterAuth::Adapters::MSSQL.new(
+      options,
+      url: ENV.fetch("DATABASE_URL")
+    )
+  }
 )
 ```
 
@@ -42,21 +46,111 @@ You may also pass an existing Sequel database object when your app owns
 connection management.
 
 ```ruby title="config/auth.rb"
+require "sequel"
+require "tiny_tds"
+
 database = Sequel.connect(ENV.fetch("DATABASE_URL"))
 
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  database: BetterAuth::Adapters::MSSQL.new(
-    connection: database
-  )
+  database: ->(options) {
+    BetterAuth::Adapters::MSSQL.new(
+      options,
+      connection: database
+    )
+  }
 )
 ```
 
+## Schema generation & migration
+
+The Ruby schema helpers generate MSSQL DDL from the same Better Auth
+configuration used at runtime, including plugins, custom model names, custom
+field names, and `additional_fields`.
+
+<table>
+  <thead>
+    <tr>
+      <th>
+        <p className="font-bold text-[16px] mb-1">MS SQL Schema Generation</p>
+      </th>
+      <th>
+        <p className="font-bold text-[16px] mb-1">MS SQL Schema Migration</p>
+      </th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>✅ Supported</td>
+      <td>✅ Supported</td>
+    </tr>
+  </tbody>
+</table>
+
+<Tabs items={["generate", "migrate"]}>
+  <Tab value="generate">
+  ```ruby title="db/better_auth_schema.rb"
+  config = BetterAuth::Configuration.new(
+    secret: ENV.fetch("BETTER_AUTH_SECRET"),
+    database: :memory,
+    plugins: []
+  )
+
+  statements = BetterAuth::Schema::SQL.create_statements(
+    config,
+    dialect: :mssql
+  )
+
+  puts statements.join("\n\n")
+  ```
+  </Tab>
+  <Tab value="migrate">
+  ```ruby title="db/migrate_better_auth.rb"
+  require "better_auth"
+  require "sequel"
+  require "tiny_tds"
+
+  config = BetterAuth::Configuration.new(
+    secret: ENV.fetch("BETTER_AUTH_SECRET"),
+    database: :memory,
+    plugins: []
+  )
+
+  statements = BetterAuth::Schema::SQL.create_statements(
+    config,
+    dialect: :mssql
+  )
+
+  database = Sequel.connect(ENV.fetch("DATABASE_URL"))
+  statements.each { |sql| database.run(sql) }
+  ```
+  </Tab>
+</Tabs>
+
+## Joins (Experimental)
+
+Enable experimental joins when you want Better Auth to ask the database adapter
+to fetch related records in one adapter call.
+
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  experimental: { joins: true },
+  database: ->(options) {
+    BetterAuth::Adapters::MSSQL.new(
+      options,
+      url: ENV.fetch("DATABASE_URL")
+    )
+  }
+)
+```
+
+The MSSQL adapter supports native joins for the core `session -> user`,
+`account -> user`, and `user -> account` relationships.
+
 ## Schema
 
-The Ruby schema maps Better Auth logical fields to MSSQL-friendly physical
-columns. String columns use `varchar(255)` where indexing is needed and
-`varchar(8000)` for larger text values.
+The Ruby schema maps Better Auth logical fields to MSSQL physical columns.
 
 | Better Auth field | MSSQL column |
 | --- | --- |
@@ -65,6 +159,19 @@ columns. String columns use `varchar(255)` where indexing is needed and
 | `createdAt` | `created_at` |
 | `expiresAt` | `expires_at` |
 
-Plugin schemas are merged into the same SQL generation path.
+JSON-like fields are stored as `varchar(8000)` JSON strings and parsed on
+output, date fields use `datetime2(3)`, indexed strings use `varchar(255)`, and
+ids are generated as hex strings by default. Set
+`advanced: { database: { generate_id: "uuid" } }` to generate UUID strings
+instead.
+
+## Additional Information
+
+- The direct adapter supports the shared Better Auth CRUD contract, where
+  operators, sorting, pagination, counts, Sequel-backed transactions, and native
+  joins.
+- The `DATABASE_URL` should use a Sequel/TinyTDS-compatible connection URL.
+- Direct SQL generation is intended for non-Rails apps or custom migration
+  workflows.
 
 {/* Upstream MSSQL guide is preserved in upstream/docs/content/docs/adapters/mssql.mdx. */}

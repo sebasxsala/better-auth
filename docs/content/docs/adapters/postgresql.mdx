@@ -3,13 +3,14 @@ title: PostgreSQL
 description: Use Better Auth Ruby with PostgreSQL.
 ---
 
-Better Auth Ruby includes a direct PostgreSQL adapter for Rack applications and
-an ActiveRecord adapter for Rails applications backed by PostgreSQL.
+PostgreSQL is supported by the core `better_auth` gem through the direct
+PostgreSQL adapter. Rails applications can use `better_auth-rails` with
+ActiveRecord on top of PostgreSQL.
 
 <Callout type="info">
-PostgreSQL support is implemented, but exhaustive upstream adapter parity is
-still being expanded. See `.docs/features/database-adapters.md` for the current
-parity notes.
+Use the lambda form when configuring the direct adapter. Better Auth passes the
+final configuration into the lambda, so the adapter sees plugins, custom model
+names, custom field names, and `advanced.database.generate_id`.
 </Callout>
 
 ## Install Dependencies
@@ -23,7 +24,7 @@ gem "pg"
 bundle install
 ```
 
-## Configure The Adapter
+## Example Usage
 
 ```ruby title="config/auth.rb"
 require "better_auth"
@@ -31,23 +32,31 @@ require "better_auth"
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   base_url: ENV.fetch("BETTER_AUTH_URL"),
-  database: BetterAuth::Adapters::Postgres.new(
-    url: ENV.fetch("DATABASE_URL")
-  )
+  database: ->(options) {
+    BetterAuth::Adapters::Postgres.new(
+      options,
+      url: ENV.fetch("DATABASE_URL")
+    )
+  }
 )
 ```
 
-You may also pass an existing connection object when your app owns connection
+You may also pass an existing `PG::Connection` when your app owns connection
 management.
 
 ```ruby title="config/auth.rb"
+require "pg"
+
 connection = PG.connect(ENV.fetch("DATABASE_URL"))
 
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  database: BetterAuth::Adapters::Postgres.new(
-    connection: connection
-  )
+  database: ->(options) {
+    BetterAuth::Adapters::Postgres.new(
+      options,
+      connection: connection
+    )
+  }
 )
 ```
 
@@ -75,10 +84,95 @@ BetterAuth::Rails.configure do |config|
 end
 ```
 
+## Schema generation & migration
+
+The Ruby schema helpers generate PostgreSQL DDL from the same Better Auth
+configuration used at runtime, including plugins, custom model names, custom
+field names, and `additional_fields`.
+
+<table>
+  <thead>
+    <tr>
+      <th>
+        <p className="font-bold text-[16px] mb-1">PostgreSQL Schema Generation</p>
+      </th>
+      <th>
+        <p className="font-bold text-[16px] mb-1">PostgreSQL Schema Migration</p>
+      </th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>✅ Supported</td>
+      <td>✅ Supported</td>
+    </tr>
+  </tbody>
+</table>
+
+<Tabs items={["generate", "migrate"]}>
+  <Tab value="generate">
+  ```ruby title="db/better_auth_schema.rb"
+  config = BetterAuth::Configuration.new(
+    secret: ENV.fetch("BETTER_AUTH_SECRET"),
+    database: :memory,
+    plugins: []
+  )
+
+  statements = BetterAuth::Schema::SQL.create_statements(
+    config,
+    dialect: :postgres
+  )
+
+  puts statements.join("\n\n")
+  ```
+  </Tab>
+  <Tab value="migrate">
+  ```ruby title="db/migrate_better_auth.rb"
+  require "better_auth"
+  require "pg"
+
+  config = BetterAuth::Configuration.new(
+    secret: ENV.fetch("BETTER_AUTH_SECRET"),
+    database: :memory,
+    plugins: []
+  )
+
+  statements = BetterAuth::Schema::SQL.create_statements(
+    config,
+    dialect: :postgres
+  )
+
+  connection = PG.connect(ENV.fetch("DATABASE_URL"))
+  statements.each { |sql| connection.exec(sql) }
+  ```
+  </Tab>
+</Tabs>
+
+## Joins (Experimental)
+
+Enable experimental joins when you want Better Auth to ask the database adapter
+to fetch related records in one adapter call.
+
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  experimental: { joins: true },
+  database: ->(options) {
+    BetterAuth::Adapters::Postgres.new(
+      options,
+      url: ENV.fetch("DATABASE_URL")
+    )
+  }
+)
+```
+
+The PostgreSQL adapter supports native joins for the core `session -> user`,
+`account -> user`, and `user -> account` relationships. Rails uses
+ActiveRecord associations for the same core relationships.
+
 ## Schema
 
-The Ruby schema maps Better Auth logical fields to PostgreSQL-friendly physical
-columns. For example:
+The Ruby schema maps Better Auth logical fields to PostgreSQL physical columns.
 
 | Better Auth field | PostgreSQL column |
 | --- | --- |
@@ -87,6 +181,19 @@ columns. For example:
 | `createdAt` | `created_at` |
 | `expiresAt` | `expires_at` |
 
-Plugin schemas are merged into the same migration generation path.
+JSON-like fields use `jsonb`, date fields use `timestamptz`, and ids are
+generated as hex strings by default. Set
+`advanced: { database: { generate_id: "uuid" } }` to generate UUID strings
+instead.
+
+## Additional Information
+
+- The direct adapter supports the shared Better Auth CRUD contract, where
+  operators, sorting, pagination, counts, transactions, and native joins.
+- If you use a non-default PostgreSQL schema, configure the connection search
+  path before the adapter runs and make sure the schema already exists.
+- Rails apps should prefer Rails migrations generated by `better_auth-rails`;
+  direct SQL generation is intended for non-Rails apps or custom migration
+  workflows.
 
 {/* Upstream PostgreSQL guide is preserved in upstream/docs/content/docs/adapters/postgresql.mdx. */}
