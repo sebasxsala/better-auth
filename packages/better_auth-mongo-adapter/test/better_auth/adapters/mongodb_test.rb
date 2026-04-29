@@ -140,9 +140,11 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     unverified = @adapter.create(model: "user", data: {id: "user-false", name: "Unverified", email: "unverified@example.com"}, force_allow_id: true)
     @adapter.update(model: "user", where: [{field: "id", value: verified.fetch("id")}], update: {emailVerified: true})
 
-    matches = @adapter.find_many(model: "user", where: [{"field" => "emailVerified", "value" => false}])
+    string_key_matches = @adapter.find_many(model: "user", where: [{"field" => "emailVerified", "value" => false}])
+    symbol_key_matches = @adapter.find_many(model: "user", where: [{field: "emailVerified", value: false}])
 
-    assert_equal [unverified.fetch("id")], matches.map { |user| user.fetch("id") }
+    assert_equal [unverified.fetch("id")], string_key_matches.map { |user| user.fetch("id") }
+    assert_equal [unverified.fetch("id")], symbol_key_matches.map { |user| user.fetch("id") }
   end
 
   def test_mongodb_adapter_rejects_unsupported_where_operators
