@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-29
+
+### Fixed
+
+- Fixed Active Record adapter value lookup so falsey values are preserved across symbol, string, and storage-key variants.
+- Fixed Rails migration generation for JSON and array-like schema fields.
+
 ## [0.1.2] - 2026-03-22
 
 ### Fixed

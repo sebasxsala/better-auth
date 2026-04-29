@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-04-29
+
+### Fixed
+
+- Fixed Hanami route installation to require the public adapter entrypoint and avoid duplicating route configuration.
+- Fixed mounted app path handling, migration type mapping for JSON, arrays, and big integers, and Sequel adapter lookup of falsey values.
+
+## [0.1.0] - 2026-04-28
+
 ### Added
 
 - Initial Hanami 2.3+ adapter with Rack route mounting, Sequel persistence, ROM::SQL migration rendering, action helpers, and Rake/generator commands.
