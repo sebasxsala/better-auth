@@ -55,6 +55,7 @@ module BetterAuth
       config = api_key_config(configurations, options)
       Plugin.new(
         id: "api-key",
+        version: BetterAuth::APIKey::VERSION,
         hooks: {
           before: [
             {
@@ -229,7 +230,7 @@ module BetterAuth
         else
           record = api_key_validate!(ctx, key, resolved_config, permissions: body[:permissions])
           record_config = api_key_resolve_config(ctx.context, config, api_key_record_config_id(record))
-          api_key_delete_expired(ctx.context, record_config)
+          api_key_schedule_cleanup(ctx, record_config)
           ctx.json({valid: true, error: nil, key: api_key_public(record, include_key_field: false)})
         end
       rescue APIError => error
@@ -278,7 +279,7 @@ module BetterAuth
         record_config = api_key_resolve_config(ctx.context, config, api_key_record_config_id(record))
         api_key_authorize_reference!(ctx, record_config, user_id, api_key_record_reference_id(record), "update")
 
-        api_key_validate_create_update!(body, record_config, create: false, client: !!session)
+        api_key_validate_create_update!(body, record_config, create: false, client: api_key_auth_required?(ctx))
         update = api_key_update_payload(body, record_config)
         raise APIError.new("BAD_REQUEST", message: API_KEY_ERROR_CODES["NO_VALUES_TO_UPDATE"]) if update.empty?
 
@@ -512,6 +513,7 @@ module BetterAuth
       end
 
       record = api_key_validate!(ctx, key, config)
+      api_key_schedule_cleanup(ctx, config)
       if config[:references].to_s != "user"
         raise APIError.new("UNAUTHORIZED", message: API_KEY_ERROR_CODES["INVALID_REFERENCE_ID_FROM_API_KEY"])
       end
@@ -543,11 +545,11 @@ module BetterAuth
       raise APIError.new("UNAUTHORIZED", message: API_KEY_ERROR_CODES["INVALID_API_KEY"]) unless api_key_config_id_matches?(api_key_record_config_id(record), config[:config_id])
       raise APIError.new("UNAUTHORIZED", message: API_KEY_ERROR_CODES["KEY_DISABLED"]) if record["enabled"] == false
       if record["expiresAt"] && record["expiresAt"] <= Time.now
-        api_key_delete_record(ctx, record, config)
+        api_key_schedule_record_delete(ctx, record, config)
         raise APIError.new("UNAUTHORIZED", message: API_KEY_ERROR_CODES["KEY_EXPIRED"])
       end
       if record["remaining"].to_i <= 0 && !record["remaining"].nil? && record["refillAmount"].nil?
-        api_key_delete_record(ctx, record, config)
+        api_key_schedule_record_delete(ctx, record, config)
         raise APIError.new("TOO_MANY_REQUESTS", message: API_KEY_ERROR_CODES["USAGE_EXCEEDED"])
       end
 
@@ -651,11 +653,13 @@ module BetterAuth
       if client && server_only_keys.any? { |key| (create && key == :remaining) ? !body[:remaining].nil? : body.key?(key) }
         raise APIError.new("BAD_REQUEST", message: API_KEY_ERROR_CODES["SERVER_ONLY_PROPERTY"])
       end
-      if body[:refill_amount] && !body[:refill_interval]
-        raise APIError.new("BAD_REQUEST", message: API_KEY_ERROR_CODES["REFILL_INTERVAL_AND_AMOUNT_REQUIRED"])
-      end
-      if body[:refill_interval] && !body[:refill_amount]
+      amount_present = body.key?(:refill_amount)
+      interval_present = body.key?(:refill_interval)
+      if amount_present && !interval_present
         raise APIError.new("BAD_REQUEST", message: API_KEY_ERROR_CODES["REFILL_AMOUNT_AND_INTERVAL_REQUIRED"])
+      end
+      if interval_present && !amount_present
+        raise APIError.new("BAD_REQUEST", message: API_KEY_ERROR_CODES["REFILL_INTERVAL_AND_AMOUNT_REQUIRED"])
       end
       if body.key?(:expires_in)
         raise APIError.new("BAD_REQUEST", message: API_KEY_ERROR_CODES["KEY_DISABLED_EXPIRATION"]) if config[:key_expiration][:disable_custom_expires_time]
@@ -782,6 +786,24 @@ module BetterAuth
       api_key_storage_delete(ctx, record, config) if config[:storage] == "secondary-storage"
     end
 
+    def api_key_schedule_record_delete(ctx, record, config)
+      task = -> { api_key_delete_record(ctx, record, config) }
+      if config[:defer_updates] && api_key_background_tasks?(ctx)
+        ctx.context.run_in_background(task)
+      else
+        task.call
+      end
+    end
+
+    def api_key_schedule_cleanup(ctx, config)
+      task = -> { api_key_delete_expired(ctx.context, config) }
+      if config[:defer_updates] && api_key_background_tasks?(ctx)
+        ctx.context.run_in_background(task)
+      else
+        task.call
+      end
+    end
+
     @api_key_last_expired_check = nil
 
     def api_key_delete_expired(context, config, bypass_last_check: false)
@@ -822,44 +844,74 @@ module BetterAuth
       expires_at = api_key_normalize_time(record["expiresAt"])
       ttl = expires_at ? [(expires_at - Time.now).to_i, 0].max : nil
       reference_id = api_key_record_reference_id(record)
-      storage.set("api-key:#{record["key"]}", serialized, ttl)
-      storage.set("api-key:by-id:#{record["id"]}", serialized, ttl)
-      if config[:fallback_to_database]
-        storage.delete("api-key:by-ref:#{reference_id}")
-        return
-      end
-
       user_key = "api-key:by-ref:#{reference_id}"
-      if config[:fallback_to_database]
-        storage.delete(user_key)
-        return
-      end
 
-      ids = JSON.parse(storage.get(user_key).to_s)
-      ids << record["id"] unless ids.include?(record["id"])
-      storage.set(user_key, JSON.generate(ids))
-    rescue JSON::ParserError
-      storage.set("api-key:by-ref:#{api_key_record_reference_id(record)}", JSON.generate([record["id"]]))
+      api_key_storage_batch(storage) do
+        operations = [
+          -> { storage.set("api-key:#{record["key"]}", serialized, ttl) },
+          -> { storage.set("api-key:by-id:#{record["id"]}", serialized, ttl) }
+        ]
+        operations << if config[:fallback_to_database]
+          # In fallback mode the ref list is a cache invalidated on writes
+          # to avoid races with concurrent writers of the same reference.
+          -> { storage.delete(user_key) }
+        else
+          -> { api_key_ref_list_add(storage, user_key, record["id"]) }
+        end
+        operations.each(&:call)
+      end
     end
 
     def api_key_storage_delete(ctx, record, config)
       storage = api_key_storage(config, ctx.context)
       return unless storage
 
-      storage.delete("api-key:#{record["key"]}")
-      storage.delete("api-key:by-id:#{record["id"]}")
-      storage.delete("api-key:key:#{record["key"]}")
-      storage.delete("api-key:id:#{record["id"]}")
-      user_key = "api-key:by-ref:#{api_key_record_reference_id(record)}"
-      if config[:fallback_to_database]
-        storage.delete(user_key)
-        return
-      end
+      reference_id = api_key_record_reference_id(record)
+      user_key = "api-key:by-ref:#{reference_id}"
 
-      ids = JSON.parse(storage.get(user_key).to_s).reject { |id| id == record["id"] }
+      api_key_storage_batch(storage) do
+        operations = [
+          -> { storage.delete("api-key:#{record["key"]}") },
+          -> { storage.delete("api-key:by-id:#{record["id"]}") },
+          # Ruby-only legacy storage layout cleanup; upstream never wrote here.
+          -> { storage.delete("api-key:key:#{record["key"]}") },
+          -> { storage.delete("api-key:id:#{record["id"]}") }
+        ]
+        operations << if config[:fallback_to_database]
+          -> { storage.delete(user_key) }
+        else
+          -> { api_key_ref_list_remove(storage, user_key, record["id"]) }
+        end
+        operations.each(&:call)
+      end
+    end
+
+    def api_key_ref_list_add(storage, user_key, id)
+      ids = api_key_safe_parse_id_list(storage.get(user_key))
+      ids << id unless ids.include?(id)
+      storage.set(user_key, JSON.generate(ids))
+    end
+
+    def api_key_ref_list_remove(storage, user_key, id)
+      ids = api_key_safe_parse_id_list(storage.get(user_key)).reject { |existing| existing == id }
       ids.empty? ? storage.delete(user_key) : storage.set(user_key, JSON.generate(ids))
+    end
+
+    def api_key_safe_parse_id_list(raw)
+      return [] if raw.nil?
+
+      parsed = JSON.parse(raw.to_s)
+      parsed.is_a?(Array) ? parsed : []
     rescue JSON::ParserError
-      nil
+      []
+    end
+
+    def api_key_storage_batch(storage, &block)
+      if storage.respond_to?(:batch)
+        storage.batch(&block)
+      else
+        block.call
+      end
     end
 
     def api_key_storage_populate_reference(ctx, reference_id, records, config)
@@ -917,6 +969,10 @@ module BetterAuth
 
     def api_key_background_tasks?(ctx)
       ctx.context.options.advanced.dig(:background_tasks, :handler).respond_to?(:call)
+    end
+
+    def api_key_auth_required?(ctx)
+      !!(ctx.request || (ctx.headers && !ctx.headers.empty?))
     end
 
     def api_key_get_from_headers(ctx, config)

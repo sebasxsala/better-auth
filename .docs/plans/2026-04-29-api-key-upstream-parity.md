@@ -397,4 +397,8 @@ git commit -m "test(api-key): lock sort field normalization for both casings"
 
 ## Verification Log
 
-- (fill in after each `rake test` and `standardrb` run with run counts and elapsed time)
+- 2026-04-29 — Branch `cursor/api-key-upstream-parity` (forked off `canary` inside the `i8m3` worktree). Upstream submodule initialized at `v1.6.9` (`f484269228b7eb8df0e2325e7d264bb8d7796311`).
+- Baseline before changes: `cd packages/better_auth-api-key && rbenv exec bundle exec rake test` -> 47 runs, 304 assertions, 0 failures (~3.3 s).
+- Final: `cd packages/better_auth-api-key && rbenv exec bundle exec rake test` -> 55 runs, 345 assertions, 0 failures (~3.2 s).
+- Final: `cd packages/better_auth-api-key && RUBOCOP_CACHE_ROOT=/private/tmp/rubocop_cache rbenv exec bundle exec standardrb lib/ test/` -> exit 0, no offenses (~1.3 s).
+- Final: `cd packages/better_auth && rbenv exec bundle exec ruby -Itest test/better_auth/plugins/api_key_external_plugin_shim_test.rb` -> 1 run, 5 assertions, 0 failures (<1 s).
