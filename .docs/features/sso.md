@@ -18,13 +18,14 @@ SAML is protocol support within `better_auth-sso`, not its own package boundary.
 
 - Implemented in `packages/better_auth-sso` for provider lifecycle, route handling, OIDC, and real SAML XML validation.
 - Adds `ssoProvider` schema fields: `issuer`, `oidcConfig`, `samlConfig`, `userId`, `providerId`, `domain`, `domainVerified`, `domainVerificationToken`, and `organizationId`.
-- Adds `/sso/register`, `/sign-in/sso`, `/sso/callback/:providerId`, `/sso/saml2/callback/:providerId`, `/sso/saml2/sp/acs/:providerId`, `/sso/saml2/sp/metadata`, `/sso/providers`, `/sso/providers/:providerId`, `/sso/request-domain-verification`, and `/sso/verify-domain`.
+- Adds `/sso/register`, `/sign-in/sso`, `/sso/callback/:providerId`, `/sso/saml2/callback/:providerId`, `/sso/saml2/sp/acs/:providerId`, `/sso/saml2/sp/metadata`, `/sso/saml2/sp/slo/:providerId`, `/sso/saml2/logout/:providerId`, `/sso/providers`, `/sso/providers/:providerId`, `/sso/request-domain-verification`, and `/sso/verify-domain`.
 - Supports injected OIDC token/user callbacks in provider config, a dependency-free SAML test payload format for core coverage, optional SAML AuthnRequest/parser/validation hooks, and verified-domain organization membership assignment when the organization plugin is enabled.
 - Configures origin-check bypass only for upstream SAML callback/ACS paths because those POSTs come from external IdPs.
 - Sanitizes provider read responses with upstream-style OIDC client-id masking and SAML certificate parse results.
 - Hydrates OIDC discovery documents, validates trusted discovered URLs, resolves relative endpoints, preserves configured values, and selects token endpoint auth methods.
 - Enforces provider access for user-owned providers and organization admin/owner providers.
 - Covers SAML RelayState safety, replay protection, AuthnRequest/parser/validator adapter contracts, XML assertion count validation, and signature-algorithm policy decisions.
+- Supports SAML Single Logout when `saml.enableSingleLogout` / `saml[:enable_single_logout]` is enabled. ACS stores `NameID`/`SessionIndex` session lookup records, IdP LogoutRequest revokes matching Better Auth sessions, SP-initiated logout creates a pending logout request, and LogoutResponse consumes that pending record.
 - `better_auth-sso` depends on `ruby-saml >= 1.18.1` and validates signed XML assertions, IdP certificates, forged/tampered responses, assertion count, XSW-style wrapping, destination/recipient/audience/issuer/timestamps, and deprecated/unknown signature algorithms. Encrypted assertion handling is delegated to `ruby-saml` when `spPrivateKey` and `spCertificate` are configured in `samlConfig`.
 
 ## Key Differences

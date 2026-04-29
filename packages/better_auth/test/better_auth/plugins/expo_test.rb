@@ -110,6 +110,7 @@ class BetterAuthPluginsExpoTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       trusted_origins: ["http://client.example"],
       plugins: [BetterAuth::Plugins.expo, observer]
     )
@@ -202,6 +203,7 @@ class BetterAuthPluginsExpoTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [BetterAuth::Plugins.expo(plugin_options)]
     }
     auth_options[:trusted_origins] = trusted_origins if trusted_origins

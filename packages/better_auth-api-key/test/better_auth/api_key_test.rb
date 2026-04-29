@@ -96,12 +96,21 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
     )
     cookie = sign_up_cookie(auth, email: "storage-key@example.com")
     created = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {name: "storage"})
+    second = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {name: "storage-two"})
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
 
     assert storage.keys.any? { |key| key.include?(created[:id]) }
+    assert_nil storage.get("api-key:by-ref:#{user_id}")
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie})
+    assert_equal [created[:id], second[:id]].sort, listed.fetch(:apiKeys).map { |entry| entry[:id] }.sort
+
     session = auth.api.get_session(headers: {"x-api-key" => created[:key]})
 
     assert_equal "storage-key@example.com", session[:user]["email"]
     assert_equal created[:id], session[:session]["id"]
+
+    assert_equal({success: true}, auth.api.delete_api_key(headers: {"cookie" => cookie}, body: {keyId: created[:id]}))
+    assert_nil storage.get("api-key:by-ref:#{user_id}")
   end
 
   def test_api_key_session_respects_disabled_ip_tracking

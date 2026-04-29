@@ -123,7 +123,8 @@ class BetterAuthPluginsMultiSessionTest < Minitest::Test
   private
 
   def build_auth(options = {})
-    BetterAuth.auth({base_url: "http://localhost:3000", secret: SECRET, database: :memory}.merge(options))
+    email_and_password = {enabled: true}.merge(options.fetch(:email_and_password, {}))
+    BetterAuth.auth({base_url: "http://localhost:3000", secret: SECRET, database: :memory}.merge(options).merge(email_and_password: email_and_password))
   end
 
   def sign_up_response(auth, email:)

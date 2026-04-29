@@ -371,6 +371,8 @@ module BetterAuth
         fields = Schema.auth_tables(options)[model]&.fetch(:fields)
         fields ||= session_additional_fields if model == "session"
         output = stringify_keys(data)
+        return output unless fields
+
         fields.each do |field, attributes|
           unless output.key?(field)
             if attributes.key?(:default_value)

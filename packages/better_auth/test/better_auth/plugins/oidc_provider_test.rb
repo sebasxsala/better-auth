@@ -626,6 +626,7 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
       base_url: auth_base_url,
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [BetterAuth::Plugins.oidc_provider(options), *extra_plugins]
     )
   end

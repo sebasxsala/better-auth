@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "uri"
+require "securerandom"
 
 module BetterAuth
   module Routes
@@ -19,7 +20,7 @@ module BetterAuth
       ) do |ctx|
         options = ctx.context.options
         email_config = options.email_and_password
-        if email_config[:enabled] == false || email_config[:disable_sign_up]
+        if email_config[:enabled] != true || email_config[:disable_sign_up]
           raise APIError.new("BAD_REQUEST", message: "Email and password sign up is not enabled")
         end
 
@@ -36,6 +37,13 @@ module BetterAuth
         ctx.context.adapter.transaction do
           existing = ctx.context.internal_adapter.find_user_by_email(email)
           if existing
+            if email_config[:require_email_verification]
+              hash_password(ctx, password)
+              call_existing_sign_up_callback(ctx, email_config, existing)
+              synthetic_user = synthetic_sign_up_user(ctx, body, email, name, image)
+              next ctx.json({token: nil, user: Schema.parse_output(options, "user", synthetic_user)})
+            end
+
             raise APIError.new(
               "UNPROCESSABLE_ENTITY",
               message: BASE_ERROR_CODES["USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL"]
@@ -108,6 +116,49 @@ module BetterAuth
       raise
     rescue
       raise APIError.new("UNPROCESSABLE_ENTITY", message: BASE_ERROR_CODES["FAILED_TO_CREATE_USER"])
+    end
+
+    def self.call_existing_sign_up_callback(ctx, email_config, existing)
+      callback = email_config[:on_existing_user_sign_up]
+      return unless callback.respond_to?(:call)
+
+      user = existing[:user] || existing["user"] || existing
+      data = {user: user}
+      if callback.arity == 1
+        callback.call(data)
+      else
+        callback.call(data, ctx.request)
+      end
+    end
+
+    def self.synthetic_sign_up_user(ctx, body, email, name, image)
+      now = Time.now
+      core_fields = {
+        "id" => SecureRandom.hex(16),
+        "name" => name,
+        "email" => email.to_s.downcase,
+        "emailVerified" => false,
+        "image" => image,
+        "createdAt" => now,
+        "updatedAt" => now
+      }
+      reserved = %w[email password name image callbackURL callbackUrl callback_url rememberMe remember_me]
+      additional = parse_declared_input(ctx, "user", body.except(*reserved), allowed_base: [])
+      custom = ctx.context.options.email_and_password[:custom_synthetic_user]
+      return core_fields.merge(additional) unless custom.respond_to?(:call)
+
+      value = {
+        core_fields: core_fields.except("id"),
+        additional_fields: additional,
+        id: core_fields["id"]
+      }
+      stringify_synthetic_user(custom.call(value))
+    end
+
+    def self.stringify_synthetic_user(value)
+      return value.each_with_object({}) { |(key, object_value), result| result[Schema.storage_key(key)] = object_value } if value.is_a?(Hash)
+
+      {}
     end
 
     def self.send_sign_up_verification_email(ctx, user, callback_url)

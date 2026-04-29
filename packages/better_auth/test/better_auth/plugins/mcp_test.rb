@@ -108,6 +108,7 @@ class BetterAuthPluginsMCPTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.mcp(login_page: "/login"),
         BetterAuth::Plugins.jwt
@@ -300,6 +301,7 @@ class BetterAuthPluginsMCPTest < Minitest::Test
         base_url: "http://localhost:3000",
         secret: SECRET,
         database: :memory,
+        email_and_password: {enabled: true},
         plugins: [BetterAuth::Plugins.mcp({login_page: "/login"}.merge(options))]
       }
     )

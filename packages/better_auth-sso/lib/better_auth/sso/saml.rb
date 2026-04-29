@@ -1,8 +1,14 @@
 # frozen_string_literal: true
 
 require "base64"
-require "onelogin/ruby-saml"
 require "uri"
+
+begin
+  require "onelogin/ruby-saml"
+rescue LoadError
+  # The core SSO plugin can run with custom SAML hooks; the ruby-saml adapter
+  # is only needed when BetterAuth::SSO::SAML helpers are invoked.
+end
 
 module BetterAuth
   module SSO
@@ -54,6 +60,8 @@ module BetterAuth
             email: email.to_s.downcase,
             name: name.to_s.empty? ? email.to_s : name.to_s,
             id: assertion_identifier(response, email),
+            name_id: response.nameid,
+            session_index: response.sessionindex,
             email_verified: true
           }
         end

@@ -204,6 +204,7 @@ class BetterAuthPluginsSiweTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.siwe({
           domain: "example.com",

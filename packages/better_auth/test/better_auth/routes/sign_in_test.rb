@@ -8,7 +8,7 @@ class BetterAuthRoutesSignInTest < Minitest::Test
   SECRET = "phase-five-secret-with-enough-entropy-123"
 
   def test_sign_in_email_returns_token_user_and_cookie
-    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    auth = build_auth
     auth.api.sign_up_email(body: {email: "ada@example.com", password: "password123", name: "Ada"})
 
     status, headers, body = auth.api.sign_in_email(
@@ -29,6 +29,17 @@ class BetterAuthRoutesSignInTest < Minitest::Test
     assert_equal "Minitest", session[:session]["userAgent"]
   end
 
+  def test_sign_in_email_requires_email_password_to_be_enabled
+    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_in_email(body: {email: "default-disabled@example.com", password: "password123"})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal "Email and password is not enabled", error.message
+  end
+
   def test_sign_in_session_respects_disable_ip_tracking
     auth = build_auth(advanced: {ip_address: {disable_ip_tracking: true}})
     sign_up_cookie(auth, email: "no-ip@example.com")
@@ -44,7 +55,7 @@ class BetterAuthRoutesSignInTest < Minitest::Test
   end
 
   def test_sign_in_email_rejects_invalid_credentials
-    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    auth = build_auth
     auth.api.sign_up_email(body: {email: "bad-password@example.com", password: "password123", name: "Bad Password"})
 
     wrong_password = assert_raises(BetterAuth::APIError) do
@@ -108,7 +119,7 @@ class BetterAuthRoutesSignInTest < Minitest::Test
   end
 
   def test_sign_in_email_accepts_form_urlencoded_rack_requests
-    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    auth = build_auth
     auth.api.sign_up_email(body: {email: "form-sign-in@example.com", password: "password123", name: "Form"})
     form = "email=form-sign-in%40example.com&password=password123"
 
@@ -129,7 +140,7 @@ class BetterAuthRoutesSignInTest < Minitest::Test
   end
 
   def test_sign_in_email_blocks_cross_site_navigation
-    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    auth = build_auth
     auth.api.sign_up_email(body: {email: "csrf-sign-in@example.com", password: "password123", name: "CSRF"})
 
     status, _headers, body = auth.call(
@@ -154,7 +165,8 @@ class BetterAuthRoutesSignInTest < Minitest::Test
   private
 
   def build_auth(options = {})
-    BetterAuth.auth({base_url: "http://localhost:3000", secret: SECRET}.merge(options))
+    email_and_password = {enabled: true}.merge(options.fetch(:email_and_password, {}))
+    BetterAuth.auth({base_url: "http://localhost:3000", secret: SECRET}.merge(options).merge(email_and_password: email_and_password))
   end
 
   def sign_up_cookie(auth, email:)

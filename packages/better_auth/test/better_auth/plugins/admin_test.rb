@@ -440,6 +440,7 @@ class BetterAuthPluginsAdminTest < Minitest::Test
     BetterAuth.auth({
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [BetterAuth::Plugins.admin(admin_options)]
     }.merge(options))
   end

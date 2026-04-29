@@ -8,7 +8,7 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
   SECRET = "phase-five-secret-with-enough-entropy-123"
 
   def test_sign_up_email_creates_user_account_and_session
-    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    auth = build_auth
 
     result = auth.api.sign_up_email(body: {
       email: "Ada@Example.COM",
@@ -29,8 +29,19 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
     assert BetterAuth::Password.verify(password: "password123", hash: account["password"])
   end
 
+  def test_sign_up_email_requires_email_password_to_be_enabled
+    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_up_email(body: {email: "default-disabled@example.com", password: "password123", name: "Disabled"})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal "Email and password sign up is not enabled", error.message
+  end
+
   def test_sign_up_email_uses_configured_bcrypt_hasher
-    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET, password_hasher: :bcrypt)
+    auth = build_auth(password_hasher: :bcrypt)
 
     result = auth.api.sign_up_email(body: {
       email: "bcrypt@example.com",
@@ -44,9 +55,7 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
   end
 
   def test_sign_up_and_sign_in_email_use_custom_password_callbacks
-    auth = BetterAuth.auth(
-      base_url: "http://localhost:3000",
-      secret: SECRET,
+    auth = build_auth(
       email_and_password: {
         password: {
           hash: ->(password) { "custom:#{password.reverse}" },
@@ -63,7 +72,7 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
   end
 
   def test_sign_up_email_allows_empty_name_and_captures_session_headers
-    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    auth = build_auth
 
     result = auth.api.sign_up_email(
       body: {email: "headers@example.com", password: "password123", name: ""},
@@ -77,9 +86,7 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
   end
 
   def test_sign_up_session_uses_advanced_ip_address_headers
-    auth = BetterAuth.auth(
-      base_url: "http://localhost:3000",
-      secret: SECRET,
+    auth = build_auth(
       advanced: {
         ip_address: {
           ip_address_headers: ["x-client-ip", "x-forwarded-for"]
@@ -98,7 +105,7 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
   end
 
   def test_sign_up_email_sets_session_cookie_for_rack_requests
-    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    auth = build_auth
 
     status, headers, body = auth.call(
       rack_env(
@@ -115,7 +122,7 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
   end
 
   def test_sign_up_email_accepts_form_urlencoded_rack_requests
-    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    auth = build_auth
     form = "email=form-sign-up%40example.com&password=password123&name=Form+User"
 
     status, _headers, body = auth.call(
@@ -134,7 +141,7 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
   end
 
   def test_sign_up_email_blocks_cross_site_navigation
-    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    auth = build_auth
 
     status, _headers, body = auth.call(
       rack_env(
@@ -156,7 +163,7 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
   end
 
   def test_sign_up_email_rejects_invalid_email_and_short_password
-    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    auth = build_auth
 
     invalid_email = assert_raises(BetterAuth::APIError) do
       auth.api.sign_up_email(body: {email: "invalid", password: "password123", name: "Bad Email"})
@@ -172,7 +179,7 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
   end
 
   def test_sign_up_email_rejects_duplicate_email
-    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    auth = build_auth
 
     auth.api.sign_up_email(body: {email: "duplicate@example.com", password: "password123", name: "First"})
     error = assert_raises(BetterAuth::APIError) do
@@ -181,6 +188,29 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
 
     assert_equal 422, error.status_code
     assert_equal BetterAuth::BASE_ERROR_CODES["USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL"], error.message
+  end
+
+  def test_sign_up_email_with_required_verification_returns_synthetic_user_for_existing_email
+    callbacks = []
+    auth = build_auth(
+      email_and_password: {
+        require_email_verification: true,
+        on_existing_user_sign_up: ->(data) { callbacks << data }
+      },
+      email_verification: {
+        send_on_sign_up: false
+      }
+    )
+
+    original = auth.api.sign_up_email(body: {email: "existing-verify@example.com", password: "password123", name: "Original"})
+    duplicate = auth.api.sign_up_email(body: {email: "EXISTING-VERIFY@example.com", password: "password123", name: "Duplicate"})
+
+    assert_nil original[:token]
+    assert_nil duplicate[:token]
+    assert_equal "existing-verify@example.com", duplicate[:user]["email"]
+    refute_equal original[:user]["id"], duplicate[:user]["id"]
+    assert_equal 1, callbacks.length
+    assert_equal "existing-verify@example.com", callbacks.first[:user]["email"]
   end
 
   def test_sign_up_email_can_be_disabled
@@ -247,6 +277,11 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
   end
 
   private
+
+  def build_auth(options = {})
+    email_and_password = {enabled: true}.merge(options.fetch(:email_and_password, {}))
+    BetterAuth.auth({base_url: "http://localhost:3000", secret: SECRET}.merge(options).merge(email_and_password: email_and_password))
+  end
 
   def rack_env(method, path, body: "", content_type: "application/json", extra_headers: {})
     base = {

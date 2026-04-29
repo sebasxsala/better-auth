@@ -392,6 +392,7 @@ class BetterAuthPluginsOrganizationTest < Minitest::Test
     BetterAuth.auth({
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [BetterAuth::Plugins.organization(teams: {enabled: true}, dynamic_access_control: {enabled: true})]
     }.merge(options))
   end

@@ -15,6 +15,7 @@ module BetterAuth
       }
 
       tables.delete("session") if secondary_storage?(options) && !session_option(options, :store_session_in_database)
+      tables.delete("verification") if secondary_storage?(options) && !verification_option(options, :store_in_database)
       tables.merge!(plugin_schema)
       tables["rateLimit"] = rate_limit_table(options) if rate_limit_option(options, :storage) == "database"
       tables.sort_by { |_name, table| table[:order] || Float::INFINITY }.to_h
@@ -179,7 +180,14 @@ module BetterAuth
     private_class_method def self.normalize_field(value, key)
       data = symbolize_hash(value || {})
       data[:field_name] ||= physical_name(key)
+      data[:references] = normalize_reference(data[:references]) if data[:references]
       data
+    end
+
+    private_class_method def self.normalize_reference(value)
+      reference = symbolize_hash(value || {})
+      reference[:on_delete] ||= "cascade"
+      reference
     end
 
     private_class_method def self.mapped_field(options, model, field)
@@ -212,6 +220,10 @@ module BetterAuth
       fetch_hash(rate_limit_options(options), key)
     end
 
+    private_class_method def self.verification_option(options, key)
+      fetch_hash(verification_options(options), key)
+    end
+
     private_class_method def self.model_options(options, model)
       options.respond_to?(model) ? options.public_send(model) : fetch_hash(options, model)
     end
@@ -222,6 +234,10 @@ module BetterAuth
 
     private_class_method def self.rate_limit_options(options)
       options.respond_to?(:rate_limit) ? options.rate_limit : fetch_hash(options, :rate_limit)
+    end
+
+    private_class_method def self.verification_options(options)
+      options.respond_to?(:verification) ? options.verification : fetch_hash(options, :verification)
     end
 
     private_class_method def self.secondary_storage?(options)

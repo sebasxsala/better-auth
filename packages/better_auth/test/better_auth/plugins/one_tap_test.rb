@@ -214,6 +214,7 @@ class BetterAuthPluginsOneTapTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       social_providers: {google: {client_id: "google-client-id"}}
     }.merge(options))
   end

@@ -830,6 +830,11 @@ module BetterAuth
       end
 
       user_key = "api-key:by-ref:#{reference_id}"
+      if config[:fallback_to_database]
+        storage.delete(user_key)
+        return
+      end
+
       ids = JSON.parse(storage.get(user_key).to_s)
       ids << record["id"] unless ids.include?(record["id"])
       storage.set(user_key, JSON.generate(ids))

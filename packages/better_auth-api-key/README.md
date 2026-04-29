@@ -94,6 +94,8 @@ BetterAuth::Plugins.api_key([
 
 Organization-owned keys require `BetterAuth::Plugins.organization` and use organization permissions for `apiKey` actions: `create`, `read`, `update`, and `delete`.
 
+Secondary-storage mode uses upstream storage keys such as `api-key:<hash>`, `api-key:by-id:<id>`, and `api-key:by-ref:<referenceId>`. When `fallback_to_database: true` is enabled, the reference list is treated as a cache and invalidated on writes/deletes so concurrent writers cannot lose IDs; listing falls back to the database source of truth.
+
 ## Hashing
 
 The upstream `defaultKeyHasher` equivalent is available as:

@@ -149,6 +149,30 @@ class BetterAuthSchemaTest < Minitest::Test
     assert_equal "last_request", schema["apiKey"][:fields]["lastRequest"][:field_name]
   end
 
+  def test_plugin_foreign_keys_default_to_cascade_delete
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [
+        {
+          id: "linked",
+          schema: {
+            linkedThing: {
+              fields: {
+                userId: {type: "string", required: true, references: {model: "user", field: "id"}}
+              }
+            }
+          }
+        }
+      ]
+    )
+
+    field = BetterAuth::Schema.auth_tables(config).fetch("linkedThing").fetch(:fields).fetch("userId")
+
+    assert_equal "cascade", field.fetch(:references).fetch(:on_delete)
+    assert_includes BetterAuth::Schema::SQL.create_statements(config, dialect: :postgres).join("\n"), %(ON DELETE CASCADE)
+  end
+
   def test_phase_eight_identity_plugin_schemas_are_merged
     config = BetterAuth::Configuration.new(
       secret: SECRET,
@@ -177,6 +201,7 @@ class BetterAuthSchemaTest < Minitest::Test
     config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, secondary_storage: storage)
 
     refute_includes BetterAuth::Schema.auth_tables(config).keys, "session"
+    refute_includes BetterAuth::Schema.auth_tables(config).keys, "verification"
 
     with_db_sessions = BetterAuth::Configuration.new(
       secret: SECRET,
@@ -186,5 +211,54 @@ class BetterAuthSchemaTest < Minitest::Test
     )
 
     assert_includes BetterAuth::Schema.auth_tables(with_db_sessions).keys, "session"
+
+    with_db_verifications = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      secondary_storage: storage,
+      verification: {store_in_database: true}
+    )
+
+    assert_includes BetterAuth::Schema.auth_tables(with_db_verifications).keys, "verification"
+  end
+
+  def test_sql_schema_maps_json_and_array_field_types_per_dialect
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [
+        {
+          id: "typed-fields",
+          schema: {
+            typedRecord: {
+              fields: {
+                id: {type: "string", required: true},
+                metadata: {type: "json", required: false},
+                tags: {type: "string[]", required: false},
+                scores: {type: "number[]", required: false}
+              }
+            }
+          }
+        }
+      ]
+    )
+
+    postgres = BetterAuth::Schema::SQL.create_statements(config, dialect: :postgres).join("\n")
+    mysql = BetterAuth::Schema::SQL.create_statements(config, dialect: :mysql).join("\n")
+    sqlite = BetterAuth::Schema::SQL.create_statements(config, dialect: :sqlite).join("\n")
+    mssql = BetterAuth::Schema::SQL.create_statements(config, dialect: :mssql).join("\n")
+
+    assert_includes postgres, %("metadata" jsonb)
+    assert_includes postgres, %("tags" jsonb)
+    assert_includes postgres, %("scores" jsonb)
+    assert_includes mysql, "`metadata` json"
+    assert_includes mysql, "`tags` json"
+    assert_includes mysql, "`scores` json"
+    assert_includes sqlite, %("metadata" text)
+    assert_includes sqlite, %("tags" text)
+    assert_includes sqlite, %("scores" text)
+    assert_includes mssql, "[metadata] varchar(8000)"
+    assert_includes mssql, "[tags] varchar(8000)"
+    assert_includes mssql, "[scores] varchar(8000)"
   end
 end

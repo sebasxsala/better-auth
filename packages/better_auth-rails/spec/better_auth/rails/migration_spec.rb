@@ -52,6 +52,34 @@ RSpec.describe BetterAuth::Rails::Migration do
     expect(migration).to include("add_foreign_key :audit_logs, :users, column: :user_id, on_delete: :cascade")
   end
 
+  it "renders json and array schema field types" do
+    plugin = BetterAuth::Plugin.new(
+      id: "typed",
+      schema: {
+        typedRecord: {
+          model_name: "typed_records",
+          fields: {
+            id: {type: "string", required: true},
+            metadata: {type: "json", required: false},
+            tags: {type: "string[]", required: false},
+            scores: {type: "number[]", required: false}
+          }
+        }
+      }
+    )
+    plugin_config = BetterAuth::Configuration.new(
+      secret: "test-secret-that-is-long-enough-for-validation",
+      database: :memory,
+      plugins: [plugin]
+    )
+
+    migration = described_class.render(plugin_config)
+
+    expect(migration).to include("t.json :metadata")
+    expect(migration).to include("t.json :tags")
+    expect(migration).to include("t.json :scores")
+  end
+
   it "renders organization and passkey plugin schema migrations" do
     plugin_config = BetterAuth::Configuration.new(
       secret: "test-secret-that-is-long-enough-for-validation",

@@ -692,6 +692,7 @@ class BetterAuthPluginsSCIMTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: plugins || [BetterAuth::Plugins.scim(options)]
     )
   end

@@ -10,6 +10,7 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.stripe(
           stripe_client: BetterAuthPluginsStripeTest::FakeStripeClient.new,
@@ -35,6 +36,7 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.organization,
         BetterAuth::Plugins.stripe(
@@ -222,6 +224,7 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.organization,
         BetterAuth::Plugins.stripe(
@@ -265,6 +268,7 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.organization,
         BetterAuth::Plugins.stripe(
@@ -316,6 +320,7 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.organization,
         BetterAuth::Plugins.stripe(
@@ -373,6 +378,7 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.organization,
         BetterAuth::Plugins.stripe(
@@ -393,6 +399,7 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
       base_url: "http://localhost:3000",
       secret: SECRET,
       database: :memory,
+      email_and_password: {enabled: true},
       plugins: [
         BetterAuth::Plugins.organization,
         BetterAuth::Plugins.stripe(

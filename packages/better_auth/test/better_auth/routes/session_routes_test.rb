@@ -108,6 +108,24 @@ class BetterAuthRoutesSessionTest < Minitest::Test
     assert_equal [auth.api.get_session(headers: {"cookie" => cookie})[:session]["userId"]], result.map { |session| session["userId"] }.uniq
   end
 
+  def test_update_session_returns_updated_session_payload
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.additional_fields(
+          session: {
+            deviceName: {type: "string", required: false}
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "update-session@example.com")
+
+    result = auth.api.update_session(headers: {"cookie" => cookie}, body: {deviceName: "mobile"})
+
+    assert_equal "mobile", result.fetch(:session).fetch("deviceName")
+    assert_equal "update-session@example.com", result.fetch(:user).fetch("email")
+  end
+
   def test_revoke_session_deletes_only_matching_user_session
     auth = build_auth
     first_cookie = sign_up_cookie(auth, email: "revoke@example.com")
@@ -119,6 +137,24 @@ class BetterAuthRoutesSessionTest < Minitest::Test
     assert_equal({status: true}, result)
     assert_nil auth.api.get_session(headers: {"cookie" => first_cookie})
     refute_nil auth.api.get_session(headers: {"cookie" => second_cookie})
+  end
+
+  def test_sensitive_session_routes_require_fresh_session
+    auth = build_auth(session: {fresh_age: 60, cookie_cache: {enabled: true, strategy: "jwe", max_age: 300}})
+    cookie = sign_up_cookie(auth, email: "stale-sensitive@example.com")
+    session = auth.api.get_session(headers: {"cookie" => cookie})
+    auth.context.adapter.update(
+      model: "session",
+      where: [{field: "token", value: session[:session]["token"]}],
+      update: {createdAt: Time.now - 300, updatedAt: Time.now - 300}
+    )
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.revoke_sessions(headers: {"cookie" => cookie})
+    end
+
+    assert_equal 403, error.status_code
+    assert_equal "SESSION_NOT_FRESH", error.code
   end
 
   def test_revoke_sessions_deletes_all_current_user_sessions
@@ -219,7 +255,8 @@ class BetterAuthRoutesSessionTest < Minitest::Test
   private
 
   def build_auth(options = {})
-    BetterAuth.auth({base_url: "http://localhost:3000", secret: SECRET, database: :memory}.merge(options))
+    email_and_password = {enabled: true}.merge(options.fetch(:email_and_password, {}))
+    BetterAuth.auth({base_url: "http://localhost:3000", secret: SECRET, database: :memory}.merge(options).merge(email_and_password: email_and_password))
   end
 
   def sign_up_cookie(auth, email:)

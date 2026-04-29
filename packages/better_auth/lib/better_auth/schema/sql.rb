@@ -108,6 +108,17 @@ module BetterAuth
           end
         when "number"
           attributes[:bigint] ? "bigint" : "integer"
+        when "json", "string[]", "number[]"
+          case dialect
+          when :postgres
+            "jsonb"
+          when :mysql
+            "json"
+          when :mssql
+            "varchar(8000)"
+          else
+            "text"
+          end
         else
           if dialect == :mysql
             indexed = logical_field == "id" || attributes[:unique] || attributes[:index] || attributes[:references]

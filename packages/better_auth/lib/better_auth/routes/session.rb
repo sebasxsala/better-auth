@@ -38,7 +38,7 @@ module BetterAuth
         updated = ctx.context.internal_adapter.update_session(session[:session]["token"], update)
         merged = session[:session].merge(updated || update)
         Cookies.set_session_cookie(ctx, {session: merged, user: session[:user]}, Cookies.dont_remember?(ctx))
-        ctx.json({session: Schema.parse_output(ctx.context.options, "session", merged)})
+        ctx.json(parsed_session_response(ctx, {session: merged, user: session[:user]}))
       end
     end
 
@@ -108,7 +108,7 @@ module BetterAuth
       created_at = normalize_time(session["createdAt"])
       return unless created_at && Time.now - created_at >= fresh_age
 
-      raise APIError.new("FORBIDDEN", message: BASE_ERROR_CODES.fetch("SESSION_NOT_FRESH"))
+      raise APIError.new("FORBIDDEN", code: "SESSION_NOT_FRESH", message: BASE_ERROR_CODES.fetch("SESSION_NOT_FRESH"))
     end
 
     def self.normalize_time(value)
