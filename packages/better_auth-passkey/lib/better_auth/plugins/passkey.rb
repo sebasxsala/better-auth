@@ -82,7 +82,7 @@ module BetterAuth
           name: user["name"] || user["email"] || user["id"],
           displayName: user["displayName"] || user["display_name"]
         }.compact)
-        ctx.json(options.as_json.merge(attestation: "none", excludeCredentials: existing.map { |passkey| passkey_credential_descriptor(passkey) }))
+        ctx.json(options.as_json.merge(attestation: "none", excludeCredentials: existing.map { |passkey| passkey_credential_descriptor(passkey, kind: :exclude) }))
       end
     end
 
@@ -228,7 +228,9 @@ module BetterAuth
         passkey_require_string!(body, :id)
         passkey = ctx.context.adapter.find_one(model: "passkey", where: [{field: "id", value: body[:id]}])
         raise APIError.new("NOT_FOUND", message: PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND")) unless passkey
-        raise APIError.new("UNAUTHORIZED") unless passkey.fetch("userId") == session.fetch(:user).fetch("id")
+        unless passkey.fetch("userId") == session.fetch(:user).fetch("id")
+          raise APIError.new("UNAUTHORIZED", message: PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND"))
+        end
 
         ctx.context.adapter.delete(model: "passkey", where: [{field: "id", value: passkey.fetch("id")}])
         ctx.json({status: true})
@@ -240,7 +242,9 @@ module BetterAuth
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         passkey_require_string!(body, :id)
-        passkey_require_string!(body, :name)
+        unless body.key?(:name) && body[:name].is_a?(String)
+          raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES.fetch("VALIDATION_ERROR"))
+        end
 
         passkey = ctx.context.adapter.find_one(model: "passkey", where: [{field: "id", value: body[:id]}])
         raise APIError.new("NOT_FOUND", message: PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND")) unless passkey
@@ -332,7 +336,10 @@ module BetterAuth
     def passkey_rp_id(config, ctx)
       return config[:rp_id] if config[:rp_id]
 
-      URI.parse(ctx.context.options.base_url.to_s).host || "localhost"
+      base_url = ctx.context.options.base_url.to_s
+      return "localhost" if base_url.empty?
+
+      URI.parse(base_url).host || "localhost"
     rescue URI::InvalidURIError
       "localhost"
     end
@@ -442,9 +449,9 @@ module BetterAuth
         context: challenge["context"]
       }) || {})
       returned_user_id = result[:user_id]
-      return target_user_id if returned_user_id.to_s.empty?
+      return target_user_id if returned_user_id.nil? || returned_user_id == ""
 
-      unless returned_user_id.is_a?(String)
+      unless returned_user_id.is_a?(String) && returned_user_id.length.positive?
         raise APIError.new("BAD_REQUEST", message: PASSKEY_ERROR_CODES.fetch("RESOLVED_USER_INVALID"))
       end
 
@@ -507,11 +514,9 @@ module BetterAuth
       record["credentialID"] || record["credentialId"] || record[:credentialID] || record[:credential_id]
     end
 
-    def passkey_credential_descriptor(record)
-      descriptor = {
-        id: passkey_credential_id(record),
-        type: "public-key"
-      }
+    def passkey_credential_descriptor(record, kind: :allow)
+      descriptor = {id: passkey_credential_id(record)}
+      descriptor[:type] = "public-key" if kind == :allow
       transports = (record["transports"] || record[:transports]).to_s.split(",").map(&:strip).reject(&:empty?)
       descriptor[:transports] = transports if transports.any?
       descriptor

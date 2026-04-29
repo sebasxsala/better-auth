@@ -60,7 +60,7 @@ The earlier parity plan implemented fresh-session enforcement, schema deep-merge
 **Files:**
 - Modify: `packages/better_auth-passkey/test/better_auth/passkey_test.rb`
 
-- [ ] **Step 1: Test that delete forbidden returns the `PASSKEY_NOT_FOUND` message**
+- [x] **Step 1: Test that delete forbidden returns the `PASSKEY_NOT_FOUND` message**
 
 ```ruby
 def test_delete_passkey_for_another_user_returns_not_found_message
@@ -70,7 +70,7 @@ def test_delete_passkey_for_another_user_returns_not_found_message
 end
 ```
 
-- [ ] **Step 2: Test for `excludeCredentials` shape parity**
+- [x] **Step 2: Test for `excludeCredentials` shape parity**
 
 ```ruby
 def test_register_options_exclude_credentials_match_upstream_shape
@@ -84,7 +84,7 @@ def test_register_options_exclude_credentials_match_upstream_shape
 end
 ```
 
-- [ ] **Step 3: Test for transports omission**
+- [x] **Step 3: Test for transports omission**
 
 ```ruby
 def test_register_options_omit_transports_when_passkey_has_none
@@ -97,7 +97,7 @@ def test_register_options_omit_transports_when_passkey_has_none
 end
 ```
 
-- [ ] **Step 4: Test for RP id resolution**
+- [x] **Step 4: Test for RP id resolution**
 
 ```ruby
 def test_rp_id_falls_back_to_hostname_with_port_stripped
@@ -113,7 +113,7 @@ def test_rp_id_returns_localhost_when_base_url_is_invalid
 end
 ```
 
-- [ ] **Step 5: Test `afterVerification` empty/invalid `userId` matrix**
+- [x] **Step 5: Test `afterVerification` empty/invalid `userId` matrix**
 
 ```ruby
 def test_after_verification_user_id_matrix
@@ -125,7 +125,7 @@ def test_after_verification_user_id_matrix
 end
 ```
 
-- [ ] **Step 6: Test `update_passkey` accepts empty string name**
+- [x] **Step 6: Test `update_passkey` accepts empty string name**
 
 ```ruby
 def test_update_passkey_allows_empty_name_to_match_upstream
@@ -134,7 +134,7 @@ def test_update_passkey_allows_empty_name_to_match_upstream
 end
 ```
 
-- [ ] **Step 7: Run the new tests**
+- [x] **Step 7: Run the new tests**
 
 ```bash
 cd packages/better_auth-passkey
@@ -143,12 +143,14 @@ rbenv exec bundle exec ruby -Itest test/better_auth/passkey_test.rb -n /shape|me
 
 Expected: failures across these tests until the implementation is updated.
 
+**Result:** Initial run produced 2 failures (`test_register_options_exclude_credentials_match_upstream_shape`, `test_delete_passkey_for_another_user_returns_not_found_message`) on a `30 runs, 132 assertions, 2 failures, 0 errors, 0 skips` baseline. The remaining new tests already match upstream behavior with the existing implementation, so they passed on first run. A pre-existing test-helper bug was uncovered during this step: `build_auth` was missing `email_and_password: {enabled: true}` after a recent core change that disables email/password sign-up by default. Adding it brought the suite from 12 errors back to a clean baseline before the new tests were introduced.
+
 ### Task 2: Ownership Check Error Message Parity
 
 **Files:**
 - Modify: `packages/better_auth-passkey/lib/better_auth/plugins/passkey.rb`
 
-- [ ] **Step 1: Update `delete_passkey_endpoint`**
+- [x] **Step 1: Update `delete_passkey_endpoint`**
 
 Replace the bare `raise APIError.new("UNAUTHORIZED")` with:
 
@@ -156,19 +158,19 @@ Replace the bare `raise APIError.new("UNAUTHORIZED")` with:
 raise APIError.new("UNAUTHORIZED", message: PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND")) unless passkey.fetch("userId") == session.fetch(:user).fetch("id")
 ```
 
-- [ ] **Step 2: Audit `update_passkey_endpoint`**
+- [x] **Step 2: Audit `update_passkey_endpoint`**
 
-Confirm it already raises `YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY` with the right message; no change required if so.
+Confirmed: it already raises `YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY` with `forbiddenError` semantics, mirroring upstream's `requireResourceOwnership({forbiddenError: PASSKEY_ERROR_CODES.YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY})`. No change required.
 
-- [ ] **Step 3: Run the delete test**
+- [x] **Step 3: Run the delete test**
 
 ```bash
 rbenv exec bundle exec ruby -Itest test/better_auth/passkey_test.rb -n test_delete_passkey_for_another_user_returns_not_found_message
 ```
 
-Expected: PASS.
+Expected: PASS. Result: `1 runs, 3 assertions, 0 failures, 0 errors, 0 skips`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git commit -am "fix(passkey): emit PASSKEY_NOT_FOUND message on cross-user delete"
@@ -179,7 +181,7 @@ git commit -am "fix(passkey): emit PASSKEY_NOT_FOUND message on cross-user delet
 **Files:**
 - Modify: `packages/better_auth-passkey/lib/better_auth/plugins/passkey.rb`
 
-- [ ] **Step 1: Drop the extra `type` field for register exclude shape**
+- [x] **Step 1: Drop the extra `type` field for register exclude shape**
 
 Update `passkey_credential_descriptor` so the registration excludeCredentials shape matches upstream. Either:
 
@@ -200,15 +202,15 @@ end
 
 Update both endpoints accordingly: registration uses `kind: :exclude`, authentication uses `kind: :allow`.
 
-- [ ] **Step 2: Run the shape tests**
+- [x] **Step 2: Run the shape tests**
 
 ```bash
 rbenv exec bundle exec ruby -Itest test/better_auth/passkey_test.rb -n /shape|transports/
 ```
 
-Expected: PASS.
+Expected: PASS. Result: `4 runs, 33 assertions, 0 failures, 0 errors, 0 skips`. Existing test `test_option_shapes_include_transport_details_and_per_request_expiration` was updated to drop the `type: "public-key"` assertion from `excludeCredentials` while keeping it on `allowCredentials`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git commit -am "fix(passkey): match upstream excludeCredentials shape (no type, omit empty transports)"
@@ -219,7 +221,7 @@ git commit -am "fix(passkey): match upstream excludeCredentials shape (no type, 
 **Files:**
 - Modify: `packages/better_auth-passkey/lib/better_auth/plugins/passkey.rb`
 
-- [ ] **Step 1: Replace `passkey_rp_id` with a strict-host implementation**
+- [x] **Step 1: Replace `passkey_rp_id` with a strict-host implementation**
 
 ```ruby
 def passkey_rp_id(config, ctx)
@@ -237,15 +239,15 @@ end
 
 If `URI.parse` raises on a URL containing whitespace, the rescue keeps the upstream fallback intact. Confirm the upstream `getRpID` only uses `URL.hostname` (no port). Ruby `URI#host` already excludes the port, so this matches upstream.
 
-- [ ] **Step 2: Run RP id tests**
+- [x] **Step 2: Run RP id tests**
 
 ```bash
 rbenv exec bundle exec ruby -Itest test/better_auth/passkey_test.rb -n /rp_id/
 ```
 
-Expected: PASS.
+Expected: PASS. Result: `4 runs, 4 assertions, 0 failures, 0 errors, 0 skips` (`port_stripped`, `invalid_url`, `blank_base_url`, `explicit_config` cases).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git commit -am "fix(passkey): resolve rp_id host without port and tolerate invalid base URLs"
@@ -256,7 +258,7 @@ git commit -am "fix(passkey): resolve rp_id host without port and tolerate inval
 **Files:**
 - Modify: `packages/better_auth-passkey/lib/better_auth/plugins/passkey.rb`
 
-- [ ] **Step 1: Tighten `passkey_after_registration_verification_user_id`**
+- [x] **Step 1: Tighten `passkey_after_registration_verification_user_id`**
 
 Replace the validation block with:
 
@@ -271,7 +273,7 @@ end
 
 This explicitly rejects integers, booleans, and other non-string truthy values, matching upstream's `typeof result.userId !== "string" || !result.userId` check.
 
-- [ ] **Step 2: Loosen `update_passkey_endpoint` to allow empty string name**
+- [x] **Step 2: Loosen `update_passkey_endpoint` to allow empty string name**
 
 Replace `passkey_require_string!(body, :name)` with a check that allows the empty string:
 
@@ -283,15 +285,15 @@ end
 
 (`""` is still a string and now passes.)
 
-- [ ] **Step 3: Run the validation tests**
+- [x] **Step 3: Run the validation tests**
 
 ```bash
 rbenv exec bundle exec ruby -Itest test/better_auth/passkey_test.rb -n /user_id_matrix|empty_name/
 ```
 
-Expected: PASS.
+Expected: PASS. Result: `5 runs, 8 assertions, 0 failures, 0 errors, 0 skips`. The single matrix scenario was split into four focused tests (`accepts_nil_and_empty_string`, `accepts_non_empty_string`, `rejects_integer`, `rejects_boolean`) plus the `empty_name` test.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git commit -am "fix(passkey): match upstream userId validation matrix and allow empty update name"
@@ -303,16 +305,18 @@ git commit -am "fix(passkey): match upstream userId validation matrix and allow 
 - Modify: `packages/better_auth-passkey/README.md`
 - Modify: `docs/content/docs/plugins/passkey.mdx`
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
-Document:
+Documented in `packages/better_auth-passkey/README.md` (new "Upstream parity notes" section) and `docs/content/docs/plugins/passkey.mdx` (new "Upstream Parity Notes" section + tightened `after_verification` semantics paragraph):
 
 - The Ruby plugin omits `type` from `excludeCredentials` to match upstream wire shape; `allowCredentials` still includes `type: "public-key"`.
 - The `model_name: "passkeys"` adaptation for SQL adapters (intentional Ruby divergence) and the resulting storage table name.
-- The `rp_id` falls back to `URI.parse(base_url).host || "localhost"`, with `localhost` returned on parse failure.
+- The `rp_id` falls back to `URI.parse(base_url).host || "localhost"`, with `localhost` returned on parse failure or empty `base_url`.
 - The pre-auth `afterVerification` flow accepts `nil` or `""` as "no override" and rejects every other non-empty-string value with `RESOLVED_USER_INVALID`.
+- `update_passkey` accepts empty-string `name`, mirroring upstream's `z.string()`.
+- Cross-user `delete_passkey` raises `UNAUTHORIZED` with the `PASSKEY_NOT_FOUND` message.
 
-- [ ] **Step 2: Run the full suite**
+- [x] **Step 2: Run the full suite**
 
 ```bash
 cd packages/better_auth-passkey
@@ -320,20 +324,20 @@ rbenv exec bundle exec rake test
 RUBOCOP_CACHE_ROOT=/private/tmp/rubocop_cache rbenv exec bundle exec standardrb
 ```
 
-Expected: tests + lint pass.
+Expected: tests + lint pass. Result: tests `30 runs, 136 assertions, 0 failures, 0 errors, 0 skips`; standardrb clean (no offenses).
 
-- [ ] **Step 3: Run the core session/routes regression**
+- [x] **Step 3: Run the core session/routes regression**
 
 ```bash
 cd ../better_auth
 rbenv exec bundle exec ruby -Itest test/better_auth/session_test.rb
 ```
 
-Expected: PASS.
+Expected: PASS. Result: `5 runs, 12 assertions, 0 failures, 0 errors, 0 skips`.
 
-- [ ] **Step 4: Update the verification log section of this plan with run counts**
+- [x] **Step 4: Update the verification log section of this plan with run counts**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -am "docs(passkey): document upstream parity follow-ups and Ruby adaptations"
@@ -349,3 +353,20 @@ git commit -am "docs(passkey): document upstream parity follow-ups and Ruby adap
 
 - Should the Ruby plugin add an opt-in `legacy_exclude_credential_type: true` switch for apps that depend on the previous shape, or is the wire change safe to ship without a flag?
 - Does `BetterAuth::Plugins.passkey` need to expose the `requireResourceOwnership` middleware as a reusable Ruby helper, or is the inline ownership check sufficient for the two endpoints that need it?
+
+## Verification Log
+
+- **Branch:** `feat/passkey-upstream-parity-followup` (based on the same commit as `57904a1` / local `canary` tip when applied in the `nylk` worktree; `canary` ref may be checked out in another worktree).
+- **Commits:** Implementation and docs are recorded as `fix(passkey): …` plus `docs(plan): …` in git history (replacing per-task micro-commits from the checklist).
+- `packages/better_auth-passkey` test suite: **30 runs, 136 assertions, 0 failures, 0 errors, 0 skips**.
+- `packages/better_auth-passkey` standardrb (with `RUBOCOP_CACHE_ROOT=/private/tmp/rubocop_cache`): clean.
+- `packages/better_auth/test/better_auth/session_test.rb`: **5 runs, 12 assertions, 0 failures**.
+- Pre-existing helper bug discovered and fixed inline: `BetterAuthPluginsPasskeyTest#build_auth` now defaults `email_and_password: {enabled: true}`, matching the username plugin's helper. Without it, every passkey test that called `sign_up_cookie` errored on `KeyError: key not found: "set-cookie"` because the core `sign_up_email` route now returns `400 Email and password sign up is not enabled` by default.
+
+## Cross-Reference Corrections
+
+While implementing this plan, two upstream behaviors were re-verified against `upstream/packages/passkey/src/routes.ts` (v1.6.9) and `upstream/packages/better-auth/src/api/middlewares/authorization.ts`:
+
+- **Delta #1 (delete ownership)**: Upstream's `requireResourceOwnership` for delete falls through to `throw new APIError(forbiddenStatus)` (no message body) when no `forbiddenError` is provided, not the `notFoundError` message as the original delta description stated. Better-call's default body for an APIError with no message would still serialize to a non-null payload (`{message: "Unauthorized"}` from the status name). The Ruby plugin now emits `{code: "UNAUTHORIZED", message: "Passkey not found"}` to expose a more useful message for clients, which is a Ruby-specific improvement on top of upstream parity.
+- **Delta #4 (`userVerification`)**: The `webauthn` Ruby gem's `WebAuthn::Credential.options_for_get` does not emit `userVerification` in its serialized output, so the Ruby plugin still merges `userVerification: "preferred"` into the JSON payload to match upstream's wire shape. The existing test `test_option_shapes_include_transport_details_and_per_request_expiration` covers this.
+- **Delta #9 (set_session_cookie ordering)**: Upstream calls `setSessionCookie` before `deleteVerificationByIdentifier`. The Ruby plugin already preserves this ordering and the existing `test_registers_and_authenticates_with_real_webauthn_challenges` test asserts the cookie is set on success, so no additional regression test was added.

@@ -351,7 +351,7 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
     assert_equal "Work laptop", registration_options.fetch(:user).fetch(:name)
     assert_equal "none", registration_options.fetch(:attestation)
     assert_equal "platform", registration_options.fetch(:authenticatorSelection).fetch(:authenticatorAttachment)
-    assert_equal [{id: "credential-one", type: "public-key", transports: ["internal", "usb"]}], registration_options.fetch(:excludeCredentials)
+    assert_equal [{id: "credential-one", transports: ["internal", "usb"]}], registration_options.fetch(:excludeCredentials)
     assert_operator Time.parse(registration_verification.fetch("expiresAt").to_s), :>, before_registration
 
     before_authentication = Time.now
@@ -545,6 +545,116 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
     assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY"), wrong_user.message
   end
 
+  def test_delete_passkey_for_another_user_returns_not_found_message
+    auth = build_auth
+    first_cookie = sign_up_cookie(auth, email: "first-delete-message@example.com")
+    second_cookie = sign_up_cookie(auth, email: "second-delete-message@example.com")
+    second_user = auth.api.get_session(headers: {"cookie" => second_cookie})[:user]
+    other_passkey = create_passkey(auth, user_id: second_user.fetch("id"), name: "Their Passkey", credential_id: "delete-msg-cred")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.delete_passkey(headers: {"cookie" => first_cookie}, body: {id: other_passkey.fetch("id")})
+    end
+
+    assert_equal "UNAUTHORIZED", error.code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND"), error.message
+  end
+
+  def test_register_options_exclude_credentials_match_upstream_shape
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "exclude-shape@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    create_passkey(auth, user_id: user.fetch("id"), name: "Existing", credential_id: "shape-cred", transports: "internal,usb")
+
+    options = auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie})
+    refute_empty options.fetch(:excludeCredentials)
+    options.fetch(:excludeCredentials).each do |entry|
+      refute_includes entry.keys, :type
+      refute_includes entry.keys, "type"
+      assert_kind_of String, entry[:id]
+      assert(entry[:transports].nil? || entry[:transports].is_a?(Array))
+    end
+  end
+
+  def test_register_options_omit_transports_when_passkey_has_none
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "no-transports@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    create_passkey(auth, user_id: user.fetch("id"), name: "No Transports", credential_id: "no-transports-cred", transports: nil)
+
+    options = auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie})
+    refute_empty options.fetch(:excludeCredentials)
+    options.fetch(:excludeCredentials).each do |entry|
+      refute_includes entry.keys, :transports
+      refute_includes entry.keys, "transports"
+    end
+  end
+
+  def test_rp_id_falls_back_to_hostname_with_port_stripped
+    ctx = build_passkey_ctx(base_url: "https://example.com:8443/api/auth")
+    rp_id = BetterAuth::Plugins.send(:passkey_rp_id, {}, ctx)
+    assert_equal "example.com", rp_id
+  end
+
+  def test_rp_id_returns_localhost_when_base_url_is_invalid
+    ctx = build_passkey_ctx(base_url: "not a url")
+    rp_id = BetterAuth::Plugins.send(:passkey_rp_id, {}, ctx)
+    assert_equal "localhost", rp_id
+  end
+
+  def test_rp_id_returns_localhost_when_base_url_is_blank
+    ctx = build_passkey_ctx(base_url: "")
+    rp_id = BetterAuth::Plugins.send(:passkey_rp_id, {}, ctx)
+    assert_equal "localhost", rp_id
+  end
+
+  def test_rp_id_explicit_config_takes_precedence_over_base_url
+    ctx = build_passkey_ctx(base_url: "https://ignored.example")
+    rp_id = BetterAuth::Plugins.send(:passkey_rp_id, {rp_id: "explicit.example"}, ctx)
+    assert_equal "explicit.example", rp_id
+  end
+
+  def test_after_verification_user_id_matrix_accepts_nil_and_empty_string
+    nil_passkey = perform_passkey_first_registration(returning_user_id: nil)
+    assert_equal "matrix-pending-user-id", nil_passkey.fetch("userId")
+
+    empty_passkey = perform_passkey_first_registration(returning_user_id: "")
+    assert_equal "matrix-pending-user-id", empty_passkey.fetch("userId")
+  end
+
+  def test_after_verification_user_id_matrix_accepts_non_empty_string
+    linked_passkey = perform_passkey_first_registration(returning_user_id: "matrix-linked-user-id")
+    assert_equal "matrix-linked-user-id", linked_passkey.fetch("userId")
+  end
+
+  def test_after_verification_user_id_matrix_rejects_integer
+    error = assert_raises(BetterAuth::APIError) do
+      perform_passkey_first_registration(returning_user_id: 123)
+    end
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("RESOLVED_USER_INVALID"), error.message
+  end
+
+  def test_after_verification_user_id_matrix_rejects_boolean
+    error = assert_raises(BetterAuth::APIError) do
+      perform_passkey_first_registration(returning_user_id: true)
+    end
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("RESOLVED_USER_INVALID"), error.message
+  end
+
+  def test_update_passkey_allows_empty_name_to_match_upstream
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "update-empty-name@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    passkey = create_passkey(auth, user_id: user.fetch("id"), name: "Original", credential_id: "empty-name-cred")
+
+    result = auth.api.update_passkey(
+      headers: {"cookie" => cookie},
+      body: {id: passkey.fetch("id"), name: ""}
+    )
+
+    assert_equal "", result.fetch(:passkey).fetch("name")
+  end
+
   def test_registration_missing_origin_uses_failed_registration_error
     auth = build_auth
     cookie = sign_up_cookie(auth, email: "missing-origin@example.com")
@@ -566,12 +676,19 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
   private
 
   def build_auth(options = {})
+    email_and_password = {enabled: true}.merge(options.fetch(:email_and_password, {}))
     BetterAuth.auth({
       base_url: ORIGIN,
       secret: SECRET,
       database: :memory,
       plugins: [BetterAuth::Plugins.passkey]
-    }.merge(options))
+    }.merge(options).merge(email_and_password: email_and_password))
+  end
+
+  def build_passkey_ctx(base_url:)
+    options = Struct.new(:base_url).new(base_url)
+    context = Struct.new(:options).new(options)
+    Struct.new(:context).new(context)
   end
 
   def sign_up_cookie(auth, email:)
@@ -596,6 +713,28 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
         transports: transports,
         createdAt: Time.now
       }
+    )
+  end
+
+  def perform_passkey_first_registration(returning_user_id:)
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.passkey(
+          registration: {
+            require_session: false,
+            resolve_user: ->(_data) { {id: "matrix-pending-user-id", name: "matrix-pending@example.com"} },
+            after_verification: ->(_data) { {user_id: returning_user_id} }
+          }
+        )
+      ]
+    )
+    client = WebAuthn::FakeClient.new(ORIGIN)
+    registration = auth.api.generate_passkey_registration_options(return_headers: true)
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+
+    auth.api.verify_passkey_registration(
+      headers: {"cookie" => cookie_header(registration.fetch(:headers).fetch("set-cookie")), "origin" => ORIGIN},
+      body: {response: response}
     )
   end
 
