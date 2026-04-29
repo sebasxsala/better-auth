@@ -6,75 +6,139 @@ description: Expose this app as an OAuth 2.0 authorization server.
 Expose this app as an OAuth 2.0 authorization server.
 
 <Callout type="info">
-This page documents the current Ruby port behavior. Ruby uses snake_case option names and `auth.api` method names; HTTP paths and JSON keys keep the upstream wire shape where implemented.
-</Callout>
-
-<Callout type="warn">
-Some UI or provider-specific setup from upstream is app-provided in Ruby. The protocol endpoints below are implemented, but you must supply your own pages, callbacks, client objects, or provider metadata where noted by the option names.
+Ruby uses snake_case option names and `auth.api` method names. HTTP paths and JSON keys keep the upstream wire shape where implemented.
 </Callout>
 
 ## Configure
 
 ```ruby title="config/auth.rb"
 require "better_auth"
+require "better_auth/oauth_provider"
 
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
+  base_url: ENV.fetch("BETTER_AUTH_URL", "https://auth.example.com/api/auth"),
   plugins: [
-    BetterAuth::Plugins.oauth_provider(consent_page: "/oauth/consent")
+    BetterAuth::Plugins.oauth_provider(
+      scopes: ["openid", "profile", "email", "offline_access"],
+      consent_page: "/oauth2/consent",
+      allow_dynamic_client_registration: true,
+      valid_audiences: ["https://api.example.com"]
+    )
   ]
 )
 ```
 
-## Usage
+## Register A Client
 
-```ruby title="server.rb"
-metadata = auth.api.get_o_auth_server_config
+Dynamic client registration is disabled by default. Enable `allow_dynamic_client_registration` and call registration with a session cookie unless `allow_unauthenticated_client_registration` is enabled.
 
+```ruby
 client = auth.api.register_o_auth_client(
+  headers: {"cookie" => session_cookie},
   body: {
     client_name: "Example Client",
-    redirect_uris: ["https://client.example.com/callback"]
-  }
-)
-
-token = auth.api.o_auth2_token(
-  body: {
-    grant_type: "authorization_code",
-    code: params[:code],
-    client_id: client[:client_id]
+    redirect_uris: ["https://client.example.com/callback"],
+    token_endpoint_auth_method: "client_secret_post",
+    grant_types: ["authorization_code", "refresh_token"],
+    response_types: ["code"],
+    scope: "openid profile offline_access"
   }
 )
 ```
+
+Public clients use `token_endpoint_auth_method: "none"` and must use S256 PKCE.
+
+## Authorization Code Flow
+
+Call `/oauth2/authorize` with `response_type=code`, a registered `redirect_uri`, and S256 PKCE parameters. If consent is needed, the endpoint redirects to `consent_page` with a `consent_code`.
+
+```ruby
+consent = auth.api.o_auth2_consent(
+  headers: {"cookie" => session_cookie},
+  body: {
+    accept: true,
+    consent_code: params[:consent_code],
+    scope: "openid profile"
+  }
+)
+```
+
+The consent scope may be narrower than the requested scope.
+
+```ruby
+tokens = auth.api.o_auth2_token(
+  body: {
+    grant_type: "authorization_code",
+    code: params[:code],
+    redirect_uri: "https://client.example.com/callback",
+    client_id: client[:client_id],
+    client_secret: client[:client_secret],
+    code_verifier: verifier
+  }
+)
+```
+
+Opaque access tokens are returned by default. If a valid `resource` is supplied, the access token is a JWT and the resource becomes the JWT `aud`.
 
 ## Routes
 
 | Method | Path | Ruby API method |
 | --- | --- | --- |
 | `GET` | `/.well-known/oauth-authorization-server` | `auth.api.get_o_auth_server_config` |
+| `GET` | `/.well-known/openid-configuration` | `auth.api.get_open_id_config` |
 | `POST` | `/oauth2/register` | `auth.api.register_o_auth_client` |
+| `POST` | `/oauth2/create-client` | `auth.api.create_o_auth_client` |
+| `GET` | `/oauth2/client/:id` | `auth.api.get_o_auth_client` |
+| `GET` | `/oauth2/client` | `auth.api.get_o_auth_client_public` |
+| `GET` | `/oauth2/public-client-prelogin` | `auth.api.get_o_auth_client_public_prelogin` |
+| `GET` | `/oauth2/clients` | `auth.api.list_o_auth_clients` |
+| `PATCH` | `/oauth2/client` | `auth.api.update_o_auth_client` |
+| `DELETE` | `/oauth2/client` | `auth.api.delete_o_auth_client` |
+| `POST` | `/oauth2/client/rotate-secret` | `auth.api.rotate_o_auth_client_secret` |
 | `GET` | `/oauth2/authorize` | `auth.api.o_auth2_authorize` |
+| `POST` | `/oauth2/continue` | `auth.api.o_auth2_continue` |
 | `POST` | `/oauth2/consent` | `auth.api.o_auth2_consent` |
+| `GET` | `/oauth2/consents` | `auth.api.list_o_auth_consents` |
+| `GET` | `/oauth2/consent` | `auth.api.get_o_auth_consent` |
+| `PATCH` | `/oauth2/consent` | `auth.api.update_o_auth_consent` |
+| `DELETE` | `/oauth2/consent` | `auth.api.delete_o_auth_consent` |
 | `POST` | `/oauth2/token` | `auth.api.o_auth2_token` |
 | `POST` | `/oauth2/introspect` | `auth.api.o_auth2_introspect` |
 | `POST` | `/oauth2/revoke` | `auth.api.o_auth2_revoke` |
 | `GET` | `/oauth2/userinfo` | `auth.api.o_auth2_user_info` |
+| `GET`, `POST` | `/oauth2/end-session` | `auth.api.o_auth2_end_session` |
 
 ## Options
 
-Current Ruby options accepted by `BetterAuth::Plugins.oauth_provider`:
+| Option | Notes |
+| --- | --- |
+| `login_page` | Page used when an authorization request needs login. |
+| `consent_page` | Page used when an authorization request needs consent. |
+| `scopes` | Provider-supported scopes. |
+| `claims` | OIDC claims advertised in metadata. |
+| `grant_types` | Supported grant types. |
+| `allow_dynamic_client_registration` | Enables `/oauth2/register`. |
+| `allow_unauthenticated_client_registration` | Allows unauthenticated DCR and coerces clients to public. |
+| `client_registration_default_scopes` | Default scopes for DCR requests without `scope`. |
+| `client_registration_allowed_scopes` | Scope allow-list for DCR. |
+| `store_client_secret` | `plain`, `hashed`, `encrypted`, or custom hash/encrypt callbacks. |
+| `prefix` | Prefixes for opaque access tokens, refresh tokens, and client secrets. |
+| `refresh_token_expires_in` | Refresh token lifetime in seconds. |
+| `advertised_metadata` | Overrides metadata fields such as `scopes_supported`, `claims_supported`, and `jwks_uri`. |
+| `valid_audiences` | Accepted `resource` values for JWT access tokens. |
+| `custom_token_response_fields` | Adds fields to token responses. |
+| `custom_access_token_claims` | Adds custom JWT access token claims before pinned OAuth claims. |
+| `custom_user_info_claims` | Adds claims to `/oauth2/userinfo`. |
+| `pairwise_secret` | Enables pairwise subject identifiers. |
+| `signup`, `select_account`, `post_login` | Page and callback controls used by `/oauth2/continue`. |
+| `client_privileges` | Callback for client management authorization. |
+| `rate_limit` | Per-endpoint rate limit overrides or `false` to disable a rule. |
+| `jwks_uri` | Advertises a configured JWKS URL. |
+| `disable_jwt_plugin` | Keeps access tokens opaque even when `resource` is supplied. |
 
-- `grant_types`
-- `scopes`
-- `claims`
-- `login_page`
-- `store`
-- `consent_page`
+## Metadata
 
-## Support Notes
-
-- The examples above are based on Ruby plugin source and tests in `packages/better_auth`.
-- If an upstream section is not represented here, treat it as not yet documented or not yet supported by the Ruby port until the matching Ruby implementation exists.
+OpenID metadata is available only when `openid` is in configured scopes. `jwks_uri` is advertised only when explicitly configured through `advertised_metadata[:jwks_uri]`, `jwks_uri`, or `jwks[:remote_url]`.
 
 {/* Upstream guide is preserved in upstream/docs/content/docs/plugins/oauth-provider.mdx. */}
