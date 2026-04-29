@@ -12,6 +12,12 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
     refute plugin.schema.fetch(:apikey).fetch(:fields).key?(:userId)
   end
 
+  def test_plugin_exposes_package_version_like_upstream
+    plugin = BetterAuth::Plugins.api_key
+
+    assert_equal BetterAuth::APIKey::VERSION, plugin.version
+  end
+
   def test_create_verify_get_list_update_and_delete_api_key
     auth = build_auth(enable_metadata: true)
     cookie = sign_up_cookie(auth, email: "api-key@example.com")
@@ -167,6 +173,49 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
     end
     assert_equal "TOO_MANY_REQUESTS", usage_error.status
     assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["USAGE_EXCEEDED"], usage_error.message
+  end
+
+  def test_secondary_storage_reads_legacy_key_layout_but_writes_new_layout
+    storage = MemoryStorage.new
+    auth = build_auth(storage: "secondary-storage", secondary_storage: storage, default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "legacy-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id})
+
+    hashed = BetterAuth::Plugins.default_api_key_hasher(created[:key])
+    legacy_payload = storage.values.fetch("api-key:by-id:#{created[:id]}")
+
+    storage.values["api-key:key:#{hashed}"] = legacy_payload
+    storage.values["api-key:id:#{created[:id]}"] = legacy_payload
+    storage.values["api-key:user:#{user_id}"] = JSON.generate([created[:id]])
+    storage.values.delete("api-key:#{hashed}")
+    storage.values.delete("api-key:by-id:#{created[:id]}")
+    storage.values.delete("api-key:by-ref:#{user_id}")
+
+    result = auth.api.verify_api_key(body: {key: created[:key]})
+    assert_equal true, result[:valid], "expected legacy api-key:key:* read fallback to validate"
+
+    fetched = auth.api.get_api_key(headers: {"cookie" => cookie}, query: {id: created[:id]})
+    assert_equal created[:id], fetched[:id], "expected legacy api-key:id:* read fallback to resolve"
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie})
+    assert_equal [created[:id]], listed.fetch(:apiKeys).map { |entry| entry[:id] },
+      "expected legacy api-key:user:* ref list fallback to populate listing"
+  end
+
+  def test_secondary_storage_write_set_does_not_serialize_independent_keys
+    storage = OrderTrackingStorage.new
+    auth = build_auth(storage: "secondary-storage", secondary_storage: storage, default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "concurrency-key@example.com")
+    created = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {})
+
+    hash_writes = storage.write_groups.last
+    hashed_key = BetterAuth::Plugins.default_api_key_hasher(created[:key])
+
+    assert_includes hash_writes, "api-key:#{hashed_key}", "expected per-hash write in last batch"
+    assert_includes hash_writes, "api-key:by-id:#{created[:id]}", "expected per-id write in last batch"
+    assert_includes hash_writes, "api-key:by-ref:#{auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]}",
+      "expected ref-list write in same batch as hash and id writes (1.6.6 parity)"
   end
 
   def test_secondary_storage_fallback_invalidates_and_rebuilds_reference_list
@@ -423,12 +472,12 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
     interval_without_amount = assert_raises(BetterAuth::APIError) do
       auth.api.create_api_key(body: {userId: user_id, refillInterval: 1000})
     end
-    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["REFILL_AMOUNT_AND_INTERVAL_REQUIRED"], interval_without_amount.message
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["REFILL_INTERVAL_AND_AMOUNT_REQUIRED"], interval_without_amount.message
 
     amount_without_interval = assert_raises(BetterAuth::APIError) do
       auth.api.create_api_key(body: {userId: user_id, refillAmount: 10})
     end
-    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["REFILL_INTERVAL_AND_AMOUNT_REQUIRED"], amount_without_interval.message
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["REFILL_AMOUNT_AND_INTERVAL_REQUIRED"], amount_without_interval.message
 
     valid_metadata = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {metadata: {test: "test"}})
     assert_equal({"test" => "test"}, valid_metadata[:metadata])
@@ -504,6 +553,21 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
     assert_raises(BetterAuth::Error) do
       BetterAuth::Plugins.api_key([{config_id: "valid"}, {}])
     end
+  end
+
+  def test_list_sort_accepts_camel_case_and_snake_case_keys
+    auth = build_auth(default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "sort-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    first = auth.api.create_api_key(body: {userId: user_id, name: "alpha"})
+    sleep 0.01
+    second = auth.api.create_api_key(body: {userId: user_id, name: "beta"})
+
+    asc_camel = auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {sortBy: "createdAt", sortDirection: "asc"})
+    asc_snake = auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {sortBy: "created_at", sortDirection: "asc"})
+
+    assert_equal [first[:id], second[:id]], asc_camel.fetch(:apiKeys).map { |entry| entry[:id] }
+    assert_equal asc_camel.fetch(:apiKeys).map { |entry| entry[:id] }, asc_snake.fetch(:apiKeys).map { |entry| entry[:id] }
   end
 
   def test_list_paginates_sorts_and_returns_upstream_shape
@@ -888,6 +952,40 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
     assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["SERVER_ONLY_PROPERTY"], client_server_only.message
   end
 
+  def test_update_rejects_server_only_properties_from_authenticated_client
+    auth = build_auth(enable_metadata: true)
+    cookie = sign_up_cookie(auth, email: "update-server-only@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id, name: "client-only"})
+
+    %i[refillAmount refillInterval rateLimitMax rateLimitTimeWindow rateLimitEnabled remaining permissions].each do |field|
+      payload = {keyId: created[:id]}
+      payload[field] = (field == :rateLimitEnabled) ? true : 1
+      error = assert_raises(BetterAuth::APIError) do
+        auth.api.update_api_key(headers: {"cookie" => cookie}, body: payload)
+      end
+      assert_equal "BAD_REQUEST", error.status, "expected BAD_REQUEST for #{field}"
+      assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["SERVER_ONLY_PROPERTY"], error.message,
+        "expected SERVER_ONLY_PROPERTY message for #{field}"
+    end
+  end
+
+  def test_update_treats_refill_undefined_vs_zero_correctly
+    auth = build_auth(default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "refill-undef@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id})
+
+    updated = auth.api.update_api_key(body: {userId: user_id, keyId: created[:id], refillAmount: 5, refillInterval: 10})
+    assert_equal 5, updated[:refillAmount]
+    assert_equal 10, updated[:refillInterval]
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.update_api_key(body: {userId: user_id, keyId: created[:id], refillAmount: 5})
+    end
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["REFILL_AMOUNT_AND_INTERVAL_REQUIRED"], error.message
+  end
+
   def test_update_expires_in_nil_clears_existing_expiration
     auth = build_auth(default_key_length: 12)
     cookie = sign_up_cookie(auth, email: "clear-expiration-key@example.com")
@@ -925,7 +1023,7 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
     missing_interval = assert_raises(BetterAuth::APIError) do
       auth.api.update_api_key(body: {userId: user_id, keyId: created[:id], refillAmount: 10})
     end
-    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["REFILL_INTERVAL_AND_AMOUNT_REQUIRED"], missing_interval.message
+    assert_equal BetterAuth::Plugins::API_KEY_ERROR_CODES["REFILL_AMOUNT_AND_INTERVAL_REQUIRED"], missing_interval.message
 
     updated = auth.api.update_api_key(
       body: {
@@ -1089,6 +1187,49 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
     assert_equal({"tier" => "legacy"}, verified[:key][:metadata])
   end
 
+  def test_verify_runs_expired_cleanup_synchronously_unless_deferred
+    auth = build_auth(default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "verify-cleanup@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+
+    expired = auth.api.create_api_key(body: {userId: user_id})
+    auth.context.adapter.update(
+      model: "apikey",
+      where: [{field: "id", value: expired[:id]}],
+      update: {expiresAt: Time.now - 60}
+    )
+
+    result = auth.api.verify_api_key(body: {key: expired[:key]})
+
+    assert_equal false, result[:valid]
+    refute auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: expired[:id]}])
+  end
+
+  def test_verify_schedules_expired_cleanup_in_background_when_deferred
+    background = []
+    auth = build_auth(
+      default_key_length: 12,
+      defer_updates: true,
+      advanced: {background_tasks: {handler: ->(task) { background << task }}}
+    )
+    cookie = sign_up_cookie(auth, email: "verify-cleanup-deferred@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+
+    expired = auth.api.create_api_key(body: {userId: user_id})
+    auth.context.adapter.update(
+      model: "apikey",
+      where: [{field: "id", value: expired[:id]}],
+      update: {expiresAt: Time.now - 60}
+    )
+
+    auth.api.verify_api_key(body: {key: expired[:key]})
+
+    assert_equal 1, background.length
+    background.each(&:call)
+    refute auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: expired[:id]}]),
+      "expected the deferred per-key cleanup to delete the expired record once the handler runs the task"
+  end
+
   def test_defer_updates_uses_configured_background_task_handler
     deferred = []
     auth = build_auth(
@@ -1107,7 +1248,7 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
 
     assert_equal true, result[:valid]
     assert_equal 1, result[:key][:remaining]
-    assert_equal 1, deferred.length
+    assert_equal 2, deferred.length, "expected upstream parity: usage update + delete-all-expired both scheduled"
     stored_before_task = auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: created[:id]}])
     assert_nil stored_before_task["lastRequest"]
     deferred.each(&:call)
@@ -1180,6 +1321,43 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
       get_calls.clear
       set_calls.clear
       delete_calls.clear
+    end
+  end
+
+  class OrderTrackingStorage < MemoryStorage
+    attr_reader :write_groups
+
+    def initialize
+      super
+      @write_groups = []
+      @current_group = nil
+    end
+
+    def set(key, value, ttl = nil)
+      record_write(key)
+      super
+    end
+
+    def delete(key)
+      record_write(key)
+      super
+    end
+
+    def batch
+      @current_group = []
+      yield
+      @write_groups << @current_group unless @current_group.empty?
+      @current_group = nil
+    end
+
+    private
+
+    def record_write(key)
+      if @current_group
+        @current_group << key
+      else
+        @write_groups << [key]
+      end
     end
   end
 end

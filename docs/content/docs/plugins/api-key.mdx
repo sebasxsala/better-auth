@@ -67,11 +67,49 @@ Current Ruby options accepted by `BetterAuth::Plugins.api_key`:
 - `custom_storage`
 - `custom_api_key_getter`
 - `api_key_headers`
+- `references` (`"user"` or `"organization"`)
+- `defer_updates`
+
+## Plugin metadata
+
+The plugin object exposes the gem version, mirroring upstream
+`@better-auth/api-key@1.6.0+`:
+
+```ruby
+auth.options.plugins.find { |plugin| plugin.id == "api-key" }.version
+# => BetterAuth::APIKey::VERSION
+```
+
+## Organization-owned API keys
+
+When a configuration sets `references: "organization"`, the plugin requires
+`BetterAuth::Plugins.organization` to also be installed. The organization's
+access-control bundle must define the `apiKey` resource with the `create`,
+`read`, `update`, and `delete` actions. The configured `creator_role`
+(default `"owner"`) bypasses the per-action permission check and can perform
+any `apiKey` mutation; other roles must be explicitly granted the relevant
+`apiKey:*` permission.
+
+## Browser client and OpenAPI
+
+The browser-only `@better-auth/api-key/client` helpers from upstream are not
+ported. Server endpoints accept and return upstream JSON so frontend
+applications using the upstream JavaScript client interoperate without
+configuration changes; Ruby applications should call the JSON endpoints
+directly.
+
+The OpenAPI metadata blocks embedded in upstream endpoint definitions are
+intentionally not ported either — OpenAPI generation lives outside the gem's
+scope.
 
 ## Support Notes
 
 - Install `gem "better_auth-api-key"` before requiring `better_auth/api_key`.
 - The examples above are based on Ruby plugin source and tests in `packages/better_auth-api-key`.
+- The Ruby gem reads legacy secondary-storage keys (`api-key:key:*`,
+  `api-key:id:*`, `api-key:user:*`) for backward compatibility but always
+  writes to the upstream layout (`api-key:*`, `api-key:by-id:*`,
+  `api-key:by-ref:*`).
 - If an upstream section is not represented here, treat it as not yet documented or not yet supported by the Ruby port until the matching Ruby implementation exists.
 
 {/* Upstream guide is preserved in upstream/docs/content/docs/plugins/api-key.mdx. */}
