@@ -54,6 +54,65 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
     assert_equal({window: 60, max: 5}, rules.fetch(4).slice(:window, :max))
   end
 
+  def test_plugin_exposes_package_version_like_upstream
+    plugin = BetterAuth::Plugins.oauth_provider(login_page: "/login", consent_page: "/consent")
+
+    assert_equal BetterAuth::OAuthProvider::VERSION, plugin.version
+  end
+
+  def test_oauth_authorization_server_metadata_excludes_none_when_unauthenticated_disabled
+    auth = build_auth(scopes: ["openid", "profile", "email"])
+    metadata = auth.api.get_o_auth_server_config
+
+    refute_includes metadata[:token_endpoint_auth_methods_supported], "none"
+    assert_includes metadata[:token_endpoint_auth_methods_supported], "client_secret_basic"
+    assert_includes metadata[:token_endpoint_auth_methods_supported], "client_secret_post"
+  end
+
+  def test_oauth_authorization_server_metadata_includes_none_when_unauthenticated_enabled
+    auth = build_auth(allow_unauthenticated_client_registration: true)
+
+    assert_includes auth.api.get_o_auth_server_config[:token_endpoint_auth_methods_supported], "none"
+  end
+
+  def test_oidc_metadata_uses_jwt_plugin_alg_when_available
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      plugins: [
+        BetterAuth::Plugins.jwt(jwks: {key_pair_config: {alg: "EdDSA"}}),
+        BetterAuth::Plugins.oauth_provider(scopes: ["openid"], allow_dynamic_client_registration: true)
+      ]
+    )
+
+    assert_equal ["EdDSA"], auth.api.get_open_id_config[:id_token_signing_alg_values_supported]
+  end
+
+  def test_oidc_metadata_advertises_prompt_none
+    auth = build_auth(scopes: ["openid"])
+
+    assert_includes auth.api.get_open_id_config[:prompt_values_supported], "none"
+  end
+
+  def test_access_token_schema_matches_upstream_canonical_columns
+    fields = BetterAuth::Schema.auth_tables(build_auth.options).fetch("oauthAccessToken")[:fields].keys
+
+    assert_includes fields, "token"
+    assert_includes fields, "expiresAt"
+    assert_includes fields, "scopes"
+    refute_includes fields, "accessToken"
+    refute_includes fields, "refreshToken"
+    refute_includes fields, "accessTokenExpiresAt"
+    refute_includes fields, "scope"
+  end
+
+  def test_consent_schema_drops_consent_given_column
+    fields = BetterAuth::Schema.auth_tables(build_auth.options).fetch("oauthConsent")[:fields].keys
+
+    refute_includes fields, "consentGiven"
+  end
+
   def test_metadata_client_management_introspection_and_revocation
     auth = build_auth
     cookie = sign_up_cookie(auth)
@@ -204,6 +263,21 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
     assert_equal "openid profile", client[:scope]
   end
 
+  def test_dynamic_registration_defaults_require_pkce_to_true
+    auth = build_auth(allow_unauthenticated_client_registration: true)
+
+    client = auth.api.register_o_auth_client(
+      body: {
+        redirect_uris: ["https://resource.example/callback"],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code"],
+        response_types: ["code"]
+      }
+    )
+
+    assert_equal true, client[:require_pkce]
+  end
+
   def test_dynamic_registration_rejects_skip_consent
     auth = build_auth(allow_unauthenticated_client_registration: true)
 
@@ -318,7 +392,7 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
     assert tokens[:refresh_token]
 
     consent_record = auth.context.adapter.find_one(model: "oauthConsent", where: [{field: "clientId", value: client[:client_id]}])
-    assert_equal true, consent_record.fetch("consentGiven")
+    assert_equal ["read"], consent_record.fetch("scopes")
   end
 
   def test_consent_can_grant_narrower_scope_set
@@ -1254,6 +1328,85 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
     assert_equal 401, error.status_code
   end
 
+  def test_oauth2_get_client_uses_query_param_like_upstream
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "client-paths@example.com")
+    client = auth.api.create_o_auth_client(headers: {"cookie" => cookie}, body: {redirect_uris: ["https://example.com/cb"]})
+
+    fetched = auth.api.get_o_auth_client(headers: {"cookie" => cookie}, query: {client_id: client[:client_id]})
+
+    assert_equal client[:client_id], fetched[:client_id]
+  end
+
+  def test_oauth2_get_clients_returns_owned_clients
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "list-clients@example.com")
+    auth.api.create_o_auth_client(headers: {"cookie" => cookie}, body: {redirect_uris: ["https://example.com/cb"]})
+
+    assert_equal 1, auth.api.get_o_auth_clients(headers: {"cookie" => cookie}).length
+  end
+
+  def test_oauth2_update_client_post_with_update_envelope
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "update-paths@example.com")
+    client = auth.api.create_o_auth_client(headers: {"cookie" => cookie}, body: {redirect_uris: ["https://example.com/cb"]})
+
+    updated = auth.api.update_o_auth_client(
+      headers: {"cookie" => cookie},
+      body: {client_id: client[:client_id], update: {client_name: "renamed"}}
+    )
+
+    assert_equal "renamed", updated[:client_name]
+  end
+
+  def test_oauth2_delete_client_post_with_client_id_body
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "delete-paths@example.com")
+    client = auth.api.create_o_auth_client(headers: {"cookie" => cookie}, body: {redirect_uris: ["https://example.com/cb"]})
+
+    deleted = auth.api.delete_o_auth_client(headers: {"cookie" => cookie}, body: {client_id: client[:client_id]})
+
+    assert_equal({deleted: true}, deleted)
+  end
+
+  def test_oauth2_public_client_endpoint_returns_public_fields_only
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "public-fields@example.com")
+    client = auth.api.create_o_auth_client(
+      headers: {"cookie" => cookie},
+      body: {redirect_uris: ["https://example.com/cb"], client_name: "Public Test"}
+    )
+
+    body = auth.api.get_o_auth_client_public(headers: {"cookie" => cookie}, query: {client_id: client[:client_id]})
+
+    assert_equal "Public Test", body[:client_name]
+    refute body.key?(:client_secret)
+    refute body.key?(:redirect_uris)
+  end
+
+  def test_admin_create_oauth_client_is_server_only
+    auth = build_auth
+
+    status, _headers, _body = auth.handler.call(rack_env("POST", "/api/auth/admin/oauth2/create-client", body: {redirect_uris: ["https://admin.example.com/cb"]}))
+    assert_equal 403, status
+
+    client = auth.api.admin_create_o_auth_client(body: {redirect_uris: ["https://admin.example.com/cb"], client_secret_expires_at: 0})
+    assert_equal 0, client[:client_secret_expires_at]
+    assert_equal ["https://admin.example.com/cb"], client[:redirect_uris]
+  end
+
+  def test_rotate_client_secret_returns_full_response_with_expires_at
+    auth = build_auth(prefix: {client_secret: "rot_"})
+    cookie = sign_up_cookie(auth, email: "rotate-secret@example.com")
+    client = auth.api.create_o_auth_client(headers: {"cookie" => cookie}, body: {redirect_uris: ["https://example.com/cb"]})
+
+    rotated = auth.api.rotate_o_auth_client_secret(headers: {"cookie" => cookie}, body: {client_id: client[:client_id]})
+
+    assert_equal client[:client_id], rotated[:client_id]
+    assert rotated[:client_secret].start_with?("rot_")
+    assert_equal 0, rotated[:client_secret_expires_at]
+  end
+
   def test_user_create_client_does_not_require_dynamic_registration
     auth = build_auth(allow_dynamic_client_registration: false)
     cookie = sign_up_cookie(auth)
@@ -1380,6 +1533,128 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
     assert_equal [], auth.api.list_o_auth_consents(headers: {"cookie" => cookie})
   end
 
+  def test_get_oauth_consent_uses_id_query_param
+    auth = build_auth(scopes: ["openid", "profile"])
+    cookie = sign_up_cookie(auth, email: "consent-id@example.com")
+    client = auth.api.register_o_auth_client(
+      headers: {"cookie" => cookie},
+      body: {
+        redirect_uris: ["https://resource.example/callback"],
+        token_endpoint_auth_method: "client_secret_post",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        scope: "openid profile"
+      }
+    )
+    issue_authorization_code_tokens(auth, cookie, client, scope: "openid profile")
+    consent_id = auth.context.adapter.find_one(model: "oauthConsent", where: [{field: "clientId", value: client[:client_id]}]).fetch("id")
+
+    consent = auth.api.get_o_auth_consent(headers: {"cookie" => cookie}, query: {id: consent_id})
+
+    assert_equal client[:client_id], consent[:client_id]
+  end
+
+  def test_get_oauth_consents_returns_user_consents
+    auth = build_auth(scopes: ["openid", "profile"])
+    cookie = sign_up_cookie(auth, email: "consents-list@example.com")
+    2.times do |index|
+      client = auth.api.register_o_auth_client(
+        headers: {"cookie" => cookie},
+        body: {
+          redirect_uris: ["https://resource#{index}.example/callback"],
+          token_endpoint_auth_method: "client_secret_post",
+          grant_types: ["authorization_code", "refresh_token"],
+          response_types: ["code"],
+          scope: "openid profile"
+        }
+      )
+      issue_authorization_code_tokens(auth, cookie, client, scope: "openid profile", redirect_uri: "https://resource#{index}.example/callback")
+    end
+
+    assert_equal 2, auth.api.get_o_auth_consents(headers: {"cookie" => cookie}).length
+  end
+
+  def test_update_oauth_consent_post_with_id_envelope
+    auth = build_auth(scopes: ["openid", "profile", "email"])
+    cookie = sign_up_cookie(auth, email: "consent-update@example.com")
+    client = auth.api.register_o_auth_client(
+      headers: {"cookie" => cookie},
+      body: {
+        redirect_uris: ["https://resource.example/callback"],
+        token_endpoint_auth_method: "client_secret_post",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        scope: "openid profile email"
+      }
+    )
+    issue_authorization_code_tokens(auth, cookie, client, scope: "openid profile email")
+    consent_id = auth.context.adapter.find_one(model: "oauthConsent", where: [{field: "clientId", value: client[:client_id]}]).fetch("id")
+
+    updated = auth.api.update_o_auth_consent(headers: {"cookie" => cookie}, body: {id: consent_id, update: {scopes: ["openid"]}})
+
+    assert_equal ["openid"], updated[:scopes]
+  end
+
+  def test_delete_oauth_consent_post_with_id_body
+    auth = build_auth(scopes: ["openid", "profile"])
+    cookie = sign_up_cookie(auth, email: "consent-delete@example.com")
+    client = auth.api.register_o_auth_client(
+      headers: {"cookie" => cookie},
+      body: {
+        redirect_uris: ["https://resource.example/callback"],
+        token_endpoint_auth_method: "client_secret_post",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        scope: "openid profile"
+      }
+    )
+    issue_authorization_code_tokens(auth, cookie, client, scope: "openid profile")
+    consent_id = auth.context.adapter.find_one(model: "oauthConsent", where: [{field: "clientId", value: client[:client_id]}]).fetch("id")
+
+    deleted = auth.api.delete_o_auth_consent(headers: {"cookie" => cookie}, body: {id: consent_id})
+
+    assert_equal({deleted: true}, deleted)
+  end
+
+  def test_pairwise_subject_uses_sector_identifier_from_redirect_uris
+    auth = build_auth(scopes: ["openid"], pairwise_secret: "pairwise-secret-with-enough-entropy-123")
+    cookie = sign_up_cookie(auth, email: "pairwise-sector@example.com")
+    client_a = auth.api.admin_create_o_auth_client(body: pairwise_client_body("https://app.example.com/cb"))
+    client_b = auth.api.admin_create_o_auth_client(body: pairwise_client_body("https://app.example.com/other"))
+    client_c = auth.api.admin_create_o_auth_client(body: pairwise_client_body("https://other.example.com/cb"))
+
+    sub_a = pairwise_sub_for(auth, cookie, client_a, redirect_uri: "https://app.example.com/cb")
+    sub_b = pairwise_sub_for(auth, cookie, client_b, redirect_uri: "https://app.example.com/other")
+    sub_c = pairwise_sub_for(auth, cookie, client_c, redirect_uri: "https://other.example.com/cb")
+
+    assert_equal sub_a, sub_b
+    refute_equal sub_a, sub_c
+  end
+
+  def test_refresh_token_replay_revokes_descendant_access_tokens
+    auth = build_auth(scopes: ["openid", "offline_access"])
+    cookie = sign_up_cookie(auth, email: "refresh-replay@example.com")
+    client = auth.api.register_o_auth_client(
+      headers: {"cookie" => cookie},
+      body: {
+        redirect_uris: ["https://resource.example/callback"],
+        token_endpoint_auth_method: "client_secret_post",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        scope: "openid offline_access"
+      }
+    )
+    tokens = issue_authorization_code_tokens(auth, cookie, client, scope: "openid offline_access")
+    rotated = auth.api.o_auth2_token(body: refresh_grant_body(client, tokens[:refresh_token]))
+
+    assert_raises(BetterAuth::APIError) { auth.api.o_auth2_token(body: refresh_grant_body(client, tokens[:refresh_token])) }
+
+    old_access = auth.api.o_auth2_introspect(body: introspect_body(client, tokens[:access_token]))
+    new_access = auth.api.o_auth2_introspect(body: introspect_body(client, rotated[:access_token]))
+    assert_equal false, old_access[:active]
+    assert_equal false, new_access[:active]
+  end
+
   def test_authorize_prompt_none_returns_consent_required_without_prior_consent
     auth = build_auth
     cookie = sign_up_cookie(auth)
@@ -1488,5 +1763,48 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
       as_response: true
     )
     headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def refresh_grant_body(client, refresh_token)
+    {
+      grant_type: "refresh_token",
+      refresh_token: refresh_token,
+      client_id: client[:client_id],
+      client_secret: client[:client_secret]
+    }
+  end
+
+  def introspect_body(client, token)
+    {
+      token: token,
+      token_type_hint: "access_token",
+      client_id: client[:client_id],
+      client_secret: client[:client_secret]
+    }
+  end
+
+  def pairwise_client_body(redirect_uri)
+    {
+      redirect_uris: [redirect_uri],
+      token_endpoint_auth_method: "client_secret_post",
+      grant_types: ["authorization_code"],
+      response_types: ["code"],
+      scope: "openid",
+      subject_type: "pairwise"
+    }
+  end
+
+  def pairwise_sub_for(auth, cookie, client, redirect_uri:)
+    tokens = issue_authorization_code_tokens(auth, cookie, client, scope: "openid", redirect_uri: redirect_uri)
+    JWT.decode(tokens[:id_token], client[:client_id], true, algorithm: "HS256").first.fetch("sub")
+  end
+
+  def rack_env(method, path, body: nil)
+    Rack::MockRequest.env_for(
+      path,
+      :method => method,
+      "CONTENT_TYPE" => "application/json",
+      :input => body ? JSON.generate(body) : nil
+    )
   end
 end

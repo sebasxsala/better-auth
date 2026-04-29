@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Aligned OAuth provider server behavior with upstream `@better-auth/oauth-provider` v1.6.9: upstream-shaped client and consent CRUD routes, server-only admin client routes, discovery metadata auth-method and signing-alg semantics, canonical access-token and consent schema, dynamic-registration PKCE defaults, refresh replay cascade revocation, rotate-secret response shape, and pairwise sector identifiers.
 - Added upstream-parity OAuth provider behavior for dynamic client registration controls, PKCE enforcement, consent management, client management, token prefixes, refresh rotation, JWT resource access tokens, pairwise subjects, userinfo claims, introspection/revocation hints, end-session, `/oauth2/continue`, metadata cache headers, conditional JWKS metadata, and rate limits.
 - Updated package and docs examples to use executable registration and token exchange flows.
 

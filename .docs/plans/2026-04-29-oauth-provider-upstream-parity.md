@@ -1203,5 +1203,15 @@ git commit -m "fix(oauth-provider): align grant-type, resource validation, and P
 
 ## Verification Log
 
-- (fill in after each `rake test` and `standardrb` run with run counts and elapsed time)
-
+- Branch established first on `codex/oauth-provider-upstream-parity-2` because `codex/oauth-provider-upstream-parity` already existed and switching to it would have overwritten local plan changes.
+- Upstream initialized and checked out at Better Auth `v1.6.9` (`f48426922`).
+- Baseline before implementation: `cd packages/better_auth-oauth-provider && rbenv exec bundle exec rake test` -> `41 runs, 213 assertions, 0 failures, 0 errors, 0 skips` in `2.018915s`.
+- Baseline core shim command from plan: `cd packages/better_auth && rbenv exec bundle exec ruby -Itest test/better_auth/plugins/oauth_protocol_test.rb` -> `LoadError`, file does not exist in this repository.
+- Red test pass for new parity coverage: `cd packages/better_auth-oauth-provider && rbenv exec bundle exec ruby -Itest test/better_auth/oauth_provider_test.rb -n '/plugin_exposes_package_version|metadata_excludes_none|metadata_includes_none|jwt_plugin_alg|prompt_none|schema_matches|drops_consent|defaults_require_pkce|oauth2_|admin_create|rotate_client_secret|oauth_consent|pairwise_subject_uses_sector|refresh_token_replay/'` initially failed across metadata, schema, route, rotate-secret, pairwise, consent, and refresh replay cases as expected.
+- Focused parity suite after implementation: same focused command -> `22 runs, 63 assertions, 0 failures, 0 errors, 0 skips` in `0.889232s`.
+- OAuth provider full suite: `cd packages/better_auth-oauth-provider && rbenv exec bundle exec rake test` -> `62 runs, 273 assertions, 0 failures, 0 errors, 0 skips` in `2.787604s`.
+- OAuth provider lint: `cd packages/better_auth-oauth-provider && RUBOCOP_CACHE_ROOT=/private/tmp/rubocop_cache rbenv exec bundle exec standardrb` -> pass.
+- Docker dependencies: `docker compose up -d` -> `mongodb`, `mysql`, `mssql`, `redis`, and `postgres` running.
+- Core full suite first sandboxed attempt failed on local socket/database permissions; rerun with approval outside sandbox: `cd packages/better_auth && rbenv exec bundle exec rake test` -> `571 runs, 2903 assertions, 0 failures, 0 errors, 0 skips` in `25.592583s`.
+- Core lint: `cd packages/better_auth && RUBOCOP_CACHE_ROOT=/private/tmp/rubocop_cache rbenv exec bundle exec standardrb` -> pass.
+- Rails suite first sandboxed attempt failed on PostgreSQL socket permissions; rerun with approval exposed one setup issue in `base_routes_active_record_spec` where `/sign-up/email` was exercised without enabling `email_and_password`. After declaring `email_and_password: {enabled: true}` in that spec setup, `cd packages/better_auth-rails && rbenv exec bundle exec rake test` -> `29 examples, 0 failures` in `0.98459s`.

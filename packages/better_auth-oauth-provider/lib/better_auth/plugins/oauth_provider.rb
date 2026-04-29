@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "jwt"
+require_relative "../oauth_provider/version"
 
 module BetterAuth
   module Plugins
@@ -46,6 +47,7 @@ module BetterAuth
 
       Plugin.new(
         id: "oauth-provider",
+        version: BetterAuth::OAuthProvider::VERSION,
         endpoints: oauth_provider_endpoints(config),
         schema: oauth_provider_schema,
         rate_limit: oauth_provider_rate_limits(config),
@@ -59,18 +61,30 @@ module BetterAuth
         get_open_id_config: oauth_openid_metadata_endpoint(config),
         register_o_auth_client: oauth_register_client_endpoint(config),
         create_o_auth_client: oauth_create_client_endpoint(config),
-        admin_create_o_auth_client: oauth_create_client_endpoint(config),
+        admin_create_o_auth_client: oauth_admin_create_client_endpoint(config),
+        admin_update_o_auth_client: oauth_admin_update_client_endpoint(config),
         get_o_auth_client: oauth_get_client_endpoint(config),
         get_o_auth_client_public: oauth_get_client_public_endpoint(config),
         get_o_auth_client_public_prelogin: oauth_get_client_public_prelogin_endpoint(config),
+        get_o_auth_clients: oauth_list_clients_endpoint(config),
         list_o_auth_clients: oauth_list_clients_endpoint(config),
         delete_o_auth_client: oauth_delete_client_endpoint(config),
         update_o_auth_client: oauth_update_client_endpoint(config),
         rotate_o_auth_client_secret: oauth_rotate_client_secret_endpoint(config),
+        get_o_auth_consents: oauth_list_consents_endpoint,
         list_o_auth_consents: oauth_list_consents_endpoint,
         get_o_auth_consent: oauth_get_consent_endpoint,
         update_o_auth_consent: oauth_update_consent_endpoint,
         delete_o_auth_consent: oauth_delete_consent_endpoint,
+        legacy_get_o_auth_client: oauth_legacy_get_client_endpoint(config),
+        legacy_get_o_auth_client_public: oauth_legacy_get_client_public_endpoint(config),
+        legacy_list_o_auth_clients: oauth_legacy_list_clients_endpoint(config),
+        legacy_update_o_auth_client: oauth_legacy_update_client_endpoint(config),
+        legacy_delete_o_auth_client: oauth_legacy_delete_client_endpoint(config),
+        legacy_list_o_auth_consents: oauth_legacy_list_consents_endpoint,
+        legacy_get_o_auth_consent: oauth_legacy_get_consent_endpoint,
+        legacy_update_o_auth_consent: oauth_legacy_update_consent_endpoint,
+        legacy_delete_o_auth_consent: oauth_legacy_delete_consent_endpoint,
         o_auth2_authorize: oauth_authorize_endpoint(config),
         o_auth2_continue: oauth_continue_endpoint(config),
         o_auth2_consent: oauth_consent_endpoint(config),
@@ -95,7 +109,7 @@ module BetterAuth
           response_types_supported: ["code"],
           response_modes_supported: ["query"],
           grant_types_supported: config[:grant_types],
-          token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"],
+          token_endpoint_auth_methods_supported: oauth_token_auth_methods(config),
           introspection_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
           revocation_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
           code_challenge_methods_supported: ["S256"],
@@ -132,10 +146,10 @@ module BetterAuth
           scopes_supported: config.dig(:advertised_metadata, :scopes_supported) || config[:scopes],
           userinfo_endpoint: "#{base}/oauth2/userinfo",
           subject_types_supported: config[:pairwise_secret] ? ["public", "pairwise"] : ["public"],
-          id_token_signing_alg_values_supported: ["HS256"],
+          id_token_signing_alg_values_supported: oauth_id_token_signing_algs(ctx, config),
           end_session_endpoint: "#{base}/oauth2/end-session",
           acr_values_supported: ["urn:mace:incommon:iap:bronze"],
-          prompt_values_supported: ["login", "consent", "create", "select_account"],
+          prompt_values_supported: oauth_prompt_values,
           claims_supported: config.dig(:advertised_metadata, :claims_supported) || config[:claims] || []
         }
         metadata[:jwks_uri] = oauth_jwks_uri(config) if oauth_jwks_uri(config)
@@ -156,6 +170,7 @@ module BetterAuth
         if body.key?("skip_consent") || body.key?("skipConsent")
           raise APIError.new("BAD_REQUEST", message: "skip_consent is not allowed during dynamic client registration")
         end
+        body["require_pkce"] = true unless body.key?("require_pkce") || body.key?("requirePKCE")
 
         client = OAuthProtocol.create_client(
           ctx,
@@ -187,36 +202,29 @@ module BetterAuth
           allowed_scopes: config[:client_registration_allowed_scopes] || config[:scopes],
           store_client_secret: config[:store_client_secret],
           prefix: config[:prefix],
-          dynamic_registration: false
+          dynamic_registration: false,
+          admin: false
         )
         ctx.json(client, status: 201, headers: {"Cache-Control" => "no-store", "Pragma" => "no-cache"})
       end
     end
 
     def oauth_get_client_endpoint(config)
-      Endpoint.new(path: "/oauth2/client/:id", method: "GET") do |ctx|
+      Endpoint.new(path: "/oauth2/get-client", method: "GET") do |ctx|
         session = Routes.current_session(ctx)
         oauth_assert_client_privilege!(ctx, config, session, "read")
-        client = OAuthProtocol.find_client(ctx, "oauthClient", ctx.params["id"] || ctx.params[:id])
+        query = OAuthProtocol.stringify_keys(ctx.query)
+        client = OAuthProtocol.find_client(ctx, "oauthClient", query["client_id"])
         raise APIError.new("NOT_FOUND", message: "client not found") unless client
-        oauth_assert_owned_client!(client, session)
+        oauth_assert_owned_client!(client, session, config)
 
         ctx.json(OAuthProtocol.client_response(client, include_secret: false))
       end
     end
 
     def oauth_get_client_public_endpoint(_config)
-      Endpoint.new(path: "/oauth2/client", method: "GET") do |ctx|
-        query = OAuthProtocol.stringify_keys(ctx.query)
-        client = OAuthProtocol.find_client(ctx, "oauthClient", query["client_id"])
-        raise APIError.new("NOT_FOUND", message: "client not found") unless client
-
-        ctx.json(OAuthProtocol.client_response(client, include_secret: false))
-      end
-    end
-
-    def oauth_get_client_public_prelogin_endpoint(_config)
-      Endpoint.new(path: "/oauth2/public-client-prelogin", method: "GET") do |ctx|
+      Endpoint.new(path: "/oauth2/public-client", method: "GET") do |ctx|
+        Routes.current_session(ctx, allow_nil: true)
         query = OAuthProtocol.stringify_keys(ctx.query)
         client = OAuthProtocol.find_client(ctx, "oauthClient", query["client_id"])
         raise APIError.new("NOT_FOUND", message: "client not found") unless client
@@ -226,39 +234,86 @@ module BetterAuth
       end
     end
 
+    def oauth_get_client_public_prelogin_endpoint(_config)
+      Endpoint.new(path: "/oauth2/public-client-prelogin", method: "POST") do |ctx|
+        input = OAuthProtocol.stringify_keys(ctx.body).merge(OAuthProtocol.stringify_keys(ctx.query))
+        client = OAuthProtocol.find_client(ctx, "oauthClient", input["client_id"])
+        raise APIError.new("NOT_FOUND", message: "client not found") unless client
+        raise APIError.new("NOT_FOUND", message: "client not found") if OAuthProtocol.stringify_keys(client)["disabled"]
+
+        ctx.json(oauth_public_client_response(client))
+      end
+    end
+
     def oauth_list_clients_endpoint(config)
-      Endpoint.new(path: "/oauth2/clients", method: "GET") do |ctx|
+      Endpoint.new(path: "/oauth2/get-clients", method: "GET") do |ctx|
         session = Routes.current_session(ctx)
         oauth_assert_client_privilege!(ctx, config, session, "list")
-        clients = ctx.context.adapter.find_many(model: "oauthClient", where: [{field: "userId", value: session[:user]["id"]}])
+        reference_id = config[:client_reference]&.call({user: session[:user], session: session[:session]})
+        clients = if reference_id
+          ctx.context.adapter.find_many(model: "oauthClient", where: [{field: "referenceId", value: reference_id}])
+        else
+          ctx.context.adapter.find_many(model: "oauthClient", where: [{field: "userId", value: session[:user]["id"]}])
+        end
         ctx.json(clients.map { |client| OAuthProtocol.client_response(client, include_secret: false) })
       end
     end
 
     def oauth_delete_client_endpoint(config)
-      Endpoint.new(path: "/oauth2/client", method: "DELETE") do |ctx|
+      Endpoint.new(path: "/oauth2/delete-client", method: "POST") do |ctx|
         session = Routes.current_session(ctx)
         oauth_assert_client_privilege!(ctx, config, session, "delete")
         body = OAuthProtocol.stringify_keys(ctx.body)
         client = OAuthProtocol.find_client(ctx, "oauthClient", body["client_id"])
         raise APIError.new("NOT_FOUND", message: "client not found") unless client
-        oauth_assert_owned_client!(client, session)
+        oauth_assert_owned_client!(client, session, config)
         ctx.context.adapter.delete(model: "oauthClient", where: [{field: "clientId", value: body["client_id"]}])
-        ctx.json({status: true})
+        ctx.json({deleted: true})
       end
     end
 
     def oauth_update_client_endpoint(config)
-      Endpoint.new(path: "/oauth2/client", method: "PATCH") do |ctx|
+      Endpoint.new(path: "/oauth2/update-client", method: "POST") do |ctx|
         session = Routes.current_session(ctx)
         oauth_assert_client_privilege!(ctx, config, session, "update")
         body = OAuthProtocol.stringify_keys(ctx.body)
         client = OAuthProtocol.find_client(ctx, "oauthClient", body["client_id"])
         raise APIError.new("NOT_FOUND", message: "client not found") unless client
-        oauth_assert_owned_client!(client, session)
+        oauth_assert_owned_client!(client, session, config)
 
-        update_source = OAuthProtocol.stringify_keys(body["update"] || body)
+        update_source = OAuthProtocol.stringify_keys(body["update"] || {})
         update = oauth_client_update_data(update_source)
+        updated = update.empty? ? client : ctx.context.adapter.update(model: "oauthClient", where: [{field: "clientId", value: body["client_id"]}], update: update.merge(updatedAt: Time.now))
+        ctx.json(OAuthProtocol.client_response(updated, include_secret: false))
+      end
+    end
+
+    def oauth_admin_create_client_endpoint(config)
+      Endpoint.new(path: "/admin/oauth2/create-client", method: "POST", metadata: {server_only: true}) do |ctx|
+        body = OAuthProtocol.stringify_keys(ctx.body)
+        client = OAuthProtocol.create_client(
+          ctx,
+          model: "oauthClient",
+          body: body,
+          owner_session: nil,
+          default_scopes: config[:client_registration_default_scopes] || config[:scopes],
+          allowed_scopes: config[:client_registration_allowed_scopes] || config[:scopes],
+          store_client_secret: config[:store_client_secret],
+          prefix: config[:prefix],
+          dynamic_registration: false,
+          admin: true
+        )
+        ctx.json(client, status: 201, headers: {"Cache-Control" => "no-store", "Pragma" => "no-cache"})
+      end
+    end
+
+    def oauth_admin_update_client_endpoint(_config)
+      Endpoint.new(path: "/admin/oauth2/update-client", method: "PATCH", metadata: {server_only: true}) do |ctx|
+        body = OAuthProtocol.stringify_keys(ctx.body)
+        client = OAuthProtocol.find_client(ctx, "oauthClient", body["client_id"])
+        raise APIError.new("NOT_FOUND", message: "client not found") unless client
+
+        update = oauth_client_update_data(OAuthProtocol.stringify_keys(body["update"] || {}), admin: true)
         updated = update.empty? ? client : ctx.context.adapter.update(model: "oauthClient", where: [{field: "clientId", value: body["client_id"]}], update: update.merge(updatedAt: Time.now))
         ctx.json(OAuthProtocol.client_response(updated, include_secret: false))
       end
@@ -271,7 +326,7 @@ module BetterAuth
         body = OAuthProtocol.stringify_keys(ctx.body)
         client = OAuthProtocol.find_client(ctx, "oauthClient", body["client_id"])
         raise APIError.new("NOT_FOUND", message: "client not found") unless client
-        oauth_assert_owned_client!(client, session)
+        oauth_assert_owned_client!(client, session, config)
         client_data = OAuthProtocol.stringify_keys(client)
         raise APIError.new("BAD_REQUEST", message: "public clients cannot rotate secrets") if client_data["public"] || client_data["tokenEndpointAuthMethod"] == "none"
 
@@ -282,12 +337,12 @@ module BetterAuth
           update: {clientSecret: OAuthProtocol.store_client_secret_value(ctx, client_secret, config[:store_client_secret]), updatedAt: Time.now}
         )
         response = OAuthProtocol.client_response(updated, include_secret: false)
-        ctx.json(response.merge(client_secret: OAuthProtocol.apply_prefix(client_secret, config[:prefix], :client_secret)))
+        ctx.json(response.merge(client_secret: OAuthProtocol.apply_prefix(client_secret, config[:prefix], :client_secret), client_secret_expires_at: client_data["clientSecretExpiresAt"] || 0))
       end
     end
 
     def oauth_list_consents_endpoint
-      Endpoint.new(path: "/oauth2/consents", method: "GET") do |ctx|
+      Endpoint.new(path: "/oauth2/get-consents", method: "GET") do |ctx|
         session = Routes.current_session(ctx)
         consents = ctx.context.adapter.find_many(model: "oauthConsent", where: [{field: "userId", value: session[:user]["id"]}])
         ctx.json(consents.map { |consent| oauth_consent_response(consent) })
@@ -295,44 +350,66 @@ module BetterAuth
     end
 
     def oauth_get_consent_endpoint
-      Endpoint.new(path: "/oauth2/consent", method: "GET") do |ctx|
+      Endpoint.new(path: "/oauth2/get-consent", method: "GET") do |ctx|
         session = Routes.current_session(ctx)
         query = OAuthProtocol.stringify_keys(ctx.query)
-        consent = oauth_find_user_consent(ctx, session, query["client_id"])
+        consent = if query["id"].to_s.empty?
+          oauth_find_user_consent(ctx, session, query["client_id"])
+        else
+          ctx.context.adapter.find_one(model: "oauthConsent", where: [{field: "id", value: query["id"]}])
+        end
+        raise APIError.new("NOT_FOUND", message: "missing id") unless query["id"] || query["client_id"]
         raise APIError.new("NOT_FOUND", message: "consent not found") unless consent
+        raise APIError.new("UNAUTHORIZED") unless OAuthProtocol.stringify_keys(consent)["userId"] == session[:user]["id"]
 
         ctx.json(oauth_consent_response(consent))
       end
     end
 
     def oauth_update_consent_endpoint
-      Endpoint.new(path: "/oauth2/consent", method: "PATCH") do |ctx|
+      Endpoint.new(path: "/oauth2/update-consent", method: "POST") do |ctx|
         session = Routes.current_session(ctx)
         body = OAuthProtocol.stringify_keys(ctx.body)
-        consent = oauth_find_user_consent(ctx, session, body["client_id"])
+        id = body["id"]
+        consent = if id.to_s.empty?
+          oauth_find_user_consent(ctx, session, body["client_id"])
+        else
+          ctx.context.adapter.find_one(model: "oauthConsent", where: [{field: "id", value: id}])
+        end
+        raise APIError.new("NOT_FOUND", message: "missing id") if id.to_s.empty? && body["client_id"].to_s.empty?
         raise APIError.new("NOT_FOUND", message: "consent not found") unless consent
+        consent_data = OAuthProtocol.stringify_keys(consent)
+        raise APIError.new("UNAUTHORIZED") unless consent_data["userId"] == session[:user]["id"]
 
-        scopes = OAuthProtocol.parse_scopes(body["scope"] || body["scopes"])
-        existing = OAuthProtocol.parse_scopes(OAuthProtocol.stringify_keys(consent)["scopes"])
-        unless scopes.all? { |scope| existing.include?(scope) }
+        client = OAuthProtocol.find_client(ctx, "oauthClient", consent_data["clientId"])
+        allowed = OAuthProtocol.parse_scopes(OAuthProtocol.stringify_keys(client || {})["scopes"])
+        scopes = OAuthProtocol.parse_scopes(OAuthProtocol.stringify_keys(body["update"] || {})["scopes"] || body["scope"] || body["scopes"])
+        unless scopes.all? { |scope| allowed.include?(scope) }
           raise APIError.new("BAD_REQUEST", message: "invalid_scope")
         end
 
         updated = ctx.context.adapter.update(
           model: "oauthConsent",
-          where: [{field: "id", value: OAuthProtocol.stringify_keys(consent)["id"]}],
-          update: {scopes: scopes, consentGiven: true, updatedAt: Time.now}
+          where: [{field: "id", value: consent_data["id"]}],
+          update: {scopes: scopes, updatedAt: Time.now}
         )
         ctx.json(oauth_consent_response(updated))
       end
     end
 
     def oauth_delete_consent_endpoint
-      Endpoint.new(path: "/oauth2/consent", method: "DELETE") do |ctx|
+      Endpoint.new(path: "/oauth2/delete-consent", method: "POST") do |ctx|
         session = Routes.current_session(ctx)
         body = OAuthProtocol.stringify_keys(ctx.body)
-        consent = oauth_find_user_consent(ctx, session, body["client_id"])
+        id = body["id"]
+        consent = if id.to_s.empty?
+          oauth_find_user_consent(ctx, session, body["client_id"])
+        else
+          ctx.context.adapter.find_one(model: "oauthConsent", where: [{field: "id", value: id}])
+        end
+        raise APIError.new("NOT_FOUND", message: "missing id") if id.to_s.empty? && body["client_id"].to_s.empty?
         raise APIError.new("NOT_FOUND", message: "consent not found") unless consent
+        raise APIError.new("UNAUTHORIZED") unless OAuthProtocol.stringify_keys(consent)["userId"] == session[:user]["id"]
 
         ctx.context.adapter.delete(model: "oauthConsent", where: [{field: "id", value: OAuthProtocol.stringify_keys(consent)["id"]}])
         ctx.json({deleted: true})
@@ -626,7 +703,7 @@ module BetterAuth
           {field: "userId", value: user_id}
         ]
       )
-      return false unless consent && consent["consentGiven"]
+      return false unless consent
 
       granted = OAuthProtocol.parse_scopes(consent["scopes"])
       scopes.all? { |scope| granted.include?(scope) }
@@ -642,7 +719,7 @@ module BetterAuth
           {field: "userId", value: user_id}
         ]
       )
-      data = {clientId: client_id, userId: user_id, scopes: scopes, consentGiven: true}
+      data = {clientId: client_id, userId: user_id, scopes: scopes}
       if existing
         ctx.context.adapter.update(model: "oauthConsent", where: [{field: "id", value: existing.fetch("id")}], update: data)
       else
@@ -757,9 +834,16 @@ module BetterAuth
       nil
     end
 
-    def oauth_assert_owned_client!(client, session)
+    def oauth_assert_owned_client!(client, session, config = nil)
       data = OAuthProtocol.stringify_keys(client)
-      raise APIError.new("NOT_FOUND", message: "client not found") unless data["userId"] && data["userId"] == session[:user]["id"]
+      return if data["userId"] && data["userId"] == session[:user]["id"]
+
+      if data["referenceId"] && config && config[:client_reference].respond_to?(:call)
+        reference_id = config[:client_reference].call({user: session[:user], session: session[:session]})
+        return if data["referenceId"] == reference_id
+      end
+
+      raise APIError.new("NOT_FOUND", message: "client not found")
     end
 
     def oauth_assert_client_privilege!(ctx, config, session, action)
@@ -775,7 +859,7 @@ module BetterAuth
       raise APIError.new("UNAUTHORIZED") unless allowed
     end
 
-    def oauth_client_update_data(source)
+    def oauth_client_update_data(source, admin: false)
       update = {}
       update["name"] = source["client_name"] || source["name"] if source.key?("client_name") || source.key?("name")
       update["uri"] = source["client_uri"] if source.key?("client_uri")
@@ -790,6 +874,9 @@ module BetterAuth
       update["responseTypes"] = Array(source["response_types"]).map(&:to_s) if source.key?("response_types")
       update["scopes"] = OAuthProtocol.parse_scopes(source["scope"] || source["scopes"]) if source.key?("scope") || source.key?("scopes")
       update["enableEndSession"] = !!(source["enable_end_session"] || source["enableEndSession"]) if source.key?("enable_end_session") || source.key?("enableEndSession")
+      update["skipConsent"] = !!(source["skip_consent"] || source["skipConsent"]) if admin && (source.key?("skip_consent") || source.key?("skipConsent"))
+      update["clientSecretExpiresAt"] = source["client_secret_expires_at"] if admin && source.key?("client_secret_expires_at")
+      update["subjectType"] = source["subject_type"] || source["subjectType"] if admin && (source.key?("subject_type") || source.key?("subjectType"))
       update["metadata"] = source["metadata"] if source.key?("metadata")
       update
     end
@@ -811,8 +898,7 @@ module BetterAuth
         client_id: data["clientId"],
         user_id: data["userId"],
         scope: OAuthProtocol.scope_string(data["scopes"]),
-        scopes: OAuthProtocol.parse_scopes(data["scopes"]),
-        consent_given: !!data["consentGiven"]
+        scopes: OAuthProtocol.parse_scopes(data["scopes"])
       }.compact
     end
 
@@ -839,15 +925,140 @@ module BetterAuth
         config.dig(:jwks, :remote_url)
     end
 
+    def oauth_token_auth_methods(config)
+      methods = ["client_secret_basic", "client_secret_post"]
+      methods.unshift("none") if config[:allow_unauthenticated_client_registration]
+      methods
+    end
+
+    def oauth_id_token_signing_algs(ctx, config)
+      return ["HS256"] if config[:disable_jwt_plugin]
+
+      jwt_plugin = ctx.context.options.plugins.find { |plugin| plugin.id == "jwt" }
+      alg = config.dig(:jwt, :jwks, :key_pair_config, :alg) ||
+        jwt_plugin&.options&.dig(:jwks, :key_pair_config, :alg)
+      alg ? [alg] : ["EdDSA"]
+    end
+
+    def oauth_prompt_values
+      ["login", "consent", "create", "select_account", "none"]
+    end
+
     def oauth_validate_resource!(ctx, config, body)
       resources = Array(body["resource"]).compact.map(&:to_s)
       return nil if resources.empty?
 
-      valid = Array(config[:valid_audiences] || [ctx.context.base_url]).map(&:to_s)
+      valid = Array(config[:valid_audiences]).map(&:to_s)
+      return (resources.length == 1) ? resources.first : resources if valid.empty?
+
       resources.each do |resource|
         raise APIError.new("BAD_REQUEST", message: "requested resource invalid") unless valid.include?(resource)
       end
       (resources.length == 1) ? resources.first : resources
+    end
+
+    def oauth_legacy_get_client_endpoint(config)
+      Endpoint.new(path: "/oauth2/client/:id", method: "GET") do |ctx|
+        session = Routes.current_session(ctx)
+        oauth_assert_client_privilege!(ctx, config, session, "read")
+        client = OAuthProtocol.find_client(ctx, "oauthClient", ctx.params["id"] || ctx.params[:id])
+        raise APIError.new("NOT_FOUND", message: "client not found") unless client
+        oauth_assert_owned_client!(client, session, config)
+        ctx.json(OAuthProtocol.client_response(client, include_secret: false))
+      end
+    end
+
+    def oauth_legacy_get_client_public_endpoint(_config)
+      Endpoint.new(path: "/oauth2/client", method: "GET") do |ctx|
+        query = OAuthProtocol.stringify_keys(ctx.query)
+        client = OAuthProtocol.find_client(ctx, "oauthClient", query["client_id"])
+        raise APIError.new("NOT_FOUND", message: "client not found") unless client
+        ctx.json(OAuthProtocol.client_response(client, include_secret: false))
+      end
+    end
+
+    def oauth_legacy_list_clients_endpoint(config)
+      Endpoint.new(path: "/oauth2/clients", method: "GET") do |ctx|
+        session = Routes.current_session(ctx)
+        oauth_assert_client_privilege!(ctx, config, session, "list")
+        clients = ctx.context.adapter.find_many(model: "oauthClient", where: [{field: "userId", value: session[:user]["id"]}])
+        ctx.json(clients.map { |client| OAuthProtocol.client_response(client, include_secret: false) })
+      end
+    end
+
+    def oauth_legacy_update_client_endpoint(config)
+      Endpoint.new(path: "/oauth2/client", method: "PATCH") do |ctx|
+        session = Routes.current_session(ctx)
+        oauth_assert_client_privilege!(ctx, config, session, "update")
+        body = OAuthProtocol.stringify_keys(ctx.body)
+        client = OAuthProtocol.find_client(ctx, "oauthClient", body["client_id"])
+        raise APIError.new("NOT_FOUND", message: "client not found") unless client
+        oauth_assert_owned_client!(client, session, config)
+        update = oauth_client_update_data(OAuthProtocol.stringify_keys(body["update"] || body))
+        updated = update.empty? ? client : ctx.context.adapter.update(model: "oauthClient", where: [{field: "clientId", value: body["client_id"]}], update: update.merge(updatedAt: Time.now))
+        ctx.json(OAuthProtocol.client_response(updated, include_secret: false))
+      end
+    end
+
+    def oauth_legacy_delete_client_endpoint(config)
+      Endpoint.new(path: "/oauth2/client", method: "DELETE") do |ctx|
+        session = Routes.current_session(ctx)
+        oauth_assert_client_privilege!(ctx, config, session, "delete")
+        body = OAuthProtocol.stringify_keys(ctx.body)
+        client = OAuthProtocol.find_client(ctx, "oauthClient", body["client_id"])
+        raise APIError.new("NOT_FOUND", message: "client not found") unless client
+        oauth_assert_owned_client!(client, session, config)
+        ctx.context.adapter.delete(model: "oauthClient", where: [{field: "clientId", value: body["client_id"]}])
+        ctx.json({deleted: true})
+      end
+    end
+
+    def oauth_legacy_list_consents_endpoint
+      Endpoint.new(path: "/oauth2/consents", method: "GET") do |ctx|
+        session = Routes.current_session(ctx)
+        consents = ctx.context.adapter.find_many(model: "oauthConsent", where: [{field: "userId", value: session[:user]["id"]}])
+        ctx.json(consents.map { |consent| oauth_consent_response(consent) })
+      end
+    end
+
+    def oauth_legacy_get_consent_endpoint
+      Endpoint.new(path: "/oauth2/consent", method: "GET") do |ctx|
+        session = Routes.current_session(ctx)
+        query = OAuthProtocol.stringify_keys(ctx.query)
+        consent = oauth_find_user_consent(ctx, session, query["client_id"])
+        raise APIError.new("NOT_FOUND", message: "consent not found") unless consent
+        ctx.json(oauth_consent_response(consent))
+      end
+    end
+
+    def oauth_legacy_update_consent_endpoint
+      Endpoint.new(path: "/oauth2/consent", method: "PATCH") do |ctx|
+        session = Routes.current_session(ctx)
+        body = OAuthProtocol.stringify_keys(ctx.body)
+        consent = oauth_find_user_consent(ctx, session, body["client_id"])
+        raise APIError.new("NOT_FOUND", message: "consent not found") unless consent
+        scopes = OAuthProtocol.parse_scopes(body["scope"] || body["scopes"])
+        existing = OAuthProtocol.parse_scopes(OAuthProtocol.stringify_keys(consent)["scopes"])
+        raise APIError.new("BAD_REQUEST", message: "invalid_scope") unless scopes.all? { |scope| existing.include?(scope) }
+
+        updated = ctx.context.adapter.update(
+          model: "oauthConsent",
+          where: [{field: "id", value: OAuthProtocol.stringify_keys(consent)["id"]}],
+          update: {scopes: scopes, updatedAt: Time.now}
+        )
+        ctx.json(oauth_consent_response(updated))
+      end
+    end
+
+    def oauth_legacy_delete_consent_endpoint
+      Endpoint.new(path: "/oauth2/consent", method: "DELETE") do |ctx|
+        session = Routes.current_session(ctx)
+        body = OAuthProtocol.stringify_keys(ctx.body)
+        consent = oauth_find_user_consent(ctx, session, body["client_id"])
+        raise APIError.new("NOT_FOUND", message: "consent not found") unless consent
+        ctx.context.adapter.delete(model: "oauthConsent", where: [{field: "id", value: OAuthProtocol.stringify_keys(consent)["id"]}])
+        ctx.json({deleted: true})
+      end
     end
 
     def oauth_provider_rate_limits(config)
@@ -884,6 +1095,7 @@ module BetterAuth
             disabled: {type: "boolean", default_value: false, required: false},
             skipConsent: {type: "boolean", required: false},
             enableEndSession: {type: "boolean", required: false},
+            clientSecretExpiresAt: {type: "number", required: false},
             scopes: {type: "string[]", required: false},
             userId: {type: "string", required: false},
             createdAt: {type: "date", required: true, default_value: -> { Time.now }},
@@ -927,16 +1139,12 @@ module BetterAuth
         oauthAccessToken: {
           modelName: "oauthAccessToken",
           fields: {
-            accessToken: {type: "string", unique: true, required: false},
-            token: {type: "string", unique: true, required: false},
-            refreshToken: {type: "string", unique: true, required: false},
-            accessTokenExpiresAt: {type: "date", required: false},
-            expiresAt: {type: "date", required: false},
+            token: {type: "string", unique: true, required: true},
+            expiresAt: {type: "date", required: true},
             clientId: {type: "string", required: true},
             userId: {type: "string", required: false},
             sessionId: {type: "string", required: false},
-            scope: {type: "string", required: false},
-            scopes: {type: "string[]", required: false},
+            scopes: {type: "string[]", required: true},
             revoked: {type: "date", required: false},
             referenceId: {type: "string", required: false},
             authTime: {type: "date", required: false},
@@ -952,7 +1160,6 @@ module BetterAuth
             userId: {type: "string", required: false},
             referenceId: {type: "string", required: false},
             scopes: {type: "string[]", required: true},
-            consentGiven: {type: "boolean", required: false},
             createdAt: {type: "date", required: true, default_value: -> { Time.now }},
             updatedAt: {type: "date", required: true, default_value: -> { Time.now }, on_update: -> { Time.now }}
           }
