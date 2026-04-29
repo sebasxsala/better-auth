@@ -26,6 +26,24 @@ class BetterAuthSocialProvidersTest < Minitest::Test
     assert_includes url, "login_hint=ada%40example.com"
   end
 
+  def test_google_and_vercel_require_code_verifier_for_authorization_url
+    google = BetterAuth::SocialProviders.google(client_id: "google-id", client_secret: "google-secret")
+    vercel = BetterAuth::SocialProviders.vercel(client_id: "vercel-id", client_secret: "vercel-secret")
+
+    assert_raises(BetterAuth::Error) do
+      google.fetch(:create_authorization_url).call(
+        state: "state-1",
+        redirect_uri: "http://localhost:3000/api/auth/callback/google"
+      )
+    end
+    assert_raises(BetterAuth::Error) do
+      vercel.fetch(:create_authorization_url).call(
+        state: "state-1",
+        redirect_uri: "http://localhost:3000/api/auth/callback/vercel"
+      )
+    end
+  end
+
   def test_google_uses_first_configured_client_id_for_authorization_url
     provider = BetterAuth::SocialProviders.google(client_id: ["web-id", "ios-id"], client_secret: "google-secret")
 
@@ -375,6 +393,159 @@ class BetterAuthSocialProvidersTest < Minitest::Test
 
     assert_equal "Railway", provider.fetch(:name)
     assert_equal false, info.fetch(:user).fetch(:emailVerified)
+  end
+
+  def test_railway_validate_authorization_code_uses_basic_auth_header
+    captured_form = nil
+    captured_headers = nil
+    post_form = lambda do |_url, form, headers = {}|
+      captured_form = form
+      captured_headers = headers
+      {"access_token" => "railway-access"}
+    end
+
+    provider = BetterAuth::SocialProviders.railway(client_id: "railway-id", client_secret: "railway-secret")
+    BetterAuth::SocialProviders::Base.stub(:post_form_json, post_form) do
+      provider.fetch(:validate_authorization_code).call(
+        code: "code-1",
+        code_verifier: "verifier-1",
+        redirect_uri: "http://localhost:3000/api/auth/callback/railway"
+      )
+    end
+
+    assert_equal "Basic #{Base64.strict_encode64("railway-id:railway-secret")}", captured_headers.fetch("Authorization")
+    refute_includes captured_form.keys, :client_id
+    refute_includes captured_form.keys, :client_secret
+  end
+
+  def test_railway_refresh_access_token_uses_basic_auth_header
+    captured_form = nil
+    captured_headers = nil
+    post_form = lambda do |_url, form, headers = {}|
+      captured_form = form
+      captured_headers = headers
+      {"access_token" => "railway-access"}
+    end
+
+    provider = BetterAuth::SocialProviders.railway(client_id: "railway-id", client_secret: "railway-secret")
+    BetterAuth::SocialProviders::Base.stub(:post_form_json, post_form) do
+      provider.fetch(:refresh_access_token).call("railway-refresh")
+    end
+
+    assert_equal "Basic #{Base64.strict_encode64("railway-id:railway-secret")}", captured_headers.fetch("Authorization")
+    assert_equal "refresh_token", captured_form.fetch(:grant_type)
+    refute_includes captured_form.keys, :client_id
+    refute_includes captured_form.keys, :client_secret
+  end
+
+  def test_wechat_validate_authorization_code_uses_appid_secret_and_get_endpoint
+    captured_url = nil
+    get_json = lambda do |url, _headers = {}|
+      captured_url = url
+      {
+        "access_token" => "wechat-access",
+        "refresh_token" => "wechat-refresh",
+        "expires_in" => 7200,
+        "openid" => "openid-1",
+        "unionid" => "union-1",
+        "scope" => "snsapi_login"
+      }
+    end
+    post_form = lambda do |_url, _form, _headers = {}|
+      flunk "WeChat token exchange should use GET with appid and secret"
+    end
+
+    provider = BetterAuth::SocialProviders.wechat(client_id: "wx-app", client_secret: "wx-secret")
+    tokens = nil
+    BetterAuth::SocialProviders::Base.stub(:post_form_json, post_form) do
+      BetterAuth::SocialProviders::Base.stub(:get_json, get_json) do
+        tokens = provider.fetch(:validate_authorization_code).call(code: "code-1")
+      end
+    end
+
+    params = Rack::Utils.parse_query(URI.parse(captured_url).query)
+    assert_equal "wx-app", params.fetch("appid")
+    assert_equal "wx-secret", params.fetch("secret")
+    assert_equal "code-1", params.fetch("code")
+    assert_equal "authorization_code", params.fetch("grant_type")
+    assert_equal "wechat-access", tokens.fetch("accessToken")
+    assert_equal "openid-1", tokens.fetch("openid")
+    assert_equal "union-1", tokens.fetch("unionid")
+  end
+
+  def test_wechat_authorization_url_uses_default_lang
+    provider = BetterAuth::SocialProviders.wechat(client_id: "wx-app", client_secret: "wx-secret")
+
+    url = provider.fetch(:create_authorization_url).call(
+      state: "state-1",
+      redirect_uri: "http://localhost:3000/api/auth/callback/wechat"
+    )
+
+    assert_equal "wechat_redirect", URI.parse(url).fragment
+    params = Rack::Utils.parse_query(URI.parse(url).query)
+    assert_equal "wx-app", params.fetch("appid")
+    assert_equal "cn", params.fetch("lang")
+  end
+
+  def test_wechat_refresh_access_token_uses_appid_and_get_endpoint
+    captured_url = nil
+    get_json = lambda do |url, _headers = {}|
+      captured_url = url
+      {
+        "access_token" => "wechat-access",
+        "refresh_token" => "wechat-refresh",
+        "expires_in" => 7200,
+        "openid" => "openid-1",
+        "scope" => "snsapi_login"
+      }
+    end
+
+    provider = BetterAuth::SocialProviders.wechat(client_id: "wx-app", client_secret: "wx-secret")
+    tokens = nil
+    BetterAuth::SocialProviders::Base.stub(:get_json, get_json) do
+      tokens = provider.fetch(:refresh_access_token).call("wechat-refresh")
+    end
+
+    params = Rack::Utils.parse_query(URI.parse(captured_url).query)
+    assert_equal "wx-app", params.fetch("appid")
+    assert_equal "refresh_token", params.fetch("grant_type")
+    assert_equal "wechat-refresh", params.fetch("refresh_token")
+    refute params.key?("secret")
+    assert_equal "openid-1", tokens.fetch("openid")
+  end
+
+  def test_wechat_get_user_info_uses_openid_and_maps_unionid_fallback
+    captured_url = nil
+    get_json = lambda do |url, _headers = {}|
+      captured_url = url
+      {
+        "openid" => "openid-1",
+        "unionid" => "union-1",
+        "nickname" => "WeChat User",
+        "headimgurl" => "https://wechat.example/avatar.png"
+      }
+    end
+
+    provider = BetterAuth::SocialProviders.wechat(client_id: "wx-app", client_secret: "wx-secret")
+    info = nil
+    BetterAuth::SocialProviders::Base.stub(:get_json, get_json) do
+      info = provider.fetch(:get_user_info).call("accessToken" => "wechat-access", "openid" => "openid-1")
+    end
+
+    params = Rack::Utils.parse_query(URI.parse(captured_url).query)
+    assert_equal "wechat-access", params.fetch("access_token")
+    assert_equal "openid-1", params.fetch("openid")
+    assert_equal "zh_CN", params.fetch("lang")
+    assert_equal "union-1", info.fetch(:user).fetch(:id)
+    assert_equal "WeChat User", info.fetch(:user).fetch(:name)
+    assert_nil info.fetch(:user).fetch(:email)
+    assert_equal false, info.fetch(:user).fetch(:emailVerified)
+  end
+
+  def test_wechat_get_user_info_returns_nil_without_openid
+    provider = BetterAuth::SocialProviders.wechat(client_id: "wx-app", client_secret: "wx-secret")
+
+    assert_nil provider.fetch(:get_user_info).call("accessToken" => "wechat-access")
   end
 
   def test_discord_null_email_can_be_synthesized_with_profile_mapping

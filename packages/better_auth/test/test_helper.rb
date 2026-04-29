@@ -4,6 +4,7 @@ $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 require "better_auth"
 
 require "minitest/autorun"
+require "minitest/mock"
 require "minitest/spec"
 
 # Configure SimpleCov if running coverage

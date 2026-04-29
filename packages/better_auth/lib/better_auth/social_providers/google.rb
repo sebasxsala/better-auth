@@ -14,6 +14,8 @@ module BetterAuth
         client_secret: client_secret,
         create_authorization_url: lambda do |data|
           verifier = data[:code_verifier] || data[:codeVerifier]
+          raise Error, "codeVerifier is required for Google" if verifier.to_s.empty?
+
           Base.authorization_url(options[:authorization_endpoint] || "https://accounts.google.com/o/oauth2/v2/auth", {
             client_id: primary_client_id,
             redirect_uri: data[:redirect_uri] || data[:redirectURI],
