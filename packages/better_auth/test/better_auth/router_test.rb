@@ -399,8 +399,39 @@ class BetterAuthRouterTest < Minitest::Test
     )
 
     assert_equal 200, auth.call(rack_env("GET", "/api/auth/limited")).first
+    stored = JSON.parse(storage.data.fetch("127.0.0.1|/limited"))
+    assert_equal ["count", "key", "lastRequest"], stored.keys.sort
+    assert_kind_of Integer, stored.fetch("lastRequest")
     assert_equal 429, auth.call(rack_env("GET", "/api/auth/limited")).first
     assert_equal 60, storage.ttls["127.0.0.1|/limited"]
+  end
+
+  def test_rate_limit_reads_upstream_secondary_storage_last_request_milliseconds
+    storage = SecondaryStorage.new
+    storage.set(
+      "127.0.0.1|/limited",
+      JSON.generate({key: "127.0.0.1|/limited", count: 1, lastRequest: ((Time.now.to_f - 1) * 1000).to_i}),
+      60
+    )
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      secondary_storage: storage,
+      rate_limit: {enabled: true, window: 60, max: 1, storage: "secondary-storage"},
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            limited: BetterAuth::Endpoint.new(path: "/limited", method: "GET") { {ok: true} }
+          }
+        }
+      ]
+    )
+
+    status, headers, = auth.call(rack_env("GET", "/api/auth/limited"))
+
+    assert_equal 429, status
+    assert_operator headers.fetch("x-retry-after").to_i, :<=, 60
   end
 
   def test_rate_limit_normalizes_configured_ip_headers

@@ -123,6 +123,30 @@ class BetterAuthRoutesUserTest < Minitest::Test
     assert auth.context.internal_adapter.find_user_by_id(user_id)
   end
 
+  def test_update_user_propagates_across_secondary_storage_sessions
+    storage = LoggingStorage.new
+    auth = build_auth(secondary_storage: storage)
+    first_cookie = sign_up_cookie(auth, email: "secondary-user@example.com", password: "password123")
+    second_cookie = sign_in_cookie(auth, email: "secondary-user@example.com", password: "password123")
+
+    auth.api.update_user(headers: {"cookie" => first_cookie}, body: {name: "Updated Name"})
+
+    assert_equal "Updated Name", auth.api.get_session(headers: {"cookie" => first_cookie})[:user]["name"]
+    assert_equal "Updated Name", auth.api.get_session(headers: {"cookie" => second_cookie})[:user]["name"]
+  end
+
+  def test_update_user_writes_each_secondary_storage_session_once
+    storage = LoggingStorage.new
+    auth = build_auth(secondary_storage: storage)
+    cookie = sign_up_cookie(auth, email: "secondary-writes@example.com", password: "password123")
+    token = auth.api.get_session(headers: {"cookie" => cookie})[:session]["token"]
+
+    storage.write_log.clear
+    auth.api.update_user(headers: {"cookie" => cookie}, body: {name: "Updated Name"})
+
+    assert_equal 1, storage.write_log.count { |entry| entry[:key] == token }
+  end
+
   def test_delete_user_deletes_current_user_sessions_and_calls_hooks
     calls = []
     auth = build_auth(
@@ -143,6 +167,33 @@ class BetterAuthRoutesUserTest < Minitest::Test
     assert_equal ["before:delete@example.com", "after:delete@example.com"], calls
     assert_nil auth.context.internal_adapter.find_user_by_id(user_id)
     assert_nil auth.api.get_session(headers: {"cookie" => cookie})
+  end
+
+  def test_delete_user_deletes_all_secondary_storage_sessions
+    storage = LoggingStorage.new
+    auth = build_auth(
+      secondary_storage: storage,
+      user: {delete_user: {enabled: true}}
+    )
+    first_cookie = sign_up_cookie(auth, email: "delete-secondary@example.com", password: "password123")
+    second_cookie = sign_in_cookie(auth, email: "delete-secondary@example.com", password: "password123")
+    session = auth.api.get_session(headers: {"cookie" => second_cookie})
+    user_id = session[:user]["id"]
+    tokens = [
+      auth.api.get_session(headers: {"cookie" => first_cookie})[:session]["token"],
+      session[:session]["token"]
+    ]
+
+    active_sessions = JSON.parse(storage.get("active-sessions-#{user_id}"))
+    assert_equal tokens.sort, active_sessions.map { |entry| entry.fetch("token") }.sort
+
+    result = auth.api.delete_user(headers: {"cookie" => second_cookie}, body: {password: "password123"})
+
+    assert_equal({success: true, message: "User deleted"}, result)
+    assert_nil storage.get("active-sessions-#{user_id}")
+    tokens.each { |token| assert_nil storage.get(token) }
+    assert_empty storage.keys
+    assert_nil auth.context.internal_adapter.find_user_by_id(user_id)
   end
 
   private
@@ -177,5 +228,31 @@ class BetterAuthRoutesUserTest < Minitest::Test
 
   def cookie_header(set_cookie)
     set_cookie.lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  class LoggingStorage
+    attr_reader :write_log
+
+    def initialize
+      @store = {}
+      @write_log = []
+    end
+
+    def set(key, value, _ttl = nil)
+      write_log << {key: key}
+      @store[key] = value
+    end
+
+    def get(key)
+      @store[key]
+    end
+
+    def delete(key)
+      @store.delete(key)
+    end
+
+    def keys
+      @store.keys
+    end
   end
 end

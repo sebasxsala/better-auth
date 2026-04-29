@@ -260,6 +260,108 @@ class BetterAuthPluginsMagicLinkTest < Minitest::Test
     assert_equal "Invalid callbackURL", error.message
   end
 
+  def test_magic_link_secondary_storage_string_flow_verifies_and_signs_up
+    storage = StringStorage.new
+    sent = []
+    auth = build_auth(
+      secondary_storage: storage,
+      plugins: [
+        BetterAuth::Plugins.magic_link(send_magic_link: ->(data, _ctx = nil) { sent << data })
+      ]
+    )
+    auth.api.sign_up_email(body: {email: "secondary-magic@example.com", password: "password123", name: "Secondary Magic"})
+
+    auth.api.sign_in_magic_link(body: {email: "secondary-magic@example.com"})
+    assert verification_keys(storage).any?
+    status, headers, _body = auth.api.magic_link_verify(query: {token: sent.last[:token]}, as_response: true)
+
+    assert_equal 200, status
+    assert_includes headers.fetch("set-cookie"), "better-auth.session_token="
+
+    auth.api.sign_in_magic_link(body: {email: "secondary-new-magic@example.com", name: "Secondary New"})
+    result = auth.api.magic_link_verify(query: {token: sent.last[:token]})
+
+    assert_match(/\A[0-9a-f]{32}\z/, result[:token])
+    assert_equal "secondary-new-magic@example.com", result[:user]["email"]
+    assert_equal "Secondary New", result[:user]["name"]
+    assert_equal true, result[:user]["emailVerified"]
+  end
+
+  def test_magic_link_secondary_storage_tracks_attempts_and_deletes_expired_tokens
+    storage = StringStorage.new
+    sent = []
+    auth = build_auth(
+      secondary_storage: storage,
+      plugins: [
+        BetterAuth::Plugins.magic_link(
+          allowed_attempts: 2,
+          send_magic_link: ->(data, _ctx = nil) { sent << data }
+        )
+      ]
+    )
+    auth.api.sign_up_email(body: {email: "secondary-attempts@example.com", password: "password123", name: "Secondary Attempts"})
+    auth.api.sign_in_magic_link(body: {email: "secondary-attempts@example.com"})
+    token = sent.last[:token]
+
+    2.times do
+      status, _headers, _body = auth.api.magic_link_verify(query: {token: token}, as_response: true)
+      assert_equal 200, status
+    end
+    exceeded = auth.api.magic_link_verify(query: {token: token, errorCallbackURL: "/error"}, as_response: true)
+
+    assert_equal 302, exceeded.first
+    assert_includes exceeded[1].fetch("location"), "error=ATTEMPTS_EXCEEDED"
+    assert_empty verification_keys(storage)
+
+    expired_storage = StringStorage.new
+    expired_sent = []
+    expired_auth = build_auth(
+      secondary_storage: expired_storage,
+      plugins: [
+        BetterAuth::Plugins.magic_link(
+          expires_in: 1,
+          send_magic_link: ->(data, _ctx = nil) { expired_sent << data }
+        )
+      ]
+    )
+    expired_auth.api.sign_in_magic_link(body: {email: "secondary-expired@example.com"})
+    expired_token = expired_sent.last[:token]
+    sleep 1.1
+    expired = expired_auth.api.magic_link_verify(query: {token: expired_token, errorCallbackURL: "/error"}, as_response: true)
+
+    assert_equal 302, expired.first
+    assert_includes expired[1].fetch("location"), "error=EXPIRED_TOKEN"
+    assert_empty verification_keys(expired_storage)
+  end
+
+  def test_magic_link_secondary_storage_preparsed_objects_verify_and_track_attempts
+    storage = ObjectStorage.new
+    sent = []
+    auth = build_auth(
+      secondary_storage: storage,
+      plugins: [
+        BetterAuth::Plugins.magic_link(
+          allowed_attempts: 2,
+          send_magic_link: ->(data, _ctx = nil) { sent << data }
+        )
+      ]
+    )
+    auth.api.sign_up_email(body: {email: "object-magic@example.com", password: "password123", name: "Object Magic"})
+    auth.api.sign_in_magic_link(body: {email: "object-magic@example.com"})
+    token = sent.last[:token]
+
+    2.times do
+      status, headers, _body = auth.api.magic_link_verify(query: {token: token}, as_response: true)
+      assert_equal 200, status
+      assert_includes headers.fetch("set-cookie"), "better-auth.session_token="
+    end
+    exceeded = auth.api.magic_link_verify(query: {token: token, errorCallbackURL: "/error"}, as_response: true)
+
+    assert_equal 302, exceeded.first
+    assert_includes exceeded[1].fetch("location"), "error=ATTEMPTS_EXCEEDED"
+    assert_empty verification_keys(storage)
+  end
+
   def test_magic_link_demo_flow_works_through_rack_requests
     sent = []
     auth = build_auth(
@@ -295,6 +397,10 @@ class BetterAuthPluginsMagicLinkTest < Minitest::Test
     BetterAuth.auth({base_url: "http://localhost:3000", secret: SECRET, database: :memory}.merge(options))
   end
 
+  def verification_keys(storage)
+    storage.keys.grep(/\Averification:/)
+  end
+
   def rack_env(method, path, body:, query: "", content_type: "application/json", extra_headers: {})
     {
       "REQUEST_METHOD" => method,
@@ -309,5 +415,51 @@ class BetterAuthPluginsMagicLinkTest < Minitest::Test
       "CONTENT_LENGTH" => body.bytesize.to_s,
       "HTTP_ORIGIN" => "http://localhost:3000"
     }.merge(extra_headers)
+  end
+
+  class StringStorage
+    def initialize
+      @store = {}
+    end
+
+    def set(key, value, _ttl = nil)
+      @store[key] = value
+    end
+
+    def get(key)
+      @store[key]
+    end
+
+    def delete(key)
+      @store.delete(key)
+    end
+
+    def keys
+      @store.keys
+    end
+  end
+
+  class ObjectStorage
+    def initialize
+      @store = {}
+    end
+
+    def set(key, value, _ttl = nil)
+      @store[key] = JSON.parse(value)
+    rescue JSON::ParserError
+      @store[key] = value
+    end
+
+    def get(key)
+      @store[key]
+    end
+
+    def delete(key)
+      @store.delete(key)
+    end
+
+    def keys
+      @store.keys
+    end
   end
 end

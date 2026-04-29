@@ -145,6 +145,77 @@ class BetterAuthRoutesSessionTest < Minitest::Test
     refute_nil auth.api.get_session(headers: {"cookie" => second_cookie})
   end
 
+  def test_secondary_storage_stores_lists_and_revokes_session
+    storage = StringStorage.new
+    auth = build_auth(secondary_storage: storage)
+    cookie = sign_up_cookie(auth, email: "secondary-session@example.com")
+    session = auth.api.get_session(headers: {"cookie" => cookie})
+    user_id = session[:user]["id"]
+    token = session[:session]["token"]
+
+    assert_equal ["active-sessions-#{user_id}", token].sort, storage.keys.sort
+    stored_session = JSON.parse(storage.get(token))
+    assert_equal user_id, stored_session.fetch("user").fetch("id")
+    assert_equal user_id, stored_session.fetch("session").fetch("userId")
+    assert stored_session.fetch("session").fetch("id")
+    active_sessions = JSON.parse(storage.get("active-sessions-#{user_id}"))
+    assert_equal [{"token" => token, "expiresAt" => active_sessions.first.fetch("expiresAt")}], active_sessions
+    assert_equal [token], auth.api.list_sessions(headers: {"cookie" => cookie}).map { |entry| entry["token"] }
+
+    result = auth.api.revoke_session(headers: {"cookie" => cookie}, body: {token: token})
+
+    assert_equal({status: true}, result)
+    assert_empty storage.keys
+    assert_nil auth.api.get_session(headers: {"cookie" => cookie})
+  end
+
+  def test_secondary_storage_can_return_already_parsed_objects
+    storage = ObjectStorage.new
+    auth = build_auth(secondary_storage: storage)
+    cookie = sign_up_cookie(auth, email: "object-storage@example.com")
+
+    session = auth.api.get_session(headers: {"cookie" => cookie})
+    active = storage.get("active-sessions-#{session[:user]["id"]}")
+
+    assert_kind_of Array, active
+    assert_equal 1, active.length
+    assert_equal 1, auth.api.list_sessions(headers: {"cookie" => cookie}).length
+
+    result = auth.api.revoke_session(headers: {"cookie" => cookie}, body: {token: session[:session]["token"]})
+
+    assert_equal({status: true}, result)
+    assert_nil auth.api.get_session(headers: {"cookie" => cookie})
+    assert_nil storage.get("active-sessions-#{session[:user]["id"]}")
+  end
+
+  def test_revoke_session_deletes_database_copy_when_secondary_storage_database_preserve_is_false
+    storage = StringStorage.new
+    auth = build_auth(secondary_storage: storage, session: {store_session_in_database: true, preserve_session_in_database: false})
+    cookie = sign_up_cookie(auth, email: "secondary-db-delete@example.com")
+    token = auth.api.get_session(headers: {"cookie" => cookie})[:session]["token"]
+
+    result = auth.api.revoke_session(headers: {"cookie" => cookie}, body: {token: token})
+
+    assert_equal({status: true}, result)
+    assert_nil storage.get(token)
+    assert_nil auth.context.adapter.find_one(model: "session", where: [{field: "token", value: token}])
+    assert_nil auth.api.get_session(headers: {"cookie" => cookie})
+  end
+
+  def test_revoke_session_preserves_database_copy_without_restoring_revoked_secondary_session
+    storage = StringStorage.new
+    auth = build_auth(secondary_storage: storage, session: {store_session_in_database: true, preserve_session_in_database: true})
+    cookie = sign_up_cookie(auth, email: "secondary-db-preserve@example.com")
+    token = auth.api.get_session(headers: {"cookie" => cookie})[:session]["token"]
+
+    result = auth.api.revoke_session(headers: {"cookie" => cookie}, body: {token: token})
+
+    assert_equal({status: true}, result)
+    assert_nil storage.get(token)
+    assert auth.context.adapter.find_one(model: "session", where: [{field: "token", value: token}])
+    assert_nil auth.api.get_session(headers: {"cookie" => cookie})
+  end
+
   private
 
   def build_auth(options = {})
@@ -169,5 +240,45 @@ class BetterAuthRoutesSessionTest < Minitest::Test
 
   def cookie_header(set_cookie)
     set_cookie.lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  class ObjectStorage
+    def initialize
+      @store = {}
+    end
+
+    def set(key, value, _ttl = nil)
+      @store[key] = JSON.parse(value)
+    end
+
+    def get(key)
+      @store[key]
+    end
+
+    def delete(key)
+      @store.delete(key)
+    end
+  end
+
+  class StringStorage
+    def initialize
+      @store = {}
+    end
+
+    def set(key, value, _ttl = nil)
+      @store[key] = value
+    end
+
+    def get(key)
+      @store[key]
+    end
+
+    def delete(key)
+      @store.delete(key)
+    end
+
+    def keys
+      @store.keys
+    end
   end
 end

@@ -92,6 +92,68 @@ class BetterAuthRoutesEmailVerificationTest < Minitest::Test
     assert_equal "new-verified@example.com", sent.last.fetch(:user).fetch("email")
   end
 
+  def test_verify_email_auto_sign_in_stores_session_in_secondary_storage
+    storage = StringStorage.new
+    auth = build_auth(
+      secondary_storage: storage,
+      email_verification: {auto_sign_in_after_verification: true}
+    )
+    auth.api.sign_up_email(body: {email: "secondary-verified@example.com", password: "password123", name: "Verified"})
+    token = BetterAuth::Crypto.sign_jwt({"email" => "secondary-verified@example.com"}, SECRET, expires_in: 3600)
+
+    status, headers, _body = auth.api.verify_email(query: {token: token}, as_response: true)
+    cookie = cookie_header(headers.fetch("set-cookie"))
+    session = auth.api.get_session(headers: {"cookie" => cookie})
+
+    assert_equal 200, status
+    assert_equal "secondary-verified@example.com", session[:user]["email"]
+    assert_equal true, session[:user]["emailVerified"]
+    assert storage.get(session[:session]["token"])
+    assert storage.get("active-sessions-#{session[:user]["id"]}")
+  end
+
+  def test_change_email_updates_secondary_storage_session_after_verification
+    storage = StringStorage.new
+    sent = []
+    auth = build_auth(
+      secondary_storage: storage,
+      user: {change_email: {enabled: true}},
+      email_verification: {send_verification_email: ->(data, _request = nil) { sent << data }}
+    )
+    cookie = sign_up_cookie(auth, email: "old-secondary-email@example.com")
+
+    result = auth.api.change_email(headers: {"cookie" => cookie}, body: {newEmail: "new-secondary-email@example.com"})
+    assert_equal({status: true}, result)
+
+    status, headers, _body = auth.api.verify_email(
+      headers: {"cookie" => cookie},
+      query: {token: sent.first.fetch(:token)},
+      as_response: true
+    )
+    refreshed_cookie = cookie_header(headers.fetch("set-cookie"))
+    session = auth.api.get_session(headers: {"cookie" => refreshed_cookie})
+    stored_session = JSON.parse(storage.get(session[:session]["token"]))
+
+    assert_equal 200, status
+    assert_equal "new-secondary-email@example.com", session[:user]["email"]
+    assert_equal false, session[:user]["emailVerified"]
+    assert_equal 2, sent.length
+    assert_equal "new-secondary-email@example.com", stored_session.fetch("user").fetch("email")
+    assert_equal false, stored_session.fetch("user").fetch("emailVerified")
+
+    status, _headers, _body = auth.api.verify_email(
+      headers: {"cookie" => refreshed_cookie},
+      query: {token: sent.last.fetch(:token)},
+      as_response: true
+    )
+    verified_session = auth.api.get_session(headers: {"cookie" => refreshed_cookie})
+    verified_stored_session = JSON.parse(storage.get(verified_session[:session]["token"]))
+
+    assert_equal 200, status
+    assert_equal true, verified_session[:user]["emailVerified"]
+    assert_equal true, verified_stored_session.fetch("user").fetch("emailVerified")
+  end
+
   private
 
   def build_auth(options = {})
@@ -104,5 +166,27 @@ class BetterAuthRoutesEmailVerificationTest < Minitest::Test
       as_response: true
     )
     headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def cookie_header(set_cookie)
+    set_cookie.lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  class StringStorage
+    def initialize
+      @store = {}
+    end
+
+    def set(key, value, _ttl = nil)
+      @store[key] = value
+    end
+
+    def get(key)
+      @store[key]
+    end
+
+    def delete(key)
+      @store.delete(key)
+    end
   end
 end

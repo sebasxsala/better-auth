@@ -148,16 +148,24 @@ module BetterAuth
     def read_storage((type, storage), key)
       data = storage.get(key)
       data = JSON.parse(data) if type == :secondary && data.is_a?(String)
-      symbolize_keys(data)
+      normalize_rate_limit_data(symbolize_keys(data))
     rescue JSON::ParserError
       nil
     end
 
     def write_storage((type, storage), key, data, ttl:, update:)
-      value = (type == :secondary) ? JSON.generate(data) : data
+      value = (type == :secondary) ? JSON.generate(secondary_storage_data(data)) : data
       return call_secondary_storage_set(storage, key, value, ttl: ttl, update: update) if type == :secondary
 
       call_storage_set(storage, key, value, ttl: ttl, update: update)
+    end
+
+    def secondary_storage_data(data)
+      {
+        key: data[:key],
+        count: data[:count],
+        lastRequest: (data[:last_request].to_f * 1000).to_i
+      }
     end
 
     def call_secondary_storage_set(storage, key, value, ttl:, update:)
@@ -186,6 +194,15 @@ module BetterAuth
       value.each_with_object({}) do |(key, object_value), result|
         result[key.to_s.gsub(/([a-z\d])([A-Z])/, "\\1_\\2").tr("-", "_").downcase.to_sym] = object_value
       end
+    end
+
+    def normalize_rate_limit_data(data)
+      return data unless data.is_a?(Hash)
+
+      last_request = data[:last_request]
+      return data unless last_request.is_a?(Numeric) && last_request > 10_000_000_000
+
+      data.merge(last_request: last_request / 1000.0)
     end
 
     def rate_limit_key(ip, path)

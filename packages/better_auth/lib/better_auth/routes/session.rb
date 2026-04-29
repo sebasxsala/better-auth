@@ -34,10 +34,11 @@ module BetterAuth
         body = Routes.parse_declared_input(ctx, "session", ctx.body, allowed_base: [])
         raise APIError.new("BAD_REQUEST", message: "No fields to update") if body.empty?
 
-        updated = ctx.context.internal_adapter.update_session(session[:session]["token"], body)
-        merged = session[:session].merge(updated || body)
+        update = body.merge("updatedAt" => Time.now)
+        updated = ctx.context.internal_adapter.update_session(session[:session]["token"], update)
+        merged = session[:session].merge(updated || update)
         Cookies.set_session_cookie(ctx, {session: merged, user: session[:user]}, Cookies.dont_remember?(ctx))
-        ctx.json({status: true})
+        ctx.json({session: Schema.parse_output(ctx.context.options, "session", merged)})
       end
     end
 

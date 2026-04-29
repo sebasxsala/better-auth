@@ -20,6 +20,29 @@ class BetterAuthConfigurationTest < Minitest::Test
     assert_equal({enabled: true, strategy: "jwe", refresh_cache: true}, config.session[:cookie_cache])
   end
 
+  def test_secondary_storage_selects_secondary_rate_limit_storage_by_default
+    storage = Object.new
+    config = BetterAuth::Configuration.new(secret: SECRET, secondary_storage: storage)
+
+    assert_equal "secondary-storage", config.rate_limit[:storage]
+  end
+
+  def test_secondary_storage_disables_cookie_refresh_cache
+    storage = Object.new
+
+    capture_io do
+      @config = BetterAuth::Configuration.new(
+        secret: SECRET,
+        secondary_storage: storage,
+        session: {cookie_cache: {refresh_cache: true}}
+      )
+    end
+
+    assert_equal false, @config.session.dig(:cookie_cache, :refresh_cache)
+  ensure
+    remove_instance_variable(:@config) if defined?(@config)
+  end
+
   def test_explicit_configuration_normalizes_ruby_option_names
     config = BetterAuth::Configuration.new(
       base_url: "http://localhost:3000",
