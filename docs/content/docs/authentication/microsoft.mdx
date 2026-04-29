@@ -1,59 +1,64 @@
 ---
-title: Microsoft Entra ID
-description: Microsoft Entra ID provider setup and usage in Better Auth Ruby.
+title: Microsoft
+description: Microsoft provider setup and usage in Better Auth Ruby.
 ---
 
-Microsoft Entra ID is supported by the Ruby port through `BetterAuth::SocialProviders.microsoft_entra_id`.
+Enabling OAuth with Microsoft Azure Entra ID (formerly Active Directory) allows your users to sign in and sign up to your application with their Microsoft account.
 
-## Callback URL
+<Steps>
+  <Step>
+    ### Get your Microsoft credentials
 
-Configure the OAuth app with this redirect URL for local development:
+    To use Microsoft as a social provider, you need to get your Microsoft credentials. Which involves generating your own Client ID and Client Secret using your Microsoft Entra ID dashboard account.
 
-```txt
-http://localhost:3000/api/auth/callback/microsoft-entra-id
-```
+    Make sure to set the redirect URL to `http://localhost:3000/api/auth/callback/microsoft` for local development. For production, you should change it to the URL of your application. If you change the base path of the auth routes, you should update the redirect URL accordingly.
 
-For production, use your application domain with the same path:
+    see the [Microsoft Entra ID documentation](https://docs.microsoft.com/en-us/azure/active-directory/develop/quickstart-register-app) for more information.
+  </Step>
 
-```txt
-https://your-domain.com/api/auth/callback/microsoft-entra-id
-```
+  <Step>
+    ### Configure the provider
 
-## Configure The Provider
+    To configure the provider, you need to pass the `client_id` and `client_secret` to `BetterAuth::SocialProviders.microsoft` in your auth configuration.
 
-```ruby title="config/auth.rb"
+    ```ruby title="config/auth.rb"
 require "better_auth"
 
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
   social_providers: {
-    microsoft_entra_id: BetterAuth::SocialProviders.microsoft_entra_id(
+    microsoft: BetterAuth::SocialProviders.microsoft(
       client_id: ENV.fetch("MICROSOFT_CLIENT_ID"),
-      client_secret: ENV.fetch("MICROSOFT_CLIENT_SECRET"),
-          tenant_id: ENV.fetch("MICROSOFT_TENANT_ID", "common")
+      client_secret: ENV.fetch("MICROSOFT_CLIENT_SECRET")
     )
   }
 )
 ```
 
-The Ruby factory is `microsoft_entra_id` and uses `tenant_id`, defaulting to `common`.
+    **Authority URL**: Use the default `https://login.microsoftonline.com` for standard Entra ID scenarios or `https://<tenant-id>.ciamlogin.com` for CIAM (Customer Identity and Access Management) scenarios.
 
-## Start Sign-In
+    <Callout type="warn">
+      Entra does not emit the `email` claim for managed users by default, and the value is [tenant-mutable and never verified by Microsoft](https://learn.microsoft.com/en-us/entra/identity-platform/id-token-claims-reference); it must not be used for authorization decisions. Request `email` as an [optional claim](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims) for managed users, and use `profile.oid` (plus `profile.tid` when correlating across tenants) as the stable identity anchor. See [Handling Providers Without Email](/docs/concepts/oauth#handling-providers-without-email) for the `map_profile_to_user` fallback.
+    </Callout>
+  </Step>
+</Steps>
+
+## Sign In with Microsoft
+
+To sign in with Microsoft, call `auth.api.sign_in_social` on your Ruby auth instance. The endpoint body takes the following properties:
+
+* `provider`: The provider to use. It should be set to `microsoft`.
 
 ```ruby title="server.rb"
 response = auth.api.sign_in_social(
   body: {
-    provider: "microsoft-entra-id",
-    callbackURL: "/dashboard",
-    errorCallbackURL: "/login",
-    disableRedirect: true
+    provider: "microsoft",
+    callback_url: "/dashboard",
+    error_callback_url: "/login",
+    disable_redirect: true
   }
 )
 
 redirect_url = response.fetch(:url)
 ```
-
-In a Rack response, redirect the user to `redirect_url`. The OAuth callback is handled by Better Auth at `/api/auth/callback/microsoft-entra-id`.
-
-{/* Upstream Microsoft Entra ID guide is preserved in upstream/docs/content/docs/authentication/microsoft.mdx. */}

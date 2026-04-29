@@ -3,25 +3,23 @@ title: GitHub
 description: GitHub provider setup and usage in Better Auth Ruby.
 ---
 
-GitHub is supported by the Ruby port through `BetterAuth::SocialProviders.github`.
+<Steps>
+  <Step>
+    ### Get your GitHub credentials
 
-## Callback URL
+    To use GitHub sign in, you need a client ID and client secret. You can get them from the [GitHub Developer Portal](https://github.com/settings/developers).
 
-Configure the OAuth app with this redirect URL for local development:
+    Make sure to set the redirect URL to `http://localhost:3000/api/auth/callback/github` for local development. For production, you should set it to the URL of your application. If you change the base path of the auth routes, you should update the redirect URL accordingly.
 
-```txt
-http://localhost:3000/api/auth/callback/github
-```
+    Important: You MUST include the user:email scope in your GitHub app. See details below.
+  </Step>
 
-For production, use your application domain with the same path:
+  <Step>
+    ### Configure the provider
 
-```txt
-https://your-domain.com/api/auth/callback/github
-```
+    To configure the provider, you need to import the provider and pass it to the `social_providers` option of the auth instance.
 
-## Configure The Provider
-
-```ruby title="config/auth.rb"
+    ```ruby title="config/auth.rb"
 require "better_auth"
 
 auth = BetterAuth.auth(
@@ -35,24 +33,51 @@ auth = BetterAuth.auth(
   }
 )
 ```
+  </Step>
 
-GitHub can return profile and email data through the built-in Ruby provider factory.
+  <Step>
+    ### Sign In with GitHub
 
-## Start Sign-In
+    To sign in with GitHub, call `auth.api.sign_in_social` on your Ruby auth instance. The endpoint body takes the following properties:
 
-```ruby title="server.rb"
+    * `provider`: The provider to use. It should be set to `github`.
+
+    ```ruby title="server.rb"
 response = auth.api.sign_in_social(
   body: {
     provider: "github",
-    callbackURL: "/dashboard",
-    errorCallbackURL: "/login",
-    disableRedirect: true
+    callback_url: "/dashboard",
+    error_callback_url: "/login",
+    disable_redirect: true
   }
 )
 
 redirect_url = response.fetch(:url)
 ```
+  </Step>
+</Steps>
 
-In a Rack response, redirect the user to `redirect_url`. The OAuth callback is handled by Better Auth at `/api/auth/callback/github`.
+## Usage
 
-{/* Upstream GitHub guide is preserved in upstream/docs/content/docs/authentication/github.mdx. */}
+### Setting up your Github app
+
+Github has two types of apps: Github apps and OAuth apps.
+
+For OAuth apps, you don't have to do anything special (just follow the steps above). For Github apps, you DO have to add one more thing, which is enable it to read the user's email:
+
+1. After creating your app, go to *Permissions and Events* > *Account Permissions* > *Email Addresses* and select "Read-Only"
+
+2. Save changes.
+
+That's all! Now you can copy the Client ID and Client Secret of your app!
+
+<Callout>
+  If you get an `email_not_found` error, it is most often because either (a) you created a GitHub App and did not grant the "Email addresses: Read-only" permission, or (b) the user has set their primary email to private, in which case `GET /user` returns `email: null`. See [Handling Providers Without Email](/docs/concepts/oauth#handling-providers-without-email) for the recommended `map_profile_to_user` fallback; the user's private addresses are also available via [`/user/emails`](https://docs.github.com/en/rest/users/emails).
+</Callout>
+
+### Why don't I have a refresh token?
+
+Github doesn't issue refresh tokens for OAuth apps. For regular OAuth apps,
+GitHub issues access tokens that remain valid indefinitely unless the user revokes them,
+the app revokes them, or they go unused for a year.
+There's no need for a refresh token because the access token doesn't expire on a short interval like Google or Discord.

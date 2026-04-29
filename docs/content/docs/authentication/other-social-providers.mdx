@@ -1,19 +1,7 @@
 ---
 title: Other Social Providers
-description: Other social providers setup and usage.
+description: Other Social Providers provider setup and usage in Better Auth Ruby.
 ---
-
-<Callout type="warn">
-This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
-</Callout>
-
-{/*
-Hidden upstream content for Other Social Providers.
-
-
-<Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
-</Callout>
 
 Better Auth provides support for any social provider that implements the OAuth2 protocol or OpenID Connect (OIDC) flows through the [Generic OAuth Plugin](/docs/plugins/generic-oauth). You can use pre-configured helper functions for popular providers like Auth0, Keycloak, Okta, Microsoft Entra ID, and Slack, or manually configure any OAuth provider.
 
@@ -25,29 +13,29 @@ Better Auth provides support for any social provider that implements the OAuth2 
 
     To use the Generic OAuth plugin, add it to your auth config.
 
-    ```ts title="auth.ts"
-    import { betterAuth } from "better-auth"
-    import { genericOAuth } from "better-auth/plugins" // [!code highlight]
+    ```ruby title="config/auth.rb"
+require "better_auth"
 
-    export const auth = betterAuth({
-        // ... other config options
-        plugins: [
-            genericOAuth({ // [!code highlight]
-                config: [ // [!code highlight]
-                    { // [!code highlight]
-                        providerId: "provider-id", // [!code highlight]
-                        clientId: "test-client-id", // [!code highlight]
-                        clientSecret: "test-client-secret", // [!code highlight]
-                        discoveryUrl: "https://auth.example.com/.well-known/openid-configuration", // [!code highlight]
-                        // ... other config options // [!code highlight]
-                    }, // [!code highlight]
-                    // Add more providers as needed // [!code highlight]
-                ] // [!code highlight]
-            }) // [!code highlight]
-        ]
-    })
-    ```
-
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
+  plugins: [
+    BetterAuth::Plugins.generic_oauth(
+      config: [
+        {
+          provider_id: "custom-provider",
+          client_id: ENV.fetch("CUSTOM_PROVIDER_CLIENT_ID"),
+          client_secret: ENV.fetch("CUSTOM_PROVIDER_CLIENT_SECRET"),
+          authorization_url: "https://provider.example.com/oauth/authorize",
+          token_url: "https://provider.example.com/oauth/token",
+          user_info_url: "https://provider.example.com/oauth/userinfo",
+          scopes: ["openid", "email", "profile"]
+        }
+      ]
+    )
+  ]
+)
+```
   </Step>
 
   <Step>
@@ -55,17 +43,29 @@ Better Auth provides support for any social provider that implements the OAuth2 
 
     Include the Generic OAuth client plugin in your authentication client instance.
 
-    ```ts title="auth-client.ts"
-    import { createAuthClient } from "better-auth/client"
-    import { genericOAuthClient } from "better-auth/client/plugins"
+    ```ruby title="config/auth.rb"
+require "better_auth"
 
-    const authClient = createAuthClient({
-        plugins: [
-            genericOAuthClient()
-        ]
-    })
-    ```
-
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
+  plugins: [
+    BetterAuth::Plugins.generic_oauth(
+      config: [
+        {
+          provider_id: "custom-provider",
+          client_id: ENV.fetch("CUSTOM_PROVIDER_CLIENT_ID"),
+          client_secret: ENV.fetch("CUSTOM_PROVIDER_CLIENT_SECRET"),
+          authorization_url: "https://provider.example.com/oauth/authorize",
+          token_url: "https://provider.example.com/oauth/token",
+          user_info_url: "https://provider.example.com/oauth/userinfo",
+          scopes: ["openid", "email", "profile"]
+        }
+      ]
+    )
+  ]
+)
+```
   </Step>
 </Steps>
 
@@ -78,53 +78,63 @@ Better Auth provides support for any social provider that implements the OAuth2 
 
 Here's a basic example of configuring a generic OAuth provider:
 
-```ts title="auth.ts"
-import { betterAuth } from "better-auth"
-import { genericOAuth } from "better-auth/plugins"
+```ruby title="config/auth.rb"
+require "better_auth"
 
-export const auth = betterAuth({
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
   plugins: [
-    genericOAuth({
+    BetterAuth::Plugins.generic_oauth(
       config: [
         {
-          providerId: "provider-id",
-          clientId: process.env.CLIENT_ID,
-          clientSecret: process.env.CLIENT_SECRET,
-          discoveryUrl: "https://auth.example.com/.well-known/openid-configuration",
-        },
-      ],
-    }),
-  ],
-})
+          provider_id: "custom-provider",
+          client_id: ENV.fetch("CUSTOM_PROVIDER_CLIENT_ID"),
+          client_secret: ENV.fetch("CUSTOM_PROVIDER_CLIENT_SECRET"),
+          authorization_url: "https://provider.example.com/oauth/authorize",
+          token_url: "https://provider.example.com/oauth/token",
+          user_info_url: "https://provider.example.com/oauth/userinfo",
+          scopes: ["openid", "email", "profile"]
+        }
+      ]
+    )
+  ]
+)
 ```
 
 ## Using Pre-configured Providers
 
 Better Auth provides pre-configured helper functions for popular OAuth providers. Here's an example using Slack:
 
-```ts title="auth.ts"
-import { betterAuth } from "better-auth"
-import { genericOAuth, slack } from "better-auth/plugins"
+```ruby title="config/auth.rb"
+require "better_auth"
 
-export const auth = betterAuth({
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
   plugins: [
-    genericOAuth({
+    BetterAuth::Plugins.generic_oauth(
       config: [
-        slack({
-          clientId: process.env.SLACK_CLIENT_ID,
-          clientSecret: process.env.SLACK_CLIENT_SECRET,
-        }),
-      ],
-    }),
-  ],
-})
+        BetterAuth::Plugins.slack(
+          client_id: ENV.fetch("SLACK_CLIENT_ID"),
+          client_secret: ENV.fetch("SLACK_CLIENT_SECRET")
+        )
+      ]
+    )
+  ]
+)
 ```
 
-```ts title="sign-in.ts"
-const response = await authClient.signIn.oauth2({
-  providerId: "slack",
-  callbackURL: "/dashboard",
-})
+```ruby title="sign-in.rb"
+response = auth.api.sign_in_with_oauth2(
+  body: {
+    provider_id: "slack",
+    callback_url: "/dashboard",
+    disable_redirect: true
+  }
+)
+
+redirect_url = response.fetch(:url)
 ```
 
 For more pre-configured providers (Auth0, Keycloak, Okta, Microsoft Entra ID) and their configuration options, see the [Generic OAuth Plugin documentation](/docs/plugins/generic-oauth#pre-configured-provider-helpers).
@@ -135,66 +145,76 @@ If you need to configure a provider that doesn't have a pre-configured helper, y
 
 ### Instagram Example
 
-```ts title="auth.ts"
-import { betterAuth } from "better-auth";
-import { genericOAuth } from "better-auth/plugins";
+```ruby title="config/auth.rb"
+require "better_auth"
 
-export const auth = betterAuth({
-  // ... other config options
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
   plugins: [
-    genericOAuth({
+    BetterAuth::Plugins.generic_oauth(
       config: [
         {
-          providerId: "instagram",
-          clientId: process.env.INSTAGRAM_CLIENT_ID as string,
-          clientSecret: process.env.INSTAGRAM_CLIENT_SECRET as string,
-          authorizationUrl: "https://api.instagram.com/oauth/authorize",
-          tokenUrl: "https://api.instagram.com/oauth/access_token",
-          scopes: ["user_profile", "user_media"],
-        },
-      ],
-    }),
-  ],
-});
+          provider_id: "instagram",
+          client_id: ENV.fetch("INSTAGRAM_CLIENT_ID"),
+          client_secret: ENV.fetch("INSTAGRAM_CLIENT_SECRET"),
+          authorization_url: "https://provider.example.com/oauth/authorize",
+          token_url: "https://provider.example.com/oauth/token",
+          user_info_url: "https://provider.example.com/oauth/userinfo",
+          scopes: ["openid", "email", "profile"]
+        }
+      ]
+    )
+  ]
+)
 ```
 
-```ts title="sign-in.ts"
-const response = await authClient.signIn.oauth2({
-  providerId: "instagram",
-  callbackURL: "/dashboard", // the path to redirect to after the user is authenticated
-});
+```ruby title="sign-in.rb"
+response = auth.api.sign_in_with_oauth2(
+  body: {
+    provider_id: "instagram",
+    callback_url: "/dashboard",
+    disable_redirect: true
+  }
+)
+
+redirect_url = response.fetch(:url)
 ```
 
 ### Coinbase Example
 
-```ts title="auth.ts"
-import { betterAuth } from "better-auth";
-import { genericOAuth } from "better-auth/plugins";
+```ruby title="config/auth.rb"
+require "better_auth"
 
-export const auth = betterAuth({
-  // ... other config options
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
   plugins: [
-    genericOAuth({
+    BetterAuth::Plugins.generic_oauth(
       config: [
         {
-          providerId: "coinbase",
-          clientId: process.env.COINBASE_CLIENT_ID as string,
-          clientSecret: process.env.COINBASE_CLIENT_SECRET as string,
-          authorizationUrl: "https://www.coinbase.com/oauth/authorize",
-          tokenUrl: "https://api.coinbase.com/oauth/token",
-          scopes: ["wallet:user:read"], // and more...
-        },
-      ],
-    }),
-  ],
-});
+          provider_id: "coinbase",
+          client_id: ENV.fetch("COINBASE_CLIENT_ID"),
+          client_secret: ENV.fetch("COINBASE_CLIENT_SECRET"),
+          authorization_url: "https://provider.example.com/oauth/authorize",
+          token_url: "https://provider.example.com/oauth/token",
+          user_info_url: "https://provider.example.com/oauth/userinfo",
+          scopes: ["openid", "email", "profile"]
+        }
+      ]
+    )
+  ]
+)
 ```
 
-```ts title="sign-in.ts"
-const response = await authClient.signIn.oauth2({
-  providerId: "coinbase",
-  callbackURL: "/dashboard", // the path to redirect to after the user is authenticated
-});
-```
+```ruby title="sign-in.rb"
+response = auth.api.sign_in_with_oauth2(
+  body: {
+    provider_id: "coinbase",
+    callback_url: "/dashboard",
+    disable_redirect: true
+  }
+)
 
-*/}
+redirect_url = response.fetch(:url)
+```

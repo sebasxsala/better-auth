@@ -1,67 +1,61 @@
 ---
 title: Twitch
-description: Twitch provider setup and usage.
+description: Twitch provider setup and usage in Better Auth Ruby.
 ---
 
-<Callout type="warn">
-This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
-</Callout>
-
-{/*
-Hidden upstream content for Twitch.
-
-
-<Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
-</Callout>
-
 <Steps>
-    <Step> 
-        ### Get your Twitch Credentials
-        To use Twitch sign in, you need a client ID and client secret. You can get them from the [Twitch Developer Portal](https://dev.twitch.tv/console/apps).
+  <Step>
+    ### Get your Twitch Credentials
 
-        Make sure to set the redirect URL to `http://localhost:3000/api/auth/callback/twitch` for local development. For production, you should set it to the URL of your application. If you change the base path of the auth routes, you should update the redirect URL accordingly.
-    </Step>
+    To use Twitch sign in, you need a client ID and client secret. You can get them from the [Twitch Developer Portal](https://dev.twitch.tv/console/apps).
+
+    Make sure to set the redirect URL to `http://localhost:3000/api/auth/callback/twitch` for local development. For production, you should set it to the URL of your application. If you change the base path of the auth routes, you should update the redirect URL accordingly.
+  </Step>
 
   <Step>
-        ### Configure the provider
-        To configure the provider, you need to import the provider and pass it to the `socialProviders` option of the auth instance.
+    ### Configure the provider
 
-        ```ts title="auth.ts"  
-        import { betterAuth } from "better-auth"
-        
-        export const auth = betterAuth({
-            socialProviders: {
-                twitch: { // [!code highlight]
-                    clientId: process.env.TWITCH_CLIENT_ID as string, // [!code highlight]
-                    clientSecret: process.env.TWITCH_CLIENT_SECRET as string, // [!code highlight]
-                }, // [!code highlight]
-            }
-        })
-        ```
-    </Step>
-       <Step>
-        ### Sign In with Twitch 
-        To sign in with Twitch, you can use the `signIn.social` function provided by the client.
-        The `signIn` function takes an object with the following properties:
+    To configure the provider, you need to import the provider and pass it to the `social_providers` option of the auth instance.
 
-        - `provider`: The provider to use. It should be set to `twitch`.
+    ```ruby title="config/auth.rb"
+require "better_auth"
 
-        ```ts title="auth-client.ts"  
-        import { createAuthClient } from "better-auth/client"
-        const authClient =  createAuthClient()
-        
-        const signIn = async () => {
-            const data = await authClient.signIn.social({
-                provider: "twitch"
-            })
-        }
-        ```
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
+  social_providers: {
+    twitch: BetterAuth::SocialProviders.twitch(
+      client_id: ENV.fetch("TWITCH_CLIENT_ID"),
+      client_secret: ENV.fetch("TWITCH_CLIENT_SECRET")
+    )
+  }
+)
+```
+  </Step>
 
-        <Callout type="warn">
-            Twitch users who do not have an email address will not be able to sign in.
-        </Callout>
-    </Step>
+  <Step>
+    ### Sign In with Twitch
+
+    To sign in with Twitch, call `auth.api.sign_in_social` on your Ruby auth instance.
+    The endpoint body takes the following properties:
+
+    * `provider`: The provider to use. It should be set to `twitch`.
+
+    ```ruby title="server.rb"
+response = auth.api.sign_in_social(
+  body: {
+    provider: "twitch",
+    callback_url: "/dashboard",
+    error_callback_url: "/login",
+    disable_redirect: true
+  }
+)
+
+redirect_url = response.fetch(:url)
+```
+
+    <Callout type="warn">
+      Twitch users who do not have an email address will not be able to sign in.
+    </Callout>
+  </Step>
 </Steps>
-
-*/}

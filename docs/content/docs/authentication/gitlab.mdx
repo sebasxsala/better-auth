@@ -3,25 +3,21 @@ title: GitLab
 description: GitLab provider setup and usage in Better Auth Ruby.
 ---
 
-GitLab is supported by the Ruby port through `BetterAuth::SocialProviders.gitlab`.
+<Steps>
+  <Step>
+    ### Get your GitLab credentials
 
-## Callback URL
+    To use GitLab sign in, you need a client ID and client secret. [GitLab OAuth documentation](https://docs.gitlab.com/ee/api/oauth2.html).
 
-Configure the OAuth app with this redirect URL for local development:
+    Make sure to set the redirect URL to `http://localhost:3000/api/auth/callback/gitlab` for local development. For production, you should set it to the URL of your application. If you change the base path of the auth routes, you should update the redirect URL accordingly.
+  </Step>
 
-```txt
-http://localhost:3000/api/auth/callback/gitlab
-```
+  <Step>
+    ### Configure the provider
 
-For production, use your application domain with the same path:
+    To configure the provider, you need to import the provider and pass it to the `social_providers` option of the auth instance.
 
-```txt
-https://your-domain.com/api/auth/callback/gitlab
-```
-
-## Configure The Provider
-
-```ruby title="config/auth.rb"
+    ```ruby title="config/auth.rb"
 require "better_auth"
 
 auth = BetterAuth.auth(
@@ -30,29 +26,62 @@ auth = BetterAuth.auth(
   social_providers: {
     gitlab: BetterAuth::SocialProviders.gitlab(
       client_id: ENV.fetch("GITLAB_CLIENT_ID"),
-      client_secret: ENV.fetch("GITLAB_CLIENT_SECRET")
+      client_secret: ENV.fetch("GITLAB_CLIENT_SECRET"),
+      issuer: ENV.fetch("GITLAB_ISSUER", "https://gitlab.com")
     )
   }
 )
 ```
 
-Use this provider for GitLab.com or pass custom endpoints for self-managed GitLab setups when needed.
+    #### Configuration Options
 
-## Start Sign-In
+    * `client_id`: Your GitLab application's Client ID
+    * `client_secret`: Your GitLab application's Client Secret
+    * `issuer`: (Optional) The URL of your GitLab instance. Use this for self-hosted GitLab servers.
+      * Default: `"https://gitlab.com"` (GitLab.com)
+      * Example: `"https://gitlab.company.com"`
 
-```ruby title="server.rb"
+    <Callout type="info">
+      The `issuer` option is useful when using a self-hosted GitLab instance. If you're using GitLab.com, you can omit this option as it defaults to `https://gitlab.com`.
+    </Callout>
+
+    #### Example with self-hosted GitLab
+
+    ```ruby title="config/auth.rb"
+require "better_auth"
+
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
+  social_providers: {
+    gitlab: BetterAuth::SocialProviders.gitlab(
+      client_id: ENV.fetch("GITLAB_CLIENT_ID"),
+      client_secret: ENV.fetch("GITLAB_CLIENT_SECRET"),
+      issuer: ENV.fetch("GITLAB_ISSUER", "https://gitlab.com")
+    )
+  }
+)
+```
+  </Step>
+
+  <Step>
+    ### Sign In with GitLab
+
+    To sign in with GitLab, call `auth.api.sign_in_social` on your Ruby auth instance. The endpoint body takes the following properties:
+
+    * `provider`: The provider to use. It should be set to `gitlab`.
+
+    ```ruby title="server.rb"
 response = auth.api.sign_in_social(
   body: {
     provider: "gitlab",
-    callbackURL: "/dashboard",
-    errorCallbackURL: "/login",
-    disableRedirect: true
+    callback_url: "/dashboard",
+    error_callback_url: "/login",
+    disable_redirect: true
   }
 )
 
 redirect_url = response.fetch(:url)
 ```
-
-In a Rack response, redirect the user to `redirect_url`. The OAuth callback is handled by Better Auth at `/api/auth/callback/gitlab`.
-
-{/* Upstream GitLab guide is preserved in upstream/docs/content/docs/authentication/gitlab.mdx. */}
+  </Step>
+</Steps>

@@ -1,0 +1,85 @@
+---
+title: WeChat
+description: WeChat provider setup and usage in Better Auth Ruby.
+---
+
+<Steps>
+  <Step>
+    ### Get your WeChat Credentials
+
+    To use WeChat sign in, you need to register a website application on the [WeChat Open Platform](https://open.weixin.qq.com/), set the `Authorization Callback Domain` to the better auth domain and get your App ID and App Secret.
+  </Step>
+
+  <Step>
+    ### Configure the provider
+
+    To configure the provider, you need to import the provider and pass it to the `social_providers` option of the auth instance.
+
+    ```ruby title="config/auth.rb"
+require "better_auth"
+
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
+  social_providers: {
+    wechat: BetterAuth::SocialProviders.wechat(
+      client_id: ENV.fetch("WECHAT_CLIENT_ID"),
+      client_secret: ENV.fetch("WECHAT_CLIENT_SECRET")
+    )
+  }
+)
+```
+
+    #### Optional Configuration
+
+    You can customize the WeChat provider with additional options:
+
+    ```ruby title="config/auth.rb"
+require "better_auth"
+
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
+  social_providers: {
+    wechat: BetterAuth::SocialProviders.wechat(
+      client_id: ENV.fetch("WECHAT_CLIENT_ID"),
+      client_secret: ENV.fetch("WECHAT_CLIENT_SECRET"),
+      scopes: ["snsapi_login"],
+      lang: "en"
+    )
+  }
+)
+```
+  </Step>
+
+  <Step>
+    ### Sign In with WeChat
+
+    To sign in with WeChat, call `auth.api.sign_in_social` on your Ruby auth instance. The endpoint body takes the following properties:
+
+    * `provider`: The provider to use. It should be set to `wechat`.
+
+    ```ruby title="server.rb"
+response = auth.api.sign_in_social(
+  body: {
+    provider: "wechat",
+    callback_url: "/dashboard",
+    error_callback_url: "/login",
+    disable_redirect: true
+  }
+)
+
+redirect_url = response.fetch(:url)
+```
+  </Step>
+</Steps>
+
+## Usage
+
+### Platform Support
+
+WeChat provider currently supports the Website Application platform type, which enables WeChat QR code login for web applications.
+
+### Development Notes
+
+* The redirect URL domain must match the domain configured in the WeChat Open Platform
