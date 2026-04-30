@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
 require "json"
+require "base64"
 require "securerandom"
 require "stringio"
+require "uri"
 require "test_helper"
 
 class RedisStorageIntegrationTest < Minitest::Test
@@ -42,37 +44,113 @@ class RedisStorageIntegrationTest < Minitest::Test
     assert_nil @storage.get("a")
   end
 
-  def test_real_redis_session_storage_for_database_and_secondary_only_modes
+  def test_real_redis_stores_session_data_after_email_signup
     @client.set("#{@prefix_root}:outside", "outside")
+    storage = isolated_storage("email-signup")
+    auth = build_auth(storage, store_session_in_database: false)
 
-    [false, true].each do |store_session_in_database|
-      storage = BetterAuth::RedisStorage.new(
-        client: @client,
-        key_prefix: "#{@prefix_root}:#{store_session_in_database}:"
+    result = auth.api.sign_up_email(
+      body: {
+        email: "redis-false-#{SecureRandom.hex(4)}@example.com",
+        password: "password123",
+        name: "Redis User"
+      }
+    )
+
+    assert result[:token]
+    keys = storage.listKeys
+    assert_equal 2, keys.length
+    assert keys.any? { |key| key.start_with?("active-sessions-") }
+    refute_includes keys, "#{@prefix_root}:outside"
+    session_data = session_payload_from_storage(storage)
+    assert session_data.fetch("user").fetch("id")
+    assert session_data.fetch("session").fetch("id")
+    assert_equal result[:token], session_data.fetch("session").fetch("token")
+  ensure
+    storage&.clear
+  end
+
+  def test_real_redis_stores_session_id_when_store_session_in_database_is_true
+    storage = isolated_storage("database-session")
+    auth = build_auth(storage, store_session_in_database: true)
+
+    result = auth.api.sign_up_email(
+      body: {
+        email: "redis-true-#{SecureRandom.hex(4)}@example.com",
+        password: "password123",
+        name: "Redis User"
+      }
+    )
+
+    assert result[:token]
+    keys = storage.listKeys
+    assert_equal 2, keys.length
+    assert keys.any? { |key| key.start_with?("active-sessions-") }
+    session_data = session_payload_from_storage(storage)
+    assert session_data.fetch("user").fetch("id")
+    assert session_data.fetch("session").fetch("id")
+    assert_equal result[:token], session_data.fetch("session").fetch("token")
+  ensure
+    storage&.clear
+  end
+
+  def test_real_redis_stores_stateless_google_oauth_session
+    storage = isolated_storage("stateless-google")
+    auth = build_stateless_google_auth(storage)
+    token_exchange = lambda do |_url, _form|
+      {
+        "accessToken" => "test-access-token",
+        "refreshToken" => "test-refresh-token",
+        "idToken" => fake_jwt("sub" => "google-1234567890")
+      }
+    end
+
+    BetterAuth::SocialProviders::Base.stub(:post_form, token_exchange) do
+      status, _headers, body = auth.api.sign_in_social(
+        body: {provider: "google", callbackURL: "/callback"},
+        as_response: true
       )
-      storage.clear
-      auth = build_auth(storage, store_session_in_database: store_session_in_database)
+      sign_in_data = JSON.parse(body.join)
+      state = extract_state(sign_in_data.fetch("url"))
 
-      result = auth.api.sign_up_email(
-        body: {
-          email: "redis-#{store_session_in_database}-#{SecureRandom.hex(4)}@example.com",
-          password: "password123",
-          name: "Redis User"
-        }
+      callback_status, callback_headers, _callback_body = auth.api.callback_oauth(
+        params: {providerId: "google"},
+        query: {state: state, code: "test-authorization-code"},
+        as_response: true
       )
 
-      assert result[:token]
+      assert_equal 200, status
+      assert_equal 302, callback_status
+      assert_includes callback_headers.fetch("location"), "/callback"
       keys = storage.listKeys
-      refute_empty keys
-      refute_includes keys, "#{@prefix_root}:outside"
-      session_key = keys.find { |key| !key.start_with?("active-sessions-") }
-      session_data = JSON.parse(storage.get(session_key))
+      assert_equal 2, keys.length
+      session_data = session_payload_from_storage(storage)
       assert session_data.fetch("user").fetch("id")
       assert session_data.fetch("session").fetch("id")
-      assert_equal result[:token], session_data.fetch("session").fetch("token")
-    ensure
-      storage&.clear
+      assert_equal "google-user@example.com", session_data.fetch("user").fetch("email")
     end
+  ensure
+    storage&.clear
+  end
+
+  def test_real_redis_google_oauth_uses_custom_authorization_endpoint
+    storage = isolated_storage("custom-google-endpoint")
+    custom_auth_endpoint = "http://localhost:8080/custom-oauth/authorize"
+    auth = build_stateless_google_auth(storage, authorization_endpoint: custom_auth_endpoint)
+
+    status, _headers, body = auth.api.sign_in_social(
+      body: {provider: "google", callbackURL: "/dashboard"},
+      as_response: true
+    )
+    sign_in_data = JSON.parse(body.join)
+    url = sign_in_data.fetch("url")
+
+    assert_equal 200, status
+    assert_includes url, custom_auth_endpoint
+    refute_includes url, "accounts.google.com"
+    assert_includes url, "localhost:8080"
+  ensure
+    storage&.clear
   end
 
   def test_real_redis_rate_limiting_persists_under_secondary_storage
@@ -103,6 +181,13 @@ class RedisStorageIntegrationTest < Minitest::Test
 
   private
 
+  def isolated_storage(name)
+    BetterAuth::RedisStorage.new(
+      client: @client,
+      key_prefix: "#{@prefix_root}:#{name}:"
+    ).tap(&:clear)
+  end
+
   def build_auth(storage, store_session_in_database:)
     BetterAuth.auth(
       base_url: "http://localhost:3000",
@@ -112,6 +197,63 @@ class RedisStorageIntegrationTest < Minitest::Test
       email_and_password: {enabled: true},
       session: {store_session_in_database: store_session_in_database}
     )
+  end
+
+  def build_stateless_google_auth(storage, authorization_endpoint: nil)
+    BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: "redis-storage-secret-with-enough-entropy-12345",
+      database: nil,
+      secondary_storage: storage,
+      session: {
+        cookie_cache: {
+          enabled: true,
+          max_age: 7 * 24 * 60 * 60,
+          strategy: "jwe",
+          refresh_cache: true
+        }
+      },
+      account: {
+        store_state_strategy: "cookie",
+        store_account_cookie: true
+      },
+      social_providers: {
+        google: BetterAuth::SocialProviders.google(
+          client_id: "demo",
+          client_secret: "demo-secret",
+          authorization_endpoint: authorization_endpoint,
+          get_user_info: ->(_tokens) {
+            {
+              user: {
+                id: "google-1234567890",
+                email: "google-user@example.com",
+                name: "Google Test User",
+                image: "https://lh3.googleusercontent.com/a-/test",
+                emailVerified: true
+              }
+            }
+          }
+        )
+      }
+    )
+  end
+
+  def extract_state(url)
+    Rack::Utils.parse_query(URI.parse(url).query).fetch("state")
+  end
+
+  def session_payload_from_storage(storage)
+    session_key = storage.listKeys.find { |key| !key.start_with?("active-sessions-") }
+    assert session_key
+    session_data_string = storage.get(session_key)
+    assert session_data_string
+    JSON.parse(session_data_string)
+  end
+
+  def fake_jwt(payload)
+    encoded_header = Base64.urlsafe_encode64(JSON.generate({"alg" => "none"}), padding: false)
+    encoded_payload = Base64.urlsafe_encode64(JSON.generate(payload), padding: false)
+    "#{encoded_header}.#{encoded_payload}."
   end
 
   def rack_env(method, path)
