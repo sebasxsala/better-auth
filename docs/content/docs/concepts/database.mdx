@@ -13,12 +13,14 @@ adapter.
 | Adapter | Status | Typical Use |
 | --- | --- | --- |
 | `BetterAuth::Adapters::Memory` | Supported | Tests, local demos, stateless experiments |
-| `BetterAuth::Adapters::Postgres` | Partial | Rack apps using PostgreSQL directly |
-| `BetterAuth::Adapters::MySQL` | Partial | Rack apps using MySQL directly |
-| `BetterAuth::Adapters::MongoDB` | Partial | Rack apps using MongoDB through `better_auth-mongo-adapter` |
-| `BetterAuth::Rails::ActiveRecordAdapter` | Partial | Rails apps using ActiveRecord |
+| `BetterAuth::Adapters::Postgres` | Supported | Rack apps using PostgreSQL directly |
+| `BetterAuth::Adapters::MySQL` | Supported | Rack apps using MySQL directly |
+| `BetterAuth::Adapters::SQLite` | Supported | Rack apps using SQLite directly |
+| `BetterAuth::Adapters::MSSQL` | Supported | Rack apps using Microsoft SQL Server directly |
+| `BetterAuth::Adapters::MongoDB` | Supported | Rack apps using MongoDB through `better_auth-mongo-adapter` |
+| `BetterAuth::Rails::ActiveRecordAdapter` | Supported | Rails apps using ActiveRecord |
 
-SQLite and MSSQL direct adapters are available in the core gem but are still documented more lightly than PostgreSQL and MySQL. Prisma, Drizzle, and other TypeScript-specific upstream adapters are not built-in Ruby adapters.
+Prisma, Drizzle, and other TypeScript-specific upstream adapters are not built-in Ruby adapters.
 
 ## Configure A Database
 

@@ -76,10 +76,10 @@ equivalent.
 
 <div className="grid gap-3 md:grid-cols-2 not-prose my-6">
   <FeatureCard title="Memory adapter" status="Supported" body="Development and test adapter. Not intended for production persistence." />
-  <FeatureCard title="SQL adapters" status="Partial" body="PostgreSQL, MySQL, SQLite, and MSSQL adapter wrappers plus DDL generation are implemented." />
-  <FeatureCard title="Rails ActiveRecord adapter" status="Partial" body="ActiveRecord persistence, migrations, mounting helpers, controller helpers, and generators are implemented." />
-  <FeatureCard title="MongoDB adapter" status="Partial" body="External package with document storage, ObjectId conversion, joins, transactions, and auth-route persistence." />
-  <FeatureCard title="Redis secondary storage" status="Partial" body="External package for sessions, active-session indexes, verification-like state, and rate limits." />
+  <FeatureCard title="SQL adapters" status="Supported" body="PostgreSQL, MySQL, SQLite, and MSSQL adapters support the core adapter contract, schema DDL, schema-driven joins, logical field mapping, and auth-route persistence." />
+  <FeatureCard title="Rails ActiveRecord adapter" status="Supported" body="ActiveRecord persistence, schema-driven associations, migrations, mounting helpers, controller helpers, generators, and auth-route persistence are implemented." />
+  <FeatureCard title="MongoDB adapter" status="Supported" body="External package with document storage, ObjectId and UUID conversion, joins, transactions, schema field mapping, and auth-route persistence." />
+  <FeatureCard title="Redis secondary storage" status="Supported" body="External package for sessions, active-session indexes, verification-like state, rate limits, prefixed key isolation, and real Redis round trips." />
 </div>
 
 ## Server Plugins

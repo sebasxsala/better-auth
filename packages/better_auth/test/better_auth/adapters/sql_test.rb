@@ -140,6 +140,91 @@ class BetterAuthSQLAdapterTest < Minitest::Test
     refute_includes connection.sql.first, "LIMIT"
   end
 
+  def test_sql_adapter_infers_user_session_collection_join
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+    connection = RecordingConnection.new([
+      {
+        "id" => "user-1",
+        "name" => "Ada",
+        "email" => "ada@example.com",
+        "email_verified" => true,
+        "image" => nil,
+        "created_at" => Time.at(1),
+        "updated_at" => Time.at(1),
+        "session__id" => "session-1",
+        "session__expires_at" => Time.at(100),
+        "session__token" => "token-1",
+        "session__ip_address" => nil,
+        "session__user_agent" => nil,
+        "session__user_id" => "user-1",
+        "session__created_at" => Time.at(1),
+        "session__updated_at" => Time.at(1)
+      },
+      {
+        "id" => "user-1",
+        "name" => "Ada",
+        "email" => "ada@example.com",
+        "email_verified" => true,
+        "image" => nil,
+        "created_at" => Time.at(1),
+        "updated_at" => Time.at(1),
+        "session__id" => "session-2",
+        "session__expires_at" => Time.at(200),
+        "session__token" => "token-2",
+        "session__ip_address" => nil,
+        "session__user_agent" => nil,
+        "session__user_id" => "user-1",
+        "session__created_at" => Time.at(1),
+        "session__updated_at" => Time.at(1)
+      }
+    ])
+    adapter = BetterAuth::Adapters::SQL.new(config, connection: connection, dialect: :postgres)
+
+    found = adapter.find_one(model: "user", where: [{field: "id", value: "user-1"}], join: {session: true})
+
+    assert_equal ["token-1", "token-2"], found.fetch("session").map { |session| session.fetch("token") }
+    assert_includes connection.sql.first, 'LEFT JOIN "sessions" AS "session" ON "session"."user_id" = "users"."id"'
+    refute_includes connection.sql.first, "LIMIT"
+  end
+
+  def test_sql_adapter_infers_schema_reference_one_to_one_join
+    plugin = BetterAuth::Plugin.new(
+      id: "profile",
+      schema: {
+        profile: {
+          model_name: "user_profiles",
+          fields: {
+            id: {type: "string", required: true},
+            ownerEmail: {type: "string", required: true, field_name: "owner_email", references: {model: "user", field: "email"}, unique: true},
+            bio: {type: "string", required: false}
+          }
+        }
+      }
+    )
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [plugin])
+    connection = RecordingConnection.new([
+      {
+        "id" => "user-1",
+        "name" => "Ada",
+        "email" => "ada@example.com",
+        "email_verified" => true,
+        "image" => nil,
+        "created_at" => Time.at(1),
+        "updated_at" => Time.at(1),
+        "profile__id" => "profile-1",
+        "profile__owner_email" => "ada@example.com",
+        "profile__bio" => "Hello"
+      }
+    ])
+    adapter = BetterAuth::Adapters::SQL.new(config, connection: connection, dialect: :postgres)
+
+    found = adapter.find_one(model: "user", where: [{field: "id", value: "user-1"}], join: {profile: true})
+
+    assert_equal "profile-1", found.fetch("profile").fetch("id")
+    assert_equal "Hello", found.fetch("profile").fetch("bio")
+    assert_includes connection.sql.first, 'LEFT JOIN "user_profiles" AS "profile" ON "profile"."owner_email" = "users"."email"'
+  end
+
   def test_sql_adapter_honors_or_connectors_in_where_clauses
     config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
     connection = RecordingConnection.new([])

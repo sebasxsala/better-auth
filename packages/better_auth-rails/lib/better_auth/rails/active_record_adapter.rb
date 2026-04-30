@@ -219,36 +219,107 @@ module BetterAuth
       end
 
       def define_join_associations(model, klass)
-        case model
-        when "session", "account"
-          return unless klass.respond_to?(:belongs_to)
+        schema_models.each_key do |join_model|
+          next if join_model == model
 
-          klass.belongs_to(
-            :user,
-            class_name: model_class("user").name,
-            foreign_key: storage_field(model, "userId"),
-            primary_key: storage_field("user", "id"),
-            optional: true
-          )
-        when "user"
-          return unless klass.respond_to?(:has_many)
+          definition = safe_join_definition(model, join_model)
+          next unless definition
 
-          klass.has_many(
-            :accounts,
-            class_name: model_class("account").name,
-            foreign_key: storage_field("account", "userId"),
-            primary_key: storage_field("user", "id")
-          )
+          association = definition.fetch(:association)
+          next if association_defined?(klass, association)
+
+          if definition[:owner] == :base && definition[:collection]
+            next unless klass.respond_to?(:has_many)
+
+            klass.has_many(
+              association,
+              class_name: model_class(join_model).name,
+              foreign_key: storage_field(join_model, definition.fetch(:to)),
+              primary_key: storage_field(model, definition.fetch(:from))
+            )
+          elsif definition[:owner] == :base
+            next unless klass.respond_to?(:has_one)
+
+            klass.has_one(
+              association,
+              class_name: model_class(join_model).name,
+              foreign_key: storage_field(join_model, definition.fetch(:to)),
+              primary_key: storage_field(model, definition.fetch(:from))
+            )
+          else
+            next unless klass.respond_to?(:belongs_to)
+
+            klass.belongs_to(
+              association,
+              class_name: model_class(join_model).name,
+              foreign_key: storage_field(model, definition.fetch(:from)),
+              primary_key: storage_field(join_model, definition.fetch(:to)),
+              optional: true
+            )
+          end
         end
       end
 
       def join_definition(model, join_model)
-        case [model.to_s, join_model.to_s]
-        when ["session", "user"], ["account", "user"]
-          {association: :user, collection: false}
-        when ["user", "account"]
-          {association: :accounts, collection: true}
+        inferred_join_config(model.to_s, join_model.to_s).merge(association: join_model.to_sym)
+      end
+
+      def safe_join_definition(model, join_model)
+        join_definition(model, join_model)
+      rescue BetterAuth::Error
+        nil
+      end
+
+      def inferred_join_config(model, join_model)
+        foreign_keys = schema_for(join_model).fetch(:fields).select do |_field, attributes|
+          reference_model_matches?(attributes, model)
         end
+
+        unless foreign_keys.empty?
+          raise BetterAuth::Error, "Multiple foreign keys found for model #{join_model} and base model #{model} while performing join operation. Only one foreign key is supported." if foreign_keys.length > 1
+
+          foreign_key, attributes = foreign_keys.first
+          reference = attributes.fetch(:references)
+          unique = attributes[:unique] == true
+          return {
+            from: reference.fetch(:field).to_s,
+            to: foreign_key,
+            collection: !unique,
+            owner: :base
+          }
+        end
+
+        foreign_keys = schema_for(model).fetch(:fields).select do |_field, attributes|
+          reference_model_matches?(attributes, join_model)
+        end
+
+        raise BetterAuth::Error, "No foreign key found for model #{join_model} and base model #{model} while performing join operation." if foreign_keys.empty?
+        raise BetterAuth::Error, "Multiple foreign keys found for model #{join_model} and base model #{model} while performing join operation. Only one foreign key is supported." if foreign_keys.length > 1
+
+        foreign_key, attributes = foreign_keys.first
+        reference = attributes.fetch(:references)
+        {
+          from: foreign_key,
+          to: reference.fetch(:field).to_s,
+          collection: false,
+          owner: :join
+        }
+      end
+
+      def reference_model_matches?(attributes, model)
+        reference = attributes[:references]
+        return false unless reference
+
+        reference_model = reference[:model] || reference["model"]
+        reference_model.to_s == model.to_s || reference_model.to_s == table_for(model)
+      end
+
+      def association_defined?(klass, association)
+        klass.respond_to?(:reflect_on_association) && klass.reflect_on_association(association)
+      end
+
+      def schema_models
+        BetterAuth::Schema.auth_tables(options)
       end
 
       def model_namespace
