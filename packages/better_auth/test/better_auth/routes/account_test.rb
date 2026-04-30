@@ -111,6 +111,113 @@ class BetterAuthRoutesAccountTest < Minitest::Test
     assert_equal "second-access", by_internal_id[:accessToken]
   end
 
+  def test_oauth_token_storage_passthrough_and_migration_values
+    encrypted_auth = build_auth(account: {encrypt_oauth_tokens: true})
+    plain_auth = build_auth(account: {encrypt_oauth_tokens: false})
+    encrypted_ctx = fake_ctx(encrypted_auth)
+    plain_ctx = fake_ctx(plain_auth)
+
+    assert_equal "", BetterAuth::Routes.oauth_token_value(encrypted_ctx, "")
+    assert_nil BetterAuth::Routes.oauth_token_for_storage(encrypted_ctx, nil)
+    assert_equal "plain-token", BetterAuth::Routes.oauth_token_for_storage(plain_ctx, "plain-token")
+    assert_equal "plain-token", BetterAuth::Routes.oauth_token_value(plain_ctx, "plain-token")
+
+    encrypted = BetterAuth::Routes.oauth_token_for_storage(encrypted_ctx, "secret-token")
+    refute_equal "secret-token", encrypted
+    assert_equal "secret-token", BetterAuth::Routes.oauth_token_value(encrypted_ctx, encrypted)
+
+    assert_equal "ya29.a0ARW5m7hQ_some_oauth_token", BetterAuth::Routes.oauth_token_value(encrypted_ctx, "ya29.a0ARW5m7hQ_some_oauth_token")
+    jwt_token = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0.signature"
+    assert_equal jwt_token, BetterAuth::Routes.oauth_token_value(encrypted_ctx, jwt_token)
+    assert_equal "abc", BetterAuth::Routes.oauth_token_value(encrypted_ctx, "abc")
+    assert_equal "not-valid-encrypted-data", BetterAuth::Routes.oauth_token_value(encrypted_ctx, "not-valid-encrypted-data")
+  end
+
+  def test_get_access_token_decrypts_stored_tokens_and_refresh_stores_encrypted_values
+    refreshed_at = Time.now + 3600
+    auth = build_auth(
+      account: {encrypt_oauth_tokens: true},
+      social_providers: {
+        github: {
+          id: "github",
+          refresh_access_token: ->(refresh_token) {
+            assert_equal "old-refresh", refresh_token
+            {
+              accessToken: "new-access",
+              refreshToken: "new-refresh",
+              accessTokenExpiresAt: refreshed_at,
+              refreshTokenExpiresAt: refreshed_at + 3600,
+              scopes: ["repo", "user"]
+            }
+          }
+        }
+      }
+    )
+    ctx = fake_ctx(auth)
+    cookie = sign_up_cookie(auth, email: "encrypted-tokens@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    account = auth.context.internal_adapter.create_account(
+      userId: user_id,
+      providerId: "github",
+      accountId: "gh-encrypted",
+      accessToken: BetterAuth::Routes.oauth_token_for_storage(ctx, "old-access"),
+      refreshToken: BetterAuth::Routes.oauth_token_for_storage(ctx, "old-refresh"),
+      accessTokenExpiresAt: Time.now - 60,
+      scope: "read"
+    )
+
+    data = auth.api.get_access_token(headers: {"cookie" => cookie}, body: {providerId: "github", accountId: "gh-encrypted"})
+
+    assert_equal "new-access", data[:accessToken]
+    assert_equal ["repo", "user"], data[:scopes]
+    stored = auth.context.internal_adapter.find_accounts(user_id).find { |entry| entry["id"] == account["id"] }
+    refute_equal "new-access", stored["accessToken"]
+    refute_equal "new-refresh", stored["refreshToken"]
+    assert_equal "new-access", BetterAuth::Routes.oauth_token_value(ctx, stored["accessToken"])
+    assert_equal "new-refresh", BetterAuth::Routes.oauth_token_value(ctx, stored["refreshToken"])
+  end
+
+  def test_refresh_token_preserves_existing_refresh_token_expiry_and_scope_when_provider_omits_them
+    existing_refresh_expires_at = Time.now + 7200
+    auth = build_auth(
+      social_providers: {
+        github: {
+          id: "github",
+          refresh_access_token: ->(refresh_token) {
+            assert_equal "old-refresh", refresh_token
+            {
+              accessToken: "new-access",
+              accessTokenExpiresAt: Time.now + 3600,
+              idToken: "new-id"
+            }
+          }
+        }
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "preserve-refresh@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    account = auth.context.internal_adapter.create_account(
+      userId: user_id,
+      providerId: "github",
+      accountId: "gh-preserve",
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      refreshTokenExpiresAt: existing_refresh_expires_at,
+      scope: "repo,user"
+    )
+
+    data = auth.api.refresh_token(headers: {"cookie" => cookie}, body: {providerId: "github", accountId: "gh-preserve"})
+
+    assert_equal "new-access", data[:accessToken]
+    assert_equal "old-refresh", data[:refreshToken]
+    assert_equal existing_refresh_expires_at, data[:refreshTokenExpiresAt]
+    assert_equal "repo,user", data[:scope]
+    assert_equal "new-id", data[:idToken]
+    stored = auth.context.internal_adapter.find_accounts(user_id).find { |entry| entry["id"] == account["id"] }
+    assert_equal "old-refresh", stored["refreshToken"]
+    assert_equal existing_refresh_expires_at, stored["refreshTokenExpiresAt"]
+  end
+
   def test_account_info_calls_provider_user_info
     provider = {
       id: "github",
@@ -150,5 +257,9 @@ class BetterAuthRoutesAccountTest < Minitest::Test
       as_response: true
     )
     headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def fake_ctx(auth)
+    Struct.new(:context).new(auth.context)
   end
 end

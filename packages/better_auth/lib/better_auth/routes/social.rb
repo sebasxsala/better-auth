@@ -228,6 +228,12 @@ module BetterAuth
 
       if existing && existing[:linked_account]
         user = existing[:user]
+        if ctx.context.options.account[:update_account_on_sign_in] != false
+          update_data = account_storage_fields(account_info)
+          ctx.context.internal_adapter.update_account(existing[:linked_account]["id"], update_data) unless update_data.empty?
+        end
+        verified_user = update_verified_email_on_link(ctx, user["id"], user["email"], user_info)
+        user = verified_user if verified_user
         new_user = false
       elsif existing
         unless linkable_provider?(ctx, provider_id, user_info, implicit: true)
@@ -235,6 +241,8 @@ module BetterAuth
         end
         user = existing[:user]
         ctx.context.internal_adapter.create_account(account_info.merge("providerId" => provider_id, "accountId" => account_id, "userId" => user["id"]))
+        verified_user = update_verified_email_on_link(ctx, user["id"], user["email"], user_info)
+        user = verified_user if verified_user
         new_user = false
       else
         return {error: "signup disabled"} if disable_sign_up
@@ -251,6 +259,7 @@ module BetterAuth
         user = created[:user]
         new_user = true
       end
+      user = override_social_user_info(ctx, user, user_info) if existing && provider_override_user_info_on_sign_in?(provider_id, ctx.context)
 
       session = ctx.context.internal_adapter.create_session(user["id"], false, session_overrides(ctx), true, ctx)
       {session: session, user: user, new_user: new_user}
@@ -316,6 +325,27 @@ module BetterAuth
       update_verified_email_on_link(ctx, user_id, link_email, user_info)
 
       {status: true}
+    end
+
+    def self.provider_override_user_info_on_sign_in?(provider_id, context)
+      provider = social_provider(context, provider_id)
+      !!(fetch_value(provider, "overrideUserInfoOnSignIn") || fetch_value(fetch_value(provider, "options") || {}, "overrideUserInfoOnSignIn"))
+    end
+
+    def self.override_social_user_info(ctx, user, user_info)
+      email = fetch_value(user_info, "email").to_s.downcase
+      email_verified = if email == user["email"].to_s.downcase
+        !!(user["emailVerified"] || fetch_value(user_info, "emailVerified"))
+      else
+        !!fetch_value(user_info, "emailVerified")
+      end
+      update = {
+        "email" => email,
+        "name" => fetch_value(user_info, "name").to_s,
+        "image" => fetch_value(user_info, "image"),
+        "emailVerified" => email_verified
+      }.reject { |_key, value| value.nil? }
+      ctx.context.internal_adapter.update_user(user["id"], update) || user
     end
 
     def self.safe_additional_state(body)

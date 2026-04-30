@@ -90,10 +90,10 @@ module BetterAuth
         Cookies.set_account_cookie(ctx, updated || account.merge(token_hash_for_storage(ctx, tokens)))
         ctx.json({
           accessToken: values["accessToken"],
-          refreshToken: values["refreshToken"],
+          refreshToken: values["refreshToken"] || refresh_token,
           accessTokenExpiresAt: values["accessTokenExpiresAt"],
-          refreshTokenExpiresAt: values["refreshTokenExpiresAt"],
-          scope: Array(values["scopes"]).join(","),
+          refreshTokenExpiresAt: values["refreshTokenExpiresAt"] || account["refreshTokenExpiresAt"],
+          scope: values["scope"] || account["scope"],
           idToken: values["idToken"] || account["idToken"],
           providerId: account["providerId"],
           accountId: account["accountId"]
@@ -167,7 +167,10 @@ module BetterAuth
     def self.update_account_tokens(ctx, account, tokens)
       return nil if account["id"].to_s.empty?
 
-      ctx.context.internal_adapter.update_account(account["id"], token_hash_for_storage(ctx, tokens))
+      data = account_token_update_hash(ctx, tokens)
+      return nil if data.empty?
+
+      ctx.context.internal_adapter.update_account(account["id"], data)
     end
 
     def self.token_hash(tokens)
@@ -181,6 +184,15 @@ module BetterAuth
       data["accessToken"] = oauth_token_for_storage(ctx, data["accessToken"]) if data.key?("accessToken")
       data["refreshToken"] = oauth_token_for_storage(ctx, data["refreshToken"]) if data.key?("refreshToken")
       data
+    end
+
+    def self.account_token_update_hash(ctx, tokens)
+      account_storage_fields(token_hash_for_storage(ctx, tokens))
+    end
+
+    def self.account_storage_fields(data)
+      allowed = %w[accessToken refreshToken idToken accessTokenExpiresAt refreshTokenExpiresAt scope]
+      token_hash(data).select { |key, value| allowed.include?(key) && !value.nil? }
     end
 
     def self.oauth_token_for_storage(ctx, token)
