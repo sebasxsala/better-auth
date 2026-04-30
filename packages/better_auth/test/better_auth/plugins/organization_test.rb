@@ -111,6 +111,50 @@ class BetterAuthPluginsOrganizationTest < Minitest::Test
     assert_equal created.fetch(:response).fetch("id"), unchanged.fetch(:session).fetch("activeOrganizationId")
   end
 
+  def test_set_active_organization_can_clear_active_organization
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "clear-active@example.com")
+    created = auth.api.create_organization(
+      headers: {"cookie" => cookie},
+      body: {name: "Clear Active", slug: "clear-active"},
+      return_headers: true
+    )
+    active_cookie = [cookie, cookie_header(created.fetch(:headers).fetch("set-cookie"))].join("; ")
+    assert_equal created.fetch(:response).fetch("id"), auth.api.get_session(headers: {"cookie" => active_cookie}).fetch(:session).fetch("activeOrganizationId")
+
+    cleared = auth.api.set_active_organization(headers: {"cookie" => active_cookie}, body: {organizationId: nil}, return_headers: true)
+    cleared_cookie = [active_cookie, cookie_header(cleared.fetch(:headers).fetch("set-cookie"))].join("; ")
+
+    assert_nil cleared.fetch(:response)
+    assert_nil auth.api.get_session(headers: {"cookie" => cleared_cookie}).fetch(:session)["activeOrganizationId"]
+    assert_nil auth.api.get_full_organization(headers: {"cookie" => cleared_cookie})
+  end
+
+  def test_get_full_organization_limits_members_and_errors_for_missing_explicit_organization
+    auth = build_auth(plugins: [BetterAuth::Plugins.organization(teams: {enabled: true}, dynamic_access_control: {enabled: true}, membership_limit: 2)])
+    cookie = sign_up_cookie(auth, email: "full-owner@example.com")
+    first_member_cookie = sign_up_cookie(auth, email: "full-one@example.com")
+    second_member_cookie = sign_up_cookie(auth, email: "full-two@example.com")
+    first_member = auth.api.get_session(headers: {"cookie" => first_member_cookie}).fetch(:user)
+    second_member = auth.api.get_session(headers: {"cookie" => second_member_cookie}).fetch(:user)
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Full Org", slug: "full-org"})
+
+    auth.api.add_member(headers: {"cookie" => cookie}, body: {organizationId: organization.fetch("id"), userId: first_member.fetch("id"), role: "member"})
+    auth.api.add_member(headers: {"cookie" => cookie}, body: {organizationId: organization.fetch("id"), userId: second_member.fetch("id"), role: "member"})
+
+    missing = assert_raises(BetterAuth::APIError) do
+      auth.api.get_full_organization(headers: {"cookie" => cookie}, query: {organizationId: "missing-org-id"})
+    end
+    assert_equal 400, missing.status_code
+    assert_equal BetterAuth::Plugins::ORGANIZATION_ERROR_CODES.fetch("ORGANIZATION_NOT_FOUND"), missing.message
+
+    limited = auth.api.get_full_organization(headers: {"cookie" => cookie}, query: {organizationId: organization.fetch("id"), membersLimit: 1})
+    assert_equal 1, limited.fetch(:members).length
+
+    default_limited = auth.api.get_full_organization(headers: {"cookie" => cookie}, query: {organizationId: organization.fetch("id")})
+    assert_equal 2, default_limited.fetch(:members).length
+  end
+
   def test_invitation_security_edges_and_limits
     auth = build_auth(plugins: [BetterAuth::Plugins.organization(invitation_limit: 1)])
     owner_cookie = sign_up_cookie(auth, email: "invite-owner@example.com")
@@ -140,6 +184,47 @@ class BetterAuthPluginsOrganizationTest < Minitest::Test
       auth.api.accept_invitation(headers: {"cookie" => invitee_cookie}, body: {invitationId: invitation.fetch("id")})
     end
     assert_equal 400, expired.status_code
+  end
+
+  def test_invitation_hooks_can_override_data_and_use_active_organization
+    calls = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.organization(
+          organization_hooks: {
+            before_create_invitation: lambda { |data, _ctx|
+              calls << [:before_invitation, data[:invitation][:email]]
+              {data: {id: "custom-invitation-id", secretCode: "hidden"}}
+            },
+            after_create_invitation: ->(data, _ctx) { calls << [:after_invitation, data[:invitation].fetch("id")] }
+          },
+          schema: {
+            invitation: {
+              additionalFields: {
+                secretCode: {type: "string", required: false, returned: false}
+              }
+            }
+          }
+        )
+      ]
+    )
+    owner_cookie = sign_up_cookie(auth, email: "hook-invite-owner@example.com")
+    invitee_cookie = sign_up_cookie(auth, email: "hook-invitee@example.com")
+    created = auth.api.create_organization(
+      headers: {"cookie" => owner_cookie},
+      body: {name: "Hook Invite", slug: "hook-invite"},
+      return_headers: true
+    )
+    active_cookie = [owner_cookie, cookie_header(created.fetch(:headers).fetch("set-cookie"))].join("; ")
+
+    invitation = auth.api.create_invitation(headers: {"cookie" => active_cookie}, body: {email: "hook-invitee@example.com", role: "member"})
+
+    assert_equal "custom-invitation-id", invitation.fetch("id")
+    refute invitation.key?("secretCode")
+    assert_equal [[:before_invitation, "hook-invitee@example.com"], [:after_invitation, "custom-invitation-id"]], calls
+
+    accepted = auth.api.accept_invitation(headers: {"cookie" => invitee_cookie}, body: {invitationId: invitation.fetch("id")})
+    assert_equal "accepted", accepted.fetch(:invitation).fetch("status")
   end
 
   def test_teams_and_dynamic_roles
@@ -172,6 +257,31 @@ class BetterAuthPluginsOrganizationTest < Minitest::Test
       headers: {"cookie" => cookie},
       body: {organizationId: organization.fetch("id"), permissions: {organization: ["delete"]}}
     ).fetch(:success)
+  end
+
+  def test_list_members_uses_active_organization_and_get_active_member_role_can_target_user
+    auth = build_auth
+    owner_cookie = sign_up_cookie(auth, email: "active-members-owner@example.com")
+    member_cookie = sign_up_cookie(auth, email: "active-members-member@example.com")
+    member_user = auth.api.get_session(headers: {"cookie" => member_cookie}).fetch(:user)
+    created = auth.api.create_organization(
+      headers: {"cookie" => owner_cookie},
+      body: {name: "Active Members", slug: "active-members"},
+      return_headers: true
+    )
+    active_cookie = [owner_cookie, cookie_header(created.fetch(:headers).fetch("set-cookie"))].join("; ")
+    member = auth.api.add_member(
+      headers: {"cookie" => active_cookie},
+      body: {organizationId: created.fetch(:response).fetch("id"), userId: member_user.fetch("id"), role: "member"}
+    )
+
+    members = auth.api.list_members(headers: {"cookie" => active_cookie})
+    assert_equal 2, members.fetch(:total)
+    assert_equal 2, members.fetch(:members).length
+
+    role = auth.api.get_active_member_role(headers: {"cookie" => active_cookie}, query: {userId: member_user.fetch("id")})
+    assert_equal "member", role.fetch(:role)
+    assert_equal member.fetch("id"), role.fetch(:member).fetch("id")
   end
 
   def test_team_limits_membership_checks_and_active_team_clear

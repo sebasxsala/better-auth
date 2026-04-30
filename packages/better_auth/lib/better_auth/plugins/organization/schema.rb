@@ -10,6 +10,7 @@ module BetterAuth
           organization: {
             model_name: "organizations",
             fields: {
+              id: {type: "string", required: true},
               name: {type: "string", required: true, sortable: true},
               slug: {type: "string", required: true, unique: true, sortable: true, index: true},
               logo: {type: "string", required: false},
@@ -21,6 +22,7 @@ module BetterAuth
           member: {
             model_name: "members",
             fields: {
+              id: {type: "string", required: true},
               organizationId: {type: "string", required: true, references: {model: "organization", field: "id"}, index: true},
               userId: {type: "string", required: true, references: {model: "user", field: "id"}, index: true},
               role: {type: "string", required: true, default_value: "member", sortable: true},
@@ -30,6 +32,7 @@ module BetterAuth
           invitation: {
             model_name: "invitations",
             fields: {
+              id: {type: "string", required: true},
               organizationId: {type: "string", required: true, references: {model: "organization", field: "id"}, index: true},
               email: {type: "string", required: true, sortable: true, index: true},
               role: {type: "string", required: true, sortable: true},
@@ -50,6 +53,7 @@ module BetterAuth
           schema[:team] = {
             model_name: "teams",
             fields: {
+              id: {type: "string", required: true},
               name: {type: "string", required: true},
               organizationId: {type: "string", required: true, references: {model: "organization", field: "id"}, index: true},
               createdAt: {type: "date", required: true, default_value: -> { Time.now }},
@@ -59,6 +63,7 @@ module BetterAuth
           schema[:teamMember] = {
             model_name: "team_members",
             fields: {
+              id: {type: "string", required: true},
               teamId: {type: "string", required: true, references: {model: "team", field: "id"}, index: true},
               userId: {type: "string", required: true, references: {model: "user", field: "id"}, index: true},
               createdAt: {type: "date", required: false, default_value: -> { Time.now }}
@@ -72,6 +77,7 @@ module BetterAuth
           schema[:organizationRole] = {
             model_name: "organization_roles",
             fields: {
+              id: {type: "string", required: true},
               organizationId: {type: "string", required: true, references: {model: "organization", field: "id"}, index: true},
               role: {type: "string", required: true, index: true},
               permission: {type: "string", required: true},
