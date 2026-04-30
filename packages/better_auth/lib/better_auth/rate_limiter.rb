@@ -4,6 +4,9 @@ require "json"
 
 module BetterAuth
   class RateLimiter
+    MISSING_CLIENT_IP_WARNING = "Rate limiting skipped: could not determine client IP address. " \
+      "Ensure your runtime forwards a trusted client IP header and configure `advanced.ipAddress.ipAddressHeaders` if needed."
+
     class MemoryStore
       def initialize
         @entries = {}
@@ -36,6 +39,7 @@ module BetterAuth
 
     def initialize
       @memory_store = MemoryStore.new
+      @warned_missing_client_ip = false
     end
 
     def call(request, context, path)
@@ -43,6 +47,7 @@ module BetterAuth
       return unless config[:enabled]
 
       ip = client_ip(request, context.options)
+      warn_missing_client_ip(context) unless ip
       return unless ip
 
       rule = rate_limit_rule(request, context, config, path)
@@ -211,6 +216,19 @@ module BetterAuth
 
     def client_ip(request, options)
       RequestIP.client_ip(request, options)
+    end
+
+    def warn_missing_client_ip(context)
+      return if @warned_missing_client_ip
+      return if context.options.advanced.dig(:ip_address, :disable_ip_tracking)
+
+      @warned_missing_client_ip = true
+      logger = context.logger
+      if logger.respond_to?(:call)
+        logger.call(:warn, MISSING_CLIENT_IP_WARNING)
+      elsif logger.respond_to?(:warn)
+        logger.warn(MISSING_CLIENT_IP_WARNING)
+      end
     end
 
     def matching_plugin_rule(context, path)

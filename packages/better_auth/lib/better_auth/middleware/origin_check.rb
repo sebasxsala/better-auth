@@ -14,7 +14,7 @@ module BetterAuth
 
         validate_origin(endpoint_context)
         validate_fetch_metadata(endpoint_context)
-        return if skip_origin_check?(endpoint_context)
+        return if skip_origin_check?(endpoint_context) || skip_origin_path?(endpoint_context)
 
         validate_callback_urls(endpoint_context)
         nil
@@ -87,7 +87,7 @@ module BetterAuth
       end
 
       def skip_origin_check?(endpoint_context)
-        !!endpoint_context.context.options.advanced[:disable_origin_check]
+        endpoint_context.context.options.advanced[:disable_origin_check] == true
       end
 
       def skip_csrf_for_backward_compat?(endpoint_context)

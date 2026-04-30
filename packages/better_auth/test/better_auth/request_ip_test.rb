@@ -39,4 +39,21 @@ class BetterAuthRequestIPTest < Minitest::Test
 
     assert_equal "2001:db8:abcd:1234::", BetterAuth::RequestIP.client_ip(request, config)
   end
+
+  def test_converts_ipv4_mapped_ipv6_to_ipv4
+    config = BetterAuth::Configuration.new(secret: SECRET)
+    request = Rack::Request.new(Rack::MockRequest.env_for("/", "HTTP_X_FORWARDED_FOR" => "::ffff:192.0.2.1"))
+
+    assert_equal "192.0.2.1", BetterAuth::RequestIP.client_ip(request, config)
+  end
+
+  def test_ipv6_subnet_does_not_affect_ipv4_addresses
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      advanced: {ip_address: {ipv6_subnet: 64}}
+    )
+    request = Rack::Request.new(Rack::MockRequest.env_for("/", "HTTP_X_FORWARDED_FOR" => "192.168.1.1"))
+
+    assert_equal "192.168.1.1", BetterAuth::RequestIP.client_ip(request, config)
+  end
 end

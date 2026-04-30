@@ -53,6 +53,67 @@ class BetterAuthRouterTest < Minitest::Test
     assert_equal 200, tolerant_auth.call(rack_env("GET", "/api/auth/ok/")).first
   end
 
+  def test_trailing_slash_normalization_applies_to_post_requests
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      advanced: {skip_trailing_slashes: true},
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            submit: BetterAuth::Endpoint.new(path: "/submit", method: "POST") { {ok: true} }
+          }
+        }
+      ]
+    )
+
+    status, _headers, body = auth.call(rack_env("POST", "/api/auth/submit/", body: {name: "Ada"}))
+
+    assert_equal 200, status
+    assert_equal({ok: true}, JSON.parse(body.join, symbolize_names: true))
+  end
+
+  def test_rack_requests_prepare_context_before_endpoint_execution
+    captured = []
+    auth = BetterAuth.auth(
+      secret: SECRET,
+      trusted_origins: ->(request) { [request.get_header("HTTP_ORIGIN")] },
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            inspect: BetterAuth::Endpoint.new(path: "/inspect", method: "GET") do |ctx|
+              captured << {
+                base_url: ctx.context.base_url,
+                trusted_origins: ctx.context.trusted_origins,
+                current_session: ctx.context.current_session
+              }
+              {ok: true}
+            end
+          }
+        }
+      ]
+    )
+    auth.context.set_current_session({user_id: "stale"})
+
+    auth.call(
+      rack_env(
+        "GET",
+        "/api/auth/inspect",
+        headers: {
+          "HTTP_HOST" => "tenant.example",
+          "HTTP_ORIGIN" => "https://frontend.example",
+          "rack.url_scheme" => "https"
+        }
+      )
+    )
+
+    assert_equal "https://tenant.example/api/auth", captured.first[:base_url]
+    assert_includes captured.first[:trusted_origins], "https://frontend.example"
+    assert_nil captured.first[:current_session]
+  end
+
   def test_disabled_paths_are_normalized_and_blocked
     auth = BetterAuth.auth(
       base_url: "http://localhost:3000",
@@ -222,6 +283,51 @@ class BetterAuthRouterTest < Minitest::Test
     assert_equal ["blocked"], body
   end
 
+  def test_on_request_response_short_circuits_remaining_requests_but_runs_responses
+    order = []
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      plugins: [
+        {
+          id: "a",
+          endpoints: {
+            blocked: BetterAuth::Endpoint.new(path: "/blocked", method: "GET") { {ok: true} }
+          },
+          on_request: lambda do |_request, _ctx|
+            order << "a-request"
+            {response: [403, {"content-type" => "text/plain"}, ["blocked"]]}
+          end,
+          on_response: lambda do |response, _ctx|
+            order << "a-response"
+            response[1]["x-a"] = "yes"
+            {response: response}
+          end
+        },
+        {
+          id: "b",
+          on_request: lambda do |_request, _ctx|
+            order << "b-request"
+            nil
+          end,
+          on_response: lambda do |response, _ctx|
+            order << "b-response"
+            response[1]["x-b"] = "yes"
+            {response: response}
+          end
+        }
+      ]
+    )
+
+    status, headers, body = auth.call(rack_env("GET", "/api/auth/blocked"))
+
+    assert_equal 403, status
+    assert_equal ["blocked"], body
+    assert_equal ["a-request", "a-response", "b-response"], order
+    assert_equal "yes", headers["x-a"]
+    assert_equal "yes", headers["x-b"]
+  end
+
   def test_origin_check_validates_callbacks_origins_and_fetch_metadata
     auth = BetterAuth.auth(
       base_url: "http://localhost:3000",
@@ -257,6 +363,75 @@ class BetterAuthRouterTest < Minitest::Test
       JSON.parse(body.join)["message"]
   end
 
+  def test_origin_check_allows_safe_methods_and_rejects_missing_or_malformed_origins_with_cookies
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            safe: BetterAuth::Endpoint.new(path: "/safe", method: "GET") { {ok: true} },
+            post: BetterAuth::Endpoint.new(path: "/post", method: "POST") { {ok: true} }
+          }
+        }
+      ]
+    )
+
+    assert_equal 200, auth.call(rack_env("GET", "/api/auth/safe", headers: {"HTTP_ORIGIN" => "https://evil.com", "HTTP_COOKIE" => "session=1"})).first
+
+    missing_status, _headers, missing_body = auth.call(rack_env("POST", "/api/auth/post", headers: {"HTTP_COOKIE" => "session=1"}))
+    assert_equal 403, missing_status
+    assert_equal "Missing or null Origin", JSON.parse(missing_body.join)["message"]
+
+    assert_equal 403, auth.call(rack_env("POST", "/api/auth/post", headers: {"HTTP_ORIGIN" => "null", "HTTP_COOKIE" => "session=1"})).first
+    assert_equal 403, auth.call(rack_env("POST", "/api/auth/post", headers: {"HTTP_ORIGIN" => "malicious.com", "HTTP_COOKIE" => "session=1"})).first
+  end
+
+  def test_origin_check_validates_callback_variants_and_relative_path_policy
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      trusted_origins: ["https://trusted.example"],
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            post: BetterAuth::Endpoint.new(path: "/post", method: "POST") { {ok: true} }
+          }
+        }
+      ]
+    )
+
+    assert_equal 200, auth.call(rack_env("POST", "/api/auth/post", body: {"callbackURL" => "/dashboard?next=/profile"})).first
+    assert_equal 200, auth.call(rack_env("POST", "/api/auth/post", body: {"redirectTo" => "https://trusted.example/reset"})).first
+    assert_equal 403, auth.call(rack_env("POST", "/api/auth/post", body: {"callbackURL" => "//evil.example"})).first
+    assert_equal 403, auth.call(rack_env("POST", "/api/auth/post", body: {"errorCallbackURL" => "https://evil.example/error"})).first
+    assert_equal 403, auth.call(rack_env("POST", "/api/auth/post", body: {"newUserCallbackURL" => "https://evil.example/welcome"})).first
+  end
+
+  def test_fetch_metadata_same_site_modes_and_missing_metadata
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      trusted_origins: ["https://app.example"],
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            post: BetterAuth::Endpoint.new(path: "/post", method: "POST") { {ok: true} }
+          }
+        }
+      ]
+    )
+
+    assert_equal 200, auth.call(rack_env("POST", "/api/auth/post", headers: {"HTTP_ORIGIN" => "http://localhost:3000"})).first
+    assert_equal 200, auth.call(rack_env("POST", "/api/auth/post", headers: fetch_metadata_headers(site: "same-origin", mode: "navigate", origin: "http://localhost:3000"))).first
+    assert_equal 200, auth.call(rack_env("POST", "/api/auth/post", headers: fetch_metadata_headers(site: "same-site", mode: "navigate", origin: "https://app.example"))).first
+    assert_equal 200, auth.call(rack_env("POST", "/api/auth/post", headers: fetch_metadata_headers(site: "same-origin", mode: "cors", dest: "empty", origin: "http://localhost:3000"))).first
+    assert_equal 403, auth.call(rack_env("POST", "/api/auth/post", headers: fetch_metadata_headers(site: "cross-site", mode: "no-cors", dest: "empty", origin: "https://evil.example"))).first
+  end
+
   def test_origin_check_disable_flags_match_upstream_split
     endpoint_plugin = {
       id: "test",
@@ -281,6 +456,28 @@ class BetterAuthRouterTest < Minitest::Test
     assert_equal 200, csrf_disabled.call(rack_env("POST", "/api/auth/post", headers: {"HTTP_ORIGIN" => "https://evil.com", "HTTP_COOKIE" => "session=1"})).first
     assert_equal 403, csrf_disabled.call(rack_env("POST", "/api/auth/post", body: {"callbackURL" => "https://evil.com"})).first
     assert_equal 200, origin_disabled.call(rack_env("POST", "/api/auth/post", body: {"callbackURL" => "https://evil.com"})).first
+  end
+
+  def test_origin_check_can_skip_origin_validation_for_configured_paths_only
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      advanced: {disable_origin_check: ["/public"]},
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            public_post: BetterAuth::Endpoint.new(path: "/public/data", method: "POST") { {ok: true} },
+            protected_post: BetterAuth::Endpoint.new(path: "/protected/data", method: "POST") { {ok: true} }
+          }
+        }
+      ]
+    )
+
+    assert_equal 200, auth.call(rack_env("POST", "/api/auth/public/data", headers: {"HTTP_ORIGIN" => "https://evil.com", "HTTP_COOKIE" => "session=1"})).first
+    assert_equal 403, auth.call(rack_env("POST", "/api/auth/protected/data", headers: {"HTTP_ORIGIN" => "https://evil.com", "HTTP_COOKIE" => "session=1"})).first
+    assert_equal 200, auth.call(rack_env("POST", "/api/auth/public/data", body: {"callbackURL" => "https://evil.com"})).first
+    assert_equal 403, auth.call(rack_env("POST", "/api/auth/protected/data", body: {"callbackURL" => "https://evil.com"})).first
   end
 
   def test_rate_limit_runs_after_plugin_on_request
@@ -324,6 +521,34 @@ class BetterAuthRouterTest < Minitest::Test
     assert_equal 429, status
     assert_match(/\A\d+\z/, headers["x-retry-after"])
     assert_equal({"message" => "Too many requests. Please try again later."}, JSON.parse(body.join))
+    assert_equal ["127.0.0.1|/limited"], storage.keys
+  end
+
+  def test_rate_limit_resets_after_window_and_ignores_query_params
+    storage = RateLimitStorage.new
+    storage.set(
+      "127.0.0.1|/limited",
+      {key: "127.0.0.1|/limited", count: 1, last_request: Time.now.to_f - 61},
+      ttl: 60,
+      update: false
+    )
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      rate_limit: {enabled: true, window: 60, max: 1, custom_storage: storage},
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            limited: BetterAuth::Endpoint.new(path: "/limited", method: "GET") { {ok: true} }
+          }
+        }
+      ]
+    )
+
+    assert_equal 200, auth.call(rack_env("GET", "/api/auth/limited?nonce=1")).first
+    assert_equal 1, storage.data.fetch("127.0.0.1|/limited")[:count]
+    assert_equal 429, auth.call(rack_env("GET", "/api/auth/limited?nonce=2")).first
     assert_equal ["127.0.0.1|/limited"], storage.keys
   end
 
@@ -479,6 +704,40 @@ class BetterAuthRouterTest < Minitest::Test
     assert_equal 200, auth.call(rack_env("GET", "/api/auth/limited")).first
   end
 
+  def test_rate_limit_warns_and_skips_when_client_ip_is_missing_outside_development
+    previous_rack_env = ENV["RACK_ENV"]
+    ENV["RACK_ENV"] = "production"
+    messages = []
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      logger: ->(level, message) { messages << [level, message] },
+      rate_limit: {enabled: true, window: 60, max: 1},
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            limited: BetterAuth::Endpoint.new(path: "/limited", method: "GET") { {ok: true} }
+          }
+        }
+      ]
+    )
+
+    env = rack_env("GET", "/api/auth/limited")
+    env.delete("REMOTE_ADDR")
+    status, = auth.call(env)
+
+    assert_equal 200, status
+    assert messages.any? { |level, message| level == :warn && message.include?("could not determine client IP address") }
+    refute messages.any? { |_level, message| message.include?("trustedProxies") }
+  ensure
+    if previous_rack_env
+      ENV["RACK_ENV"] = previous_rack_env
+    else
+      ENV.delete("RACK_ENV")
+    end
+  end
+
   def test_form_media_type_is_rejected_unless_endpoint_allows_it
     json_only = BetterAuth.auth(
       base_url: "http://localhost:3000",
@@ -567,9 +826,80 @@ class BetterAuthRouterTest < Minitest::Test
     assert messages.any? { |_level, message| message.include?("\"/shared\" [GET] used by plugins: one, two") }
   end
 
+  def test_endpoint_conflict_matrix_matches_upstream
+    no_conflict_messages = []
+    BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      logger: ->(level, message) { no_conflict_messages << [level, message] },
+      plugins: [
+        {
+          id: "one",
+          endpoints: {
+            read: BetterAuth::Endpoint.new(path: "/resource", method: "GET") { {ok: true} },
+            create: BetterAuth::Endpoint.new(path: "/same-plugin", method: "POST") { {ok: true} }
+          }
+        },
+        {
+          id: "two",
+          endpoints: {
+            create: BetterAuth::Endpoint.new(path: "/resource", method: "POST") { {ok: true} },
+            delete: BetterAuth::Endpoint.new(path: "/resource", method: "DELETE") { {ok: true} }
+          }
+        }
+      ]
+    )
+
+    refute no_conflict_messages.any? { |level, _message| level == :error }
+
+    conflict_messages = []
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      logger: ->(level, message) { conflict_messages << [level, message] },
+      plugins: [
+        {
+          id: "one",
+          endpoints: {
+            duplicate_one: BetterAuth::Endpoint.new(path: "/duplicate", method: "GET") { {ok: true} },
+            duplicate_two: BetterAuth::Endpoint.new(path: "/duplicate", method: "GET") { {ok: true} },
+            array_methods: BetterAuth::Endpoint.new(path: "/array", method: ["GET", "POST"]) { {ok: true} }
+          }
+        },
+        {
+          id: "two",
+          endpoints: {
+            wildcard: BetterAuth::Endpoint.new(path: "/array", method: "*") { {ok: true} },
+            array_conflict: BetterAuth::Endpoint.new(path: "/duplicate-array", method: ["PATCH", "PUT"]) { {ok: true} }
+          }
+        },
+        {
+          id: "three",
+          endpoints: {
+            array_conflict: BetterAuth::Endpoint.new(path: "/duplicate-array", method: ["DELETE", "PATCH"]) { {ok: true} },
+            pathless: BetterAuth::Endpoint.new(method: "GET") { {ok: true} }
+          }
+        },
+        {
+          id: "empty"
+        }
+      ]
+    )
+
+    assert_instance_of BetterAuth::Auth, auth
+    error_messages = conflict_messages.filter_map { |level, message| message if level == :error }
+    assert_equal 1, error_messages.length
+    assert_includes error_messages.first, "Endpoint path conflicts detected"
+    assert_includes error_messages.first, "\"/duplicate\" [GET] used by plugins: one"
+    assert_match(/"\/array" \[(?=.*GET)(?=.*POST)(?=.*\*)[^\]]+\]/, error_messages.first)
+    assert_includes error_messages.first, "used by plugins: one, two"
+    assert_includes error_messages.first, "\"/duplicate-array\" [PATCH] used by plugins: two, three"
+  end
+
   private
 
   def rack_env(method, path, body: nil, form: nil, headers: {})
+    path_info, query_string = path.split("?", 2)
     payload = if form
       URI.encode_www_form(form)
     elsif body
@@ -579,8 +909,8 @@ class BetterAuthRouterTest < Minitest::Test
     end
     {
       "REQUEST_METHOD" => method,
-      "PATH_INFO" => path,
-      "QUERY_STRING" => "",
+      "PATH_INFO" => path_info,
+      "QUERY_STRING" => query_string || "",
       "SERVER_NAME" => "localhost",
       "SERVER_PORT" => "3000",
       "REMOTE_ADDR" => "127.0.0.1",
@@ -589,6 +919,15 @@ class BetterAuthRouterTest < Minitest::Test
       "CONTENT_TYPE" => content_type_for(body, form),
       "CONTENT_LENGTH" => payload.bytesize.to_s
     }.merge(headers).compact
+  end
+
+  def fetch_metadata_headers(site:, mode:, origin:, dest: "document")
+    {
+      "HTTP_ORIGIN" => origin,
+      "HTTP_SEC_FETCH_SITE" => site,
+      "HTTP_SEC_FETCH_MODE" => mode,
+      "HTTP_SEC_FETCH_DEST" => dest
+    }
   end
 
   def content_type_for(body, form)

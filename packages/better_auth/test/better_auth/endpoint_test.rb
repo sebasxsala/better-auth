@@ -80,6 +80,50 @@ class BetterAuthEndpointTest < Minitest::Test
     assert_equal({"name" => "Ada", "parsed" => true}, result.response)
   end
 
+  def test_endpoint_applies_all_schema_parsers_before_handler
+    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    parser = Class.new do
+      def initialize(label)
+        @label = label
+      end
+
+      def parse(value)
+        value.merge("#{@label}_parsed" => true)
+      end
+    end
+    endpoint = BetterAuth::Endpoint.new(
+      path: "/profiles/:id",
+      method: "POST",
+      body_schema: parser.new("body"),
+      query_schema: parser.new("query"),
+      params_schema: parser.new("params"),
+      headers_schema: parser.new("headers")
+    ) do |ctx|
+      {
+        body: ctx.body,
+        query: ctx.query,
+        params: ctx.params,
+        headers: ctx.headers.slice("x-name", "headers-parsed")
+      }
+    end
+
+    result = endpoint.call(
+      context_for(
+        auth,
+        endpoint,
+        body: {"name" => "Ada"},
+        query: {"page" => "1"},
+        params: {"id" => "user-1"},
+        headers: {"x_name" => "Ada"}
+      )
+    )
+
+    assert_equal({"name" => "Ada", "body_parsed" => true}, result.response[:body])
+    assert_equal({"page" => "1", "query_parsed" => true}, result.response[:query])
+    assert_equal({"id" => "user-1", "params_parsed" => true}, result.response[:params])
+    assert_equal({"x-name" => "Ada", "headers-parsed" => true}, result.response[:headers])
+  end
+
   def test_endpoint_schema_errors_become_bad_request_api_errors
     auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
     endpoint = BetterAuth::Endpoint.new(path: "/profile", method: "POST", body_schema: ->(_value) { false }) do
@@ -94,14 +138,14 @@ class BetterAuthEndpointTest < Minitest::Test
 
   private
 
-  def context_for(auth, endpoint, body: {})
+  def context_for(auth, endpoint, body: {}, query: {}, params: {}, headers: {})
     BetterAuth::Endpoint::Context.new(
       path: endpoint.path,
       method: "GET",
-      query: {},
+      query: query,
       body: body,
-      params: {},
-      headers: {},
+      params: params,
+      headers: headers,
       context: auth.context
     )
   end
