@@ -48,11 +48,11 @@ Rails apps use the same options in the initializer.
 
 ```ruby title="config/initializers/better_auth.rb"
 BetterAuth::Rails.configure do |config|
-  config.rate_limit = {
-    enabled: true,
-    window: 60,
-    max: 100
-  }
+  config.rate_limit do |rate_limit|
+    rate_limit.enabled = true
+    rate_limit.window = 60
+    rate_limit.max = 100
+  end
 end
 ```
 

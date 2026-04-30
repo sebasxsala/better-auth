@@ -80,48 +80,47 @@ BetterAuth::Rails.configure do |config|
 
   config.base_url = ENV["BETTER_AUTH_URL"]
   config.base_path = "/api/auth"
-  config.database = ->(options) { BetterAuth::Rails::ActiveRecordAdapter.new(options) }
   config.trusted_origins = [
     ENV["BETTER_AUTH_URL"]
   ].compact
 
-  config.session = {
-    cookie_cache: {
-      enabled: true,
-      max_age: 5 * 60,
-      strategy: "jwe"
-    }
-  }
+  config.session do |session|
+    session.cookie_cache do |cookie|
+      cookie.enabled = true
+      cookie.max_age = 5 * 60
+      cookie.strategy = "jwe"
+    end
+  end
 
-  config.advanced = {
-    ip_address: {
-      ip_address_headers: ["x-forwarded-for"],
-      disable_ip_tracking: false
-    }
-  }
+  config.advanced do |advanced|
+    advanced.ip_address do |ip|
+      ip.ip_address_headers = ["x-forwarded-for"]
+      ip.disable_ip_tracking = false
+    end
+  end
 
-  config.experimental = {
-    joins: false
-  }
+  config.experimental do |experimental|
+    experimental.joins = false
+  end
 
-  config.social_providers = {
-    # github: BetterAuth::SocialProviders.github(
+  config.social_providers do |providers|
+    # providers.github = BetterAuth::SocialProviders.github(
     #   client_id: ENV.fetch("GITHUB_CLIENT_ID"),
     #   client_secret: ENV.fetch("GITHUB_CLIENT_SECRET")
     # )
-  }
+  end
 
   config.plugins = []
-  config.hooks = {
-    before: [],
-    after: []
-  }
+  config.hooks do |hooks|
+    hooks.before = []
+    hooks.after = []
+  end
 end
 ```
 
 Rails configuration is a thin option builder for the core Rack auth object. The same option concepts are available in core Ruby through `BetterAuth.auth(...)`; Rails places them in `config/initializers/better_auth.rb` so applications can rely on credentials, ActiveRecord, and Rails environment configuration.
 
-The ActiveRecord adapter uses whichever database adapter the Rails app is already configured with, including PostgreSQL and MySQL.
+Rails uses `BetterAuth::Rails::ActiveRecordAdapter` by default. The adapter uses whichever database adapter the Rails app is already configured with, including PostgreSQL and MySQL. To be explicit, set `config.database_adapter = :active_record`; for custom adapters, assign `config.database` directly.
 
 ### JavaScript Client
 

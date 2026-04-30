@@ -34,19 +34,19 @@ BetterAuth::Rails.configure do |config|
 
   config.base_url = ENV["BETTER_AUTH_URL"]
   config.base_path = "/api/auth"
-  config.database = ->(options) {
-    BetterAuth::Rails::ActiveRecordAdapter.new(options)
-  }
 
-  config.email_and_password = {
-    enabled: true
-  }
+  config.email_and_password do |auth|
+    auth.enabled = true
+    auth.require_email_verification = true
+  end
 
   config.plugins = [
     # BetterAuth::Plugins.username
   ]
 end
 ```
+
+Rails uses `BetterAuth::Rails::ActiveRecordAdapter` by default. For a custom adapter, assign `config.database` directly.
 
 ## Mount Routes
 

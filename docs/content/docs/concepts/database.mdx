@@ -77,9 +77,7 @@ Rails:
 
 ```ruby title="config/initializers/better_auth.rb"
 BetterAuth::Rails.configure do |config|
-  config.database = ->(options) {
-    BetterAuth::Rails::ActiveRecordAdapter.new(options)
-  }
+  config.database_adapter = :active_record
 end
 ```
 

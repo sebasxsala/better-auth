@@ -92,9 +92,6 @@ BetterAuth::Rails.configure do |config|
 
   config.base_url = ENV["BETTER_AUTH_URL"]
   config.base_path = "/api/auth"
-  config.database = ->(options) {
-    BetterAuth::Rails::ActiveRecordAdapter.new(options)
-  }
 end
 ```
 

@@ -128,9 +128,9 @@ bin/rails generate better_auth:install
 BetterAuth::Rails.configure do |config|
   config.secret = ENV.fetch("BETTER_AUTH_SECRET")
   config.base_url = ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000")
-  config.email_and_password = {
-    enabled: true
-  }
+  config.email_and_password do |auth|
+    auth.enabled = true
+  end
 end
 ```
 
