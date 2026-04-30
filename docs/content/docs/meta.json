@@ -4,6 +4,7 @@
   "pages": [
     "introduction",
     "supported-features",
+    "comparison",
     "installation",
     "basic-usage",
     "integrations/rack",
