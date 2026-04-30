@@ -139,7 +139,7 @@ module BetterAuth
         return @raw_response if raw_response?
 
         body = if response.nil?
-          [""]
+          [JSON.generate(nil)]
         elsif response.is_a?(String)
           [response]
         else

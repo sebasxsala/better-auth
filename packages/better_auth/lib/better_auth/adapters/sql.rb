@@ -204,10 +204,11 @@ module BetterAuth
           column = "#{quote(table_for(model))}.#{quote(storage_field(model, field))}"
           operator = (fetch_key(clause, :operator) || "eq").to_s
           value = fetch_key(clause, :value)
+          attributes = schema_for(model).fetch(:fields).fetch(field)
 
           expression = case operator
           when "in", "not_in"
-            values = Array(value)
+            values = Array(value).map { |entry| coerce_where_value(entry, attributes) }
             placeholders = values.map do |entry|
               params << entry
               placeholder(params.length)
@@ -223,7 +224,7 @@ module BetterAuth
             params << pattern
             "#{column} LIKE #{placeholder(params.length)}"
           else
-            params << value
+            params << coerce_where_value(value, attributes)
             "#{column} #{sql_operator(operator)} #{placeholder(params.length)}"
           end
 
@@ -385,6 +386,22 @@ module BetterAuth
         value
       end
 
+      def coerce_where_value(value, attributes)
+        return value if value.nil?
+
+        case attributes[:type]
+        when "boolean"
+          return coerce_value(false, attributes) if value == false || value == 0 || value.to_s.downcase == "false" || value.to_s == "0"
+          return coerce_value(true, attributes) if value == true || value == 1 || value.to_s.downcase == "true" || value.to_s == "1"
+        when "number"
+          return coerce_number(value)
+        when "date"
+          return Time.parse(value) if value.is_a?(String)
+        end
+
+        coerce_value(value, attributes)
+      end
+
       def coerce_output_value(value, attributes)
         return value if value.nil?
         return coerce_boolean(value) if attributes[:type] == "boolean"
@@ -408,6 +425,14 @@ module BetterAuth
         return value if value == true || value == false
         return false if value == 0 || value.to_s == "0" || value.to_s.downcase == "f" || value.to_s.downcase == "false"
         return true if value == 1 || value.to_s == "1" || value.to_s.downcase == "t" || value.to_s.downcase == "true"
+
+        value
+      end
+
+      def coerce_number(value)
+        return value unless value.is_a?(String)
+        return value.to_i if /\A-?\d+\z/.match?(value)
+        return value.to_f if /\A-?\d+\.\d+\z/.match?(value)
 
         value
       end

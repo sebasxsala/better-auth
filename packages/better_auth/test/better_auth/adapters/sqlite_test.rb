@@ -105,6 +105,40 @@ class BetterAuthSQLiteAdapterTest < Minitest::Test
     skip "sqlite3 gem is not installed"
   end
 
+  def test_sqlite_adapter_coerces_string_where_values_to_schema_types
+    require "sqlite3"
+
+    Tempfile.create(["better-auth-coerce", ".sqlite3"]) do |file|
+      config = BetterAuth::Configuration.new(
+        secret: SECRET,
+        database: :memory,
+        user: {
+          additional_fields: {
+            age: {type: "number", required: false}
+          }
+        }
+      )
+      connection = SQLite3::Database.new(file.path)
+      connection.results_as_hash = true
+      create_schema(connection, config)
+      adapter = BetterAuth::Adapters::SQLite.new(config, connection: connection)
+
+      adapter.create(model: "user", data: {name: "False", email: "false-sqlite@example.com", age: 25})
+      true_user = adapter.create(model: "user", data: {name: "True", email: "true-sqlite@example.com", age: 30})
+      adapter.update(model: "user", where: [{field: "id", value: true_user.fetch("id")}], update: {emailVerified: true})
+
+      by_boolean = adapter.find_many(model: "user", where: [{field: "emailVerified", value: "false"}])
+      by_number = adapter.find_many(model: "user", where: [{field: "age", value: "25"}])
+
+      assert_equal ["false-sqlite@example.com"], by_boolean.map { |user| user["email"] }
+      assert_equal ["false-sqlite@example.com"], by_number.map { |user| user["email"] }
+    ensure
+      connection&.close
+    end
+  rescue LoadError
+    skip "sqlite3 gem is not installed"
+  end
+
   private
 
   def create_schema(connection, config)

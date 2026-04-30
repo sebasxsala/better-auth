@@ -19,6 +19,34 @@ class BetterAuthSchemaSQLTest < Minitest::Test
     assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_sessions_on_user_id" ON "sessions" ("user_id")'
   end
 
+  def test_postgres_ddl_uses_custom_table_and_field_names
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      user: {
+        model_name: "app_users",
+        fields: {
+          email: "email_address"
+        }
+      },
+      session: {
+        model_name: "app_sessions",
+        fields: {
+          userId: "owner_id"
+        }
+      }
+    )
+
+    sql = BetterAuth::Schema::SQL.create_statements(config, dialect: :postgres).join("\n")
+
+    assert_includes sql, 'CREATE TABLE IF NOT EXISTS "app_users"'
+    assert_includes sql, '"email_address" text NOT NULL'
+    assert_includes sql, 'CREATE TABLE IF NOT EXISTS "app_sessions"'
+    assert_includes sql, '"owner_id" text NOT NULL'
+    assert_includes sql, 'FOREIGN KEY ("owner_id") REFERENCES "app_users" ("id") ON DELETE CASCADE'
+    assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_app_sessions_on_owner_id" ON "app_sessions" ("owner_id")'
+  end
+
   def test_mysql_ddl_uses_mysql_types_constraints_indexes_and_engine
     config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
 
@@ -81,5 +109,32 @@ class BetterAuthSchemaSQLTest < Minitest::Test
     assert_includes sql, 'CREATE TABLE IF NOT EXISTS "organization_roles"'
     assert_includes sql, '"active_organization_id" text'
     assert_includes sql, '"active_team_id" text'
+  end
+
+  def test_indexed_plugin_fields_use_create_index_statements
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [
+        {
+          id: "indexed",
+          schema: {
+            user: {
+              fields: {
+                externalId: {type: "string", required: false, index: true}
+              }
+            }
+          }
+        }
+      ]
+    )
+
+    sqlite = BetterAuth::Schema::SQL.create_statements(config, dialect: :sqlite).join("\n").downcase
+    postgres = BetterAuth::Schema::SQL.create_statements(config, dialect: :postgres).join("\n").downcase
+
+    assert_includes sqlite, "create index"
+    assert_includes postgres, "create index"
+    refute_includes sqlite, "add index"
+    refute_includes postgres, "add index"
   end
 end

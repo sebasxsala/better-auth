@@ -66,6 +66,54 @@ class BetterAuthSchemaTest < Minitest::Test
     assert_equal "user_id", schema["session"][:fields]["userId"][:field_name]
   end
 
+  def test_custom_model_names_are_applied_to_core_tables
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      user: {model_name: "app_users"},
+      session: {model_name: "app_sessions"},
+      account: {model_name: "app_accounts"},
+      verification: {model_name: "app_verifications"}
+    )
+
+    schema = BetterAuth::Schema.auth_tables(config)
+
+    assert_equal "app_users", schema["user"][:model_name]
+    assert_equal "app_sessions", schema["session"][:model_name]
+    assert_equal "app_accounts", schema["account"][:model_name]
+    assert_equal "app_verifications", schema["verification"][:model_name]
+    assert_equal "app_users", schema["session"][:fields]["userId"][:references][:model]
+    assert_equal "app_users", schema["account"][:fields]["userId"][:references][:model]
+  end
+
+  def test_returned_false_fields_are_valid_input_and_excluded_from_output
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [
+        {
+          id: "secret-fields",
+          schema: {
+            secretRecord: {
+              fields: {
+                name: {type: "string", required: true},
+                secretField: {type: "string", required: true, returned: false}
+              }
+            }
+          }
+        }
+      ]
+    )
+    adapter = BetterAuth::Adapters::Memory.new(config)
+
+    stored = adapter.create(model: "secretRecord", data: {name: "visible", secretField: "hidden"})
+    output = BetterAuth::Schema.parse_output(config, "secretRecord", stored)
+
+    assert_equal "hidden", stored["secretField"]
+    assert_equal "visible", output["name"]
+    refute output.key?("secretField")
+  end
+
   def test_plugin_schema_merges_fields_and_tables
     config = BetterAuth::Configuration.new(
       secret: SECRET,

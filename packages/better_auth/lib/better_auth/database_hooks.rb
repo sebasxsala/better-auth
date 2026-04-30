@@ -35,9 +35,9 @@ module BetterAuth
 
     def delete(where, model, custom: nil, context: nil)
       entity = adapter.find_one(model: model, where: where)
-      return custom ? custom.call(where) : adapter.delete(model: model, where: where) unless entity
+      return nil unless entity
 
-      return nil if before_hooks(model, :delete).any? { |hook| hook.call(entity, context) == false }
+      return false if before_hooks(model, :delete).any? { |hook| hook.call(entity, context) == false }
 
       deleted = custom ? custom.call(where) : adapter.delete(model: model, where: where)
       after_hooks(model, :delete).each { |hook| hook.call(entity, context) }
@@ -47,7 +47,7 @@ module BetterAuth
     def delete_many(where, model, custom: nil, context: nil)
       entities = adapter.find_many(model: model, where: where)
       entities.each do |entity|
-        return nil if before_hooks(model, :delete).any? { |hook| hook.call(entity, context) == false }
+        return false if before_hooks(model, :delete).any? { |hook| hook.call(entity, context) == false }
       end
       deleted = custom ? custom.call(where) : adapter.delete_many(model: model, where: where)
       entities.each { |entity| after_hooks(model, :delete).each { |hook| hook.call(entity, context) } }

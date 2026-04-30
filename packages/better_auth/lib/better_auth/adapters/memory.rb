@@ -156,31 +156,77 @@ module BetterAuth
         value = fetch_key(clause, :value)
         operator = (fetch_key(clause, :operator) || "eq").to_s
         current = record[field]
+        comparable = coerce_where_value(record, field, value, operator)
 
         case operator
         when "in"
-          Array(value).include?(current)
+          Array(comparable).include?(current)
         when "not_in"
-          !Array(value).include?(current)
+          !Array(comparable).include?(current)
         when "contains"
-          current.to_s.include?(value.to_s)
+          current.to_s.include?(comparable.to_s)
         when "starts_with"
-          current.to_s.start_with?(value.to_s)
+          current.to_s.start_with?(comparable.to_s)
         when "ends_with"
-          current.to_s.end_with?(value.to_s)
+          current.to_s.end_with?(comparable.to_s)
         when "ne"
-          current != value
+          current != comparable
         when "gt"
-          !value.nil? && current > value
+          !comparable.nil? && current > comparable
         when "gte"
-          !value.nil? && current >= value
+          !comparable.nil? && current >= comparable
         when "lt"
-          !value.nil? && current < value
+          !comparable.nil? && current < comparable
         when "lte"
-          !value.nil? && current <= value
+          !comparable.nil? && current <= comparable
         else
-          current == value
+          current == comparable
         end
+      end
+
+      def coerce_where_value(record, field, value, operator)
+        attributes = schema_for_record_field(record, field)
+        return value unless attributes
+        return Array(value).map { |entry| coerce_scalar_where_value(entry, attributes) } if %w[in not_in].include?(operator)
+
+        coerce_scalar_where_value(value, attributes)
+      end
+
+      def schema_for_record_field(record, field)
+        db.each_key do |model|
+          fields = Schema.auth_tables(options)[model]&.fetch(:fields, nil)
+          next unless fields&.key?(field)
+          return fields[field] if table_for(model).include?(record)
+        end
+        nil
+      end
+
+      def coerce_scalar_where_value(value, attributes)
+        return value if value.nil?
+
+        case attributes[:type]
+        when "boolean"
+          return false if value == false || value == 0 || value.to_s.downcase == "false" || value.to_s == "0"
+          return true if value == true || value == 1 || value.to_s.downcase == "true" || value.to_s == "1"
+        when "number"
+          return coerce_number(value)
+        when "date"
+          return Time.parse(value) if value.is_a?(String)
+        when "number[]"
+          return Array(value).map { |entry| coerce_number(entry) }
+        when "string[]"
+          return Array(value).map(&:to_s)
+        end
+
+        value
+      end
+
+      def coerce_number(value)
+        return value unless value.is_a?(String)
+        return value.to_i if /\A-?\d+\z/.match?(value)
+        return value.to_f if /\A-?\d+\.\d+\z/.match?(value)
+
+        value
       end
 
       def sort_records(model, records, sort_by)
