@@ -203,7 +203,8 @@ module BetterAuth
       ctx.context.internal_adapter.create_user(
         name: ens[:name] || wallet_address,
         email: (anonymous == false && !email.empty?) ? email : "#{wallet_address}@#{domain}",
-        image: ens[:avatar] || ""
+        image: ens[:avatar] || "",
+        context: ctx
       )
     end
 

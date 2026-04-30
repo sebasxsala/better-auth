@@ -254,7 +254,8 @@ module BetterAuth
             image: fetch_value(user_info, "image"),
             emailVerified: !!fetch_value(user_info, "emailVerified")
           },
-          account_info.merge("providerId" => provider_id, "accountId" => account_id)
+          account_info.merge("providerId" => provider_id, "accountId" => account_id),
+          context: ctx
         )
         user = created[:user]
         new_user = true

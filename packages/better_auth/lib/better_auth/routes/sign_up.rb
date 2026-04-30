@@ -118,7 +118,8 @@ module BetterAuth
           "name" => name,
           "image" => image,
           "emailVerified" => false
-        )
+        ),
+        context: ctx
       )
     rescue APIError
       raise

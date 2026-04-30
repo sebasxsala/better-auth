@@ -15,18 +15,18 @@ module BetterAuth
         @hooks = DatabaseHooks.new(adapter, options)
       end
 
-      def create_oauth_user(user, account)
+      def create_oauth_user(user, account, context: nil)
         adapter.transaction do
-          created_user = create_user(user)
+          created_user = create_user(user, context: context)
           created_account = create_account(stringify_keys(account).merge("userId" => created_user["id"]))
           {user: created_user, account: created_account}
         end
       end
 
-      def create_user(user)
-        data = timestamps.merge(stringify_keys(user))
+      def create_user(user = nil, context: nil, **keywords)
+        data = timestamps.merge(stringify_keys((user || {}).merge(keywords)))
         data["email"] = data["email"].to_s.downcase if data["email"]
-        hooks.create(data, "user")
+        hooks.create(data, "user", context: context)
       end
 
       def create_account(account)

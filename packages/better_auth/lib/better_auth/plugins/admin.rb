@@ -183,7 +183,7 @@ module BetterAuth
           name: body[:name].to_s,
           email: email,
           role: admin_validate_roles!(body[:role] || config[:default_role], config)
-        ).merge(body.key?(:image) ? {image: body[:image]} : {}))
+        ).merge(body.key?(:image) ? {image: body[:image]} : {}), context: ctx)
         raise APIError.new("INTERNAL_SERVER_ERROR", message: ADMIN_ERROR_CODES.fetch("FAILED_TO_CREATE_USER")) unless user
 
         if body[:password].to_s != ""

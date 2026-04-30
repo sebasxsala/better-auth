@@ -54,7 +54,8 @@ module BetterAuth
           isAnonymous: true,
           name: name,
           createdAt: Time.now,
-          updatedAt: Time.now
+          updatedAt: Time.now,
+          context: ctx
         )
         raise APIError.new("INTERNAL_SERVER_ERROR", message: ANONYMOUS_ERROR_CODES["FAILED_TO_CREATE_USER"]) unless user
 
