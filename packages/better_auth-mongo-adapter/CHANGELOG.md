@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-- Kept at `0.1.0` for now so this first-publish package can be released separately when ready.
+## 0.1.1 - 2026-04-30
+
+- Fixed inferred limited joins so explicit relation and limit configuration is preserved.
+- Added MongoDB upstream parity coverage using a fake Mongo adapter harness.
 
 ## 0.1.0
 

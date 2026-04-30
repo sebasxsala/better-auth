@@ -74,6 +74,7 @@ jobs:
       sso_releases: ${{ steps.detect.outputs.sso_releases }}
       stripe_releases: ${{ steps.detect.outputs.stripe_releases }}
       should_publish: ${{ steps.detect.outputs.should_publish }}
+      is_prerelease: ${{ steps.detect.outputs.is_prerelease }}
       dry_run: ${{ steps.detect.outputs.dry_run }}
     steps:
       - uses: actions/checkout@v4
@@ -129,6 +130,7 @@ jobs:
           sso_releases=false
           stripe_releases=false
           should_publish=false
+          is_prerelease=false
 
           if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
             tag_name="${GITHUB_REF_NAME}"
@@ -224,7 +226,6 @@ jobs:
 
             git fetch origin '+refs/heads/*:refs/remotes/origin/*'
             containing_branches=$(git branch -r --contains "$GITHUB_SHA" | sed 's/^[[:space:]]*//' || true)
-            is_prerelease=false
             if [[ "$tag_version" =~ [a-zA-Z] ]]; then
               is_prerelease=true
             fi
@@ -281,6 +282,7 @@ jobs:
           echo "sso_releases=$sso_releases" >> "$GITHUB_OUTPUT"
           echo "stripe_releases=$stripe_releases" >> "$GITHUB_OUTPUT"
           echo "should_publish=$should_publish" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=$is_prerelease" >> "$GITHUB_OUTPUT"
           echo "dry_run=$DRY_RUN_INPUT" >> "$GITHUB_OUTPUT"
 
           echo "core_version=$core_version"
@@ -310,6 +312,7 @@ jobs:
           echo "sso_releases=$sso_releases"
           echo "stripe_releases=$stripe_releases"
           echo "should_publish=$should_publish"
+          echo "is_prerelease=$is_prerelease"
           echo "dry_run=$DRY_RUN_INPUT"
 
   test-core:
@@ -1294,6 +1297,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
+          prerelease: ${{ needs.prepare-release.outputs.is_prerelease == 'true' }}
           name: "Better Auth Ruby ${{ github.ref_name }}"
           body: |
             ## Published packages

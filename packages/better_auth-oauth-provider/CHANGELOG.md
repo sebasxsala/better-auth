@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-04-30
+
+- Added upstream-parity support for provider init validation, request URI resolution, prompt handling, consent reference IDs, client references, custom token/id-token claims, scope-specific access-token expiry, M2M token defaults, userinfo JWT verification, and expanded introspection fields.
+- Aligned dynamic registration, admin client creation, authorization, consent, token, refresh, revoke, and userinfo behavior with upstream edge cases.
+- Expanded OAuth provider upstream parity tests across authorization, metadata, client privileges, pairwise endpoints, organization integration, prompts, rate limits, PKCE/token handling, and userinfo.
+
 ## 0.2.0 - 2026-04-29
 
 - Aligned OAuth provider server behavior with upstream `@better-auth/oauth-provider` v1.6.9: upstream-shaped client and consent CRUD routes, server-only admin client routes, discovery metadata auth-method and signing-alg semantics, canonical access-token and consent schema, dynamic-registration PKCE defaults, refresh replay cascade revocation, rotate-secret response shape, and pairwise sector identifiers.

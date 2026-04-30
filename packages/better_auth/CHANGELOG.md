@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-30
+
+### Added
+
+- Added upstream-parity helpers for async execution, host resolution, instrumentation, request state, URL handling, OAuth2, deprecation warnings, and expanded route behavior.
+- Added two-factor, OAuth protocol, social route, organization, admin, adapter, schema, and session parity coverage.
+
+### Changed
+
+- Aligned core auth, email OTP, generic OAuth, organization, two-factor, OAuth protocol, adapter, router, rate-limiter, logger, and middleware behavior more closely with upstream Better Auth.
+
+### Fixed
+
+- Fixed upstream parity gaps in organization handling, generic OAuth user info, email OTP sign-up, database schema behavior, and route/session edge cases.
+
 ## [0.3.0] - 2026-04-29
 
 ### Added
