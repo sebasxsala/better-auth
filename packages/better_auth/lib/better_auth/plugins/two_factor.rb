@@ -24,6 +24,7 @@ module BetterAuth
     TRUST_DEVICE_COOKIE_NAME = "trust_device"
     TRUST_DEVICE_COOKIE_MAX_AGE = 30 * 24 * 60 * 60
     TWO_FACTOR_COOKIE_MAX_AGE = 10 * 60
+    TWO_FACTOR_MODEL = "twoFactor"
 
     module_function
 
@@ -39,6 +40,8 @@ module BetterAuth
       config[:backup_code_options] = {store_backup_codes: "encrypted"}.merge(normalize_hash(config[:backup_code_options]))
       config[:otp_options] = normalize_hash(config[:otp_options])
       config[:totp_options] = normalize_hash(config[:totp_options])
+      config[:backup_code_options][:allow_passwordless] = config[:allow_passwordless] unless config[:backup_code_options].key?(:allow_passwordless)
+      config[:totp_options][:allow_passwordless] = config[:allow_passwordless] unless config[:totp_options].key?(:allow_passwordless)
 
       Plugin.new(
         id: "two-factor",
@@ -62,7 +65,7 @@ module BetterAuth
             }
           ]
         },
-        schema: two_factor_schema(config[:schema]),
+        schema: two_factor_schema(config),
         rate_limit: [
           {
             path_matcher: ->(path) { path.start_with?("/two-factor/") },
@@ -79,7 +82,7 @@ module BetterAuth
       Endpoint.new(path: "/two-factor/enable", method: "POST") do |ctx|
         session = Routes.current_session(ctx, sensitive: true)
         body = normalize_hash(ctx.body)
-        two_factor_check_password!(ctx, session[:user]["id"], body[:password])
+        two_factor_check_password!(ctx, session[:user]["id"], body[:password], allow_passwordless: config[:allow_passwordless])
 
         secret = two_factor_generate_secret
         backup = two_factor_generate_backup_codes(ctx.context.secret, config[:backup_code_options])
@@ -90,14 +93,18 @@ module BetterAuth
           ctx.context.internal_adapter.delete_session(session[:session]["token"])
         end
 
-        ctx.context.adapter.delete_many(model: config[:two_factor_table], where: [{field: "userId", value: session[:user]["id"]}])
+        existing = two_factor_record(ctx, config, session[:user]["id"])
+        verified = (!!existing && existing["verified"] != false) || !!config[:skip_verification_on_enable]
+        ctx.context.adapter.delete_many(model: TWO_FACTOR_MODEL, where: [{field: "userId", value: session[:user]["id"]}])
         ctx.context.adapter.create(
-          model: config[:two_factor_table],
+          model: TWO_FACTOR_MODEL,
           data: {
             secret: Crypto.symmetric_encrypt(key: ctx.context.secret, data: secret),
             backupCodes: backup[:stored],
-            userId: session[:user]["id"]
-          }
+            userId: session[:user]["id"],
+            verified: verified
+          },
+          force_allow_id: true
         )
 
         ctx.json({
@@ -111,10 +118,10 @@ module BetterAuth
       Endpoint.new(path: "/two-factor/disable", method: "POST") do |ctx|
         session = Routes.current_session(ctx, sensitive: true)
         body = normalize_hash(ctx.body)
-        two_factor_check_password!(ctx, session[:user]["id"], body[:password])
+        two_factor_check_password!(ctx, session[:user]["id"], body[:password], allow_passwordless: config[:allow_passwordless])
 
         updated_user = ctx.context.internal_adapter.update_user(session[:user]["id"], twoFactorEnabled: false)
-        ctx.context.adapter.delete(model: config[:two_factor_table], where: [{field: "userId", value: updated_user["id"]}])
+        ctx.context.adapter.delete(model: TWO_FACTOR_MODEL, where: [{field: "userId", value: updated_user["id"]}])
         new_session = ctx.context.internal_adapter.create_session(updated_user["id"], false)
         Cookies.set_session_cookie(ctx, {session: new_session, user: updated_user})
         ctx.context.internal_adapter.delete_session(session[:session]["token"])
@@ -142,7 +149,7 @@ module BetterAuth
       Endpoint.new(path: "/two-factor/get-totp-uri", method: "POST") do |ctx|
         two_factor_totp_enabled!(config)
         session = Routes.current_session(ctx, sensitive: true)
-        two_factor_check_password!(ctx, session[:user]["id"], normalize_hash(ctx.body)[:password])
+        two_factor_check_password!(ctx, session[:user]["id"], normalize_hash(ctx.body)[:password], allow_passwordless: config[:totp_options][:allow_passwordless])
         record = two_factor_record(ctx, config, session[:user]["id"])
         raise APIError.new("BAD_REQUEST", message: TWO_FACTOR_ERROR_CODES["TOTP_NOT_ENABLED"]) unless record
 
@@ -158,11 +165,22 @@ module BetterAuth
         data = two_factor_verification_context(ctx, config)
         record = two_factor_record(ctx, config, data[:session][:user]["id"])
         raise APIError.new("BAD_REQUEST", message: TWO_FACTOR_ERROR_CODES["TOTP_NOT_ENABLED"]) unless record
+        if !data[:session][:session] && record["verified"] == false
+          raise APIError.new("BAD_REQUEST", message: TWO_FACTOR_ERROR_CODES["TOTP_NOT_ENABLED"])
+        end
 
         secret = Crypto.symmetric_decrypt(key: ctx.context.secret, data: record["secret"])
         raise APIError.new("UNAUTHORIZED", message: TWO_FACTOR_ERROR_CODES["INVALID_CODE"]) unless two_factor_totp_valid?(secret, body[:code], options: config[:totp_options])
 
-        if !data[:session][:user]["twoFactorEnabled"] && data[:session][:session]
+        if record["verified"] != true
+          if !data[:session][:user]["twoFactorEnabled"] && data[:session][:session]
+            updated_user = ctx.context.internal_adapter.update_user(data[:session][:user]["id"], twoFactorEnabled: true)
+            new_session = ctx.context.internal_adapter.create_session(updated_user["id"], false)
+            ctx.context.internal_adapter.delete_session(data[:session][:session]["token"])
+            Cookies.set_session_cookie(ctx, {session: new_session, user: updated_user})
+          end
+          ctx.context.adapter.update(model: TWO_FACTOR_MODEL, where: [{field: "id", value: record["id"]}], update: {verified: true})
+        elsif !data[:session][:user]["twoFactorEnabled"] && data[:session][:session]
           updated_user = ctx.context.internal_adapter.update_user(data[:session][:user]["id"], twoFactorEnabled: true)
           new_session = ctx.context.internal_adapter.create_session(updated_user["id"], false)
           ctx.context.internal_adapter.delete_session(data[:session][:session]["token"])
@@ -242,7 +260,7 @@ module BetterAuth
         remaining = codes.reject { |code| code == body[:code].to_s }
         stored = two_factor_store_backup_codes(ctx.context.secret, remaining, config[:backup_code_options])
         updated = ctx.context.adapter.update(
-          model: config[:two_factor_table],
+          model: TWO_FACTOR_MODEL,
           where: [{field: "id", value: record["id"]}, {field: "backupCodes", value: record["backupCodes"]}],
           update: {backupCodes: stored}
         )
@@ -257,12 +275,12 @@ module BetterAuth
         session = Routes.current_session(ctx, sensitive: true)
         raise APIError.new("BAD_REQUEST", message: TWO_FACTOR_ERROR_CODES["TWO_FACTOR_NOT_ENABLED"]) unless session[:user]["twoFactorEnabled"]
 
-        two_factor_check_password!(ctx, session[:user]["id"], normalize_hash(ctx.body)[:password])
+        two_factor_check_password!(ctx, session[:user]["id"], normalize_hash(ctx.body)[:password], allow_passwordless: config[:backup_code_options][:allow_passwordless])
         record = two_factor_record(ctx, config, session[:user]["id"])
         raise APIError.new("BAD_REQUEST", message: TWO_FACTOR_ERROR_CODES["TWO_FACTOR_NOT_ENABLED"]) unless record
 
         backup = two_factor_generate_backup_codes(ctx.context.secret, config[:backup_code_options])
-        ctx.context.adapter.update(model: config[:two_factor_table], where: [{field: "id", value: record["id"]}], update: {backupCodes: backup[:stored]})
+        ctx.context.adapter.update(model: TWO_FACTOR_MODEL, where: [{field: "id", value: record["id"]}], update: {backupCodes: backup[:stored]})
         ctx.json({status: true, backupCodes: backup[:codes]})
       end
     end
@@ -277,7 +295,8 @@ module BetterAuth
       end
     end
 
-    def two_factor_schema(custom_schema = nil)
+    def two_factor_schema(config = {})
+      custom_schema = config[:schema]
       base = {
         user: {
           fields: {
@@ -288,10 +307,14 @@ module BetterAuth
           fields: {
             secret: {type: "string", required: true, returned: false, index: true},
             backupCodes: {type: "string", required: true, returned: false},
-            userId: {type: "string", required: true, returned: false, index: true, references: {model: "user", field: "id"}}
+            userId: {type: "string", required: true, returned: false, index: true, references: {model: "user", field: "id"}},
+            verified: {type: "boolean", required: false, default_value: true, input: false}
           }
         }
       }
+      if config[:two_factor_table] && config[:two_factor_table] != TWO_FACTOR_MODEL
+        base[:twoFactor][:model_name] = config[:two_factor_table].to_s
+      end
       deep_merge_hashes(base, normalize_hash(custom_schema || {}))
     end
 
@@ -311,7 +334,7 @@ module BetterAuth
         expiresAt: Time.now + config[:two_factor_cookie_max_age].to_i
       )
       ctx.set_signed_cookie(cookie.name, identifier, ctx.context.secret, cookie.attributes)
-      ctx.json({twoFactorRedirect: true})
+      ctx.json({twoFactorRedirect: true, twoFactorMethods: two_factor_methods(ctx, config, data[:user]["id"])})
     end
 
     def two_factor_verification_context(ctx, config)
@@ -377,11 +400,23 @@ module BetterAuth
     end
 
     def two_factor_record(ctx, config, user_id)
-      ctx.context.adapter.find_one(model: config[:two_factor_table], where: [{field: "userId", value: user_id}])
+      ctx.context.adapter.find_one(model: TWO_FACTOR_MODEL, where: [{field: "userId", value: user_id}])
     end
 
-    def two_factor_check_password!(ctx, user_id, password)
+    def two_factor_methods(ctx, config, user_id)
+      methods = []
+      unless config[:totp_options][:disable]
+        record = two_factor_record(ctx, config, user_id)
+        methods << "totp" if record && record["verified"] != false
+      end
+      methods << "otp" if config[:otp_options][:send_otp].respond_to?(:call)
+      methods
+    end
+
+    def two_factor_check_password!(ctx, user_id, password, allow_passwordless: false)
       account = ctx.context.internal_adapter.find_accounts(user_id).find { |entry| entry["providerId"] == "credential" }
+      return if allow_passwordless && !account
+
       unless account && account["password"] && Routes.verify_password_value(ctx, password.to_s, account["password"])
         raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["INVALID_PASSWORD"])
       end

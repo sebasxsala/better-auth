@@ -26,10 +26,162 @@ class BetterAuthPluginsTwoFactorTest < Minitest::Test
       as_response: true
     )
     assert_equal 200, status
-    assert_equal({"twoFactorRedirect" => true}, JSON.parse(body.join))
+    assert_equal({"twoFactorRedirect" => true, "twoFactorMethods" => ["totp", "otp"]}, JSON.parse(body.join))
     assert_includes headers.fetch("set-cookie"), "better-auth.two_factor="
     assert_includes headers.fetch("set-cookie"), "better-auth.session_token=;"
     assert_includes headers.fetch("set-cookie"), "Max-Age=0"
+  end
+
+  def test_enable_marks_totp_unverified_then_verify_marks_verified
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "verified-state@example.com")
+    auth.api.enable_two_factor(headers: {"cookie" => cookie}, body: {password: "password123"})
+
+    record = auth.context.adapter.find_one(model: "twoFactor", where: [{field: "userId", value: user_id(auth, cookie)}])
+    assert_equal false, record.fetch("verified")
+
+    secret = BetterAuth::Crypto.symmetric_decrypt(key: SECRET, data: record.fetch("secret"))
+    verified = auth.api.verify_totp(headers: {"cookie" => cookie}, body: {code: BetterAuth::Plugins.two_factor_totp(secret)}, return_headers: true)
+    cookie = cookie_header(verified.fetch(:headers).fetch("set-cookie"))
+
+    updated = auth.context.adapter.find_one(model: "twoFactor", where: [{field: "userId", value: user_id(auth, cookie)}])
+    assert_equal true, updated.fetch("verified")
+  end
+
+  def test_nil_verified_totp_row_completes_enrollment
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "nil-verified@example.com")
+    auth.api.enable_two_factor(headers: {"cookie" => cookie}, body: {password: "password123"})
+    record = auth.context.adapter.find_one(model: "twoFactor", where: [{field: "userId", value: user_id(auth, cookie)}])
+    auth.context.adapter.update(model: "twoFactor", where: [{field: "id", value: record.fetch("id")}], update: {verified: nil})
+
+    secret = BetterAuth::Crypto.symmetric_decrypt(key: SECRET, data: record.fetch("secret"))
+    verified = auth.api.verify_totp(headers: {"cookie" => cookie}, body: {code: BetterAuth::Plugins.two_factor_totp(secret)}, return_headers: true)
+    cookie = cookie_header(verified.fetch(:headers).fetch("set-cookie"))
+
+    user = auth.api.get_session(headers: {"cookie" => cookie}, query: {disableCookieCache: true})[:user]
+    updated = auth.context.adapter.find_one(model: "twoFactor", where: [{field: "userId", value: user.fetch("id")}])
+    assert_equal true, user["twoFactorEnabled"]
+    assert_equal true, updated.fetch("verified")
+  end
+
+  def test_verified_state_is_preserved_when_re_enrolling_totp
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "reenroll@example.com")
+    auth.api.enable_two_factor(headers: {"cookie" => cookie}, body: {password: "password123"})
+
+    record = auth.context.adapter.find_one(model: "twoFactor", where: [{field: "userId", value: user_id(auth, cookie)}])
+    secret = BetterAuth::Crypto.symmetric_decrypt(key: SECRET, data: record.fetch("secret"))
+    verified = auth.api.verify_totp(headers: {"cookie" => cookie}, body: {code: BetterAuth::Plugins.two_factor_totp(secret)}, return_headers: true)
+    cookie = cookie_header(verified.fetch(:headers).fetch("set-cookie"))
+
+    auth.api.enable_two_factor(headers: {"cookie" => cookie}, body: {password: "password123"})
+    reenrolled = auth.context.adapter.find_one(model: "twoFactor", where: [{field: "userId", value: user_id(auth, cookie)}])
+    assert_equal true, reenrolled.fetch("verified")
+  end
+
+  def test_unverified_totp_is_rejected_during_sign_in_but_otp_fallback_works
+    sent = []
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.two_factor(
+          otp_options: {send_otp: ->(data, _ctx = nil) { sent << data }}
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "otp-fallback@example.com")
+    auth.api.send_two_factor_otp(headers: {"cookie" => cookie})
+    enrolled = auth.api.verify_two_factor_otp(headers: {"cookie" => cookie}, body: {code: sent.last.fetch(:otp)}, return_headers: true)
+    cookie = cookie_header(enrolled.fetch(:headers).fetch("set-cookie"))
+    auth.api.enable_two_factor(headers: {"cookie" => cookie}, body: {password: "password123"})
+
+    sign_in = auth.api.sign_in_email(body: {email: "otp-fallback@example.com", password: "password123"}, return_headers: true)
+    assert_equal({twoFactorRedirect: true, twoFactorMethods: ["otp"]}, sign_in.fetch(:response))
+
+    two_factor_cookie = cookie_header(sign_in.fetch(:headers).fetch("set-cookie"))
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_totp(headers: {"cookie" => two_factor_cookie}, body: {code: "000000"})
+    end
+    assert_equal BetterAuth::Plugins::TWO_FACTOR_ERROR_CODES["TOTP_NOT_ENABLED"], error.message
+
+    auth.api.send_two_factor_otp(headers: {"cookie" => two_factor_cookie})
+    verified = auth.api.verify_two_factor_otp(headers: {"cookie" => two_factor_cookie}, body: {code: sent.last.fetch(:otp)})
+    assert_equal "otp-fallback@example.com", verified[:user]["email"]
+  end
+
+  def test_sign_in_response_includes_available_two_factor_methods
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.two_factor(
+          skip_verification_on_enable: true,
+          otp_options: {send_otp: ->(_data, _ctx = nil) {}}
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "methods@example.com")
+    auth.api.enable_two_factor(headers: {"cookie" => cookie}, body: {password: "password123"})
+
+    sign_in = auth.api.sign_in_email(body: {email: "methods@example.com", password: "password123"})
+    assert_equal true, sign_in[:twoFactorRedirect]
+    assert_equal ["totp", "otp"], sign_in[:twoFactorMethods]
+  end
+
+  def test_totp_is_excluded_from_sign_in_methods_when_disabled
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.two_factor(
+          skip_verification_on_enable: true,
+          totp_options: {disable: true},
+          otp_options: {send_otp: ->(_data, _ctx = nil) {}}
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "totp-disabled@example.com")
+    auth.api.enable_two_factor(headers: {"cookie" => cookie}, body: {password: "password123"})
+
+    sign_in = auth.api.sign_in_email(body: {email: "totp-disabled@example.com", password: "password123"})
+    assert_equal true, sign_in[:twoFactorRedirect]
+    assert_equal ["otp"], sign_in[:twoFactorMethods]
+  end
+
+  def test_passwordless_users_can_manage_two_factor_when_allowed
+    auth = build_auth(plugins: [BetterAuth::Plugins.two_factor(allow_passwordless: true)])
+    cookie = sign_up_cookie(auth, email: "passwordless@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie}, query: {disableCookieCache: true})[:user]
+    auth.context.adapter.delete(model: "account", where: [{field: "userId", value: user.fetch("id")}])
+
+    enabled = auth.api.enable_two_factor(headers: {"cookie" => cookie}, body: {})
+    assert_equal 10, enabled[:backupCodes].length
+
+    record = auth.context.adapter.find_one(model: "twoFactor", where: [{field: "userId", value: user.fetch("id")}])
+    secret = BetterAuth::Crypto.symmetric_decrypt(key: SECRET, data: record.fetch("secret"))
+    verified = auth.api.verify_totp(headers: {"cookie" => cookie}, body: {code: BetterAuth::Plugins.two_factor_totp(secret)}, return_headers: true)
+    cookie = cookie_header(verified.fetch(:headers).fetch("set-cookie"))
+
+    assert_match(/\Aotpauth:\/\/totp\//, auth.api.get_totp_uri(headers: {"cookie" => cookie}, body: {})[:totpURI])
+    assert_equal 10, auth.api.generate_backup_codes(headers: {"cookie" => cookie}, body: {})[:backupCodes].length
+    disabled = auth.api.disable_two_factor(headers: {"cookie" => cookie}, body: {}, return_headers: true)
+    assert_equal({status: true}, disabled.fetch(:response))
+  end
+
+  def test_allow_passwordless_still_requires_password_for_credential_users
+    auth = build_auth(plugins: [BetterAuth::Plugins.two_factor(allow_passwordless: true)])
+    cookie = sign_up_cookie(auth, email: "credential-required@example.com")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.enable_two_factor(headers: {"cookie" => cookie}, body: {})
+    end
+    assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_PASSWORD"], error.message
+  end
+
+  def test_custom_two_factor_table_option_maps_schema_model_name
+    plugin = BetterAuth::Plugins.two_factor(two_factor_table: "custom_two_factors")
+    config = BetterAuth::Configuration.new(secret: SECRET, plugins: [plugin])
+    schema = BetterAuth::Schema.auth_tables(config)
+
+    assert schema.key?("twoFactor")
+    assert_equal "custom_two_factors", schema.fetch("twoFactor").fetch(:model_name)
+    assert_equal "boolean", schema.fetch("twoFactor").fetch(:fields).fetch("verified").fetch(:type)
   end
 
   def test_second_factor_verification_preserves_dont_remember_me_session
