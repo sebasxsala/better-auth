@@ -87,6 +87,31 @@ class BetterAuthPluginsEmailOTPTest < Minitest::Test
     assert_equal "green", result[:user]["favoriteColor"]
   end
 
+  def test_sign_in_with_email_otp_sign_up_ignores_input_false_fields_and_uses_default
+    sent = []
+    auth = build_auth(
+      user: {
+        additional_fields: {
+          isAdmin: {type: "boolean", default_value: false, input: false}
+        }
+      },
+      plugins: [
+        BetterAuth::Plugins.email_otp(send_verification_otp: ->(data, _ctx = nil) { sent << data })
+      ]
+    )
+    auth.api.send_verification_otp(body: {email: "input-false-otp@example.com", type: "sign-in"})
+
+    result = auth.api.sign_in_email_otp(
+      body: {
+        email: "input-false-otp@example.com",
+        otp: sent.last[:otp],
+        isAdmin: true
+      }
+    )
+
+    assert_equal false, result[:user]["isAdmin"]
+  end
+
   def test_sign_in_with_email_otp_normalizes_email_case
     sent = []
     auth = build_auth(
@@ -120,6 +145,26 @@ class BetterAuthPluginsEmailOTPTest < Minitest::Test
     assert_equal({success: true}, missing)
     assert_equal({success: true}, existing)
     assert_equal ["existing-otp@example.com"], sent.map { |entry| entry[:email] }
+  end
+
+  def test_sign_in_with_email_otp_returns_invalid_otp_when_sign_up_is_disabled
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.email_otp(
+          disable_sign_up: true,
+          generate_otp: ->(_data, _ctx = nil) { "123456" },
+          send_verification_otp: ->(_data, _ctx = nil) {}
+        )
+      ]
+    )
+    auth.api.create_verification_otp(body: {email: "disabled-sign-up@example.com", type: "sign-in"})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_in_email_otp(body: {email: "disabled-sign-up@example.com", otp: "123456"})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::Plugins::EMAIL_OTP_ERROR_CODES["INVALID_OTP"], error.message
   end
 
   def test_email_otp_verifies_last_issued_otp
