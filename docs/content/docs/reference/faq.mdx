@@ -1,270 +1,182 @@
 ---
 title: FAQ
-description: Frequently asked questions about Better Auth.
+description: Frequently asked questions about Better Auth Ruby.
 ---
 
-<Callout type="warn">
-This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
-</Callout>
+This page covers common Better Auth Ruby questions and issues.
 
-{/*
-Hidden upstream content for FAQ.
+## Which gem should I install?
 
+Use `better_auth` for Rack-compatible apps and custom integrations.
 
-<Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
-</Callout>
-
-This page contains frequently asked questions, common issues, and other helpful information about Better Auth.
-
-<Accordions>
-  <Accordion id="auth-client-not-working" title="Auth client not working">
-  When encountering `createAuthClient` related errors, make sure to have the correct import path as it varies based on environment.
-
-If you're using the auth client on react front-end, you'll need to import it from `/react`:
-
-```ts title="component.ts"
-import { createAuthClient } from "better-auth/react";
+```ruby title="Gemfile"
+gem "better_auth"
 ```
 
-Where as if you're using the auth client in Next.js middleware, server-actions, server-components or anything server-related, you'll likely need to import it from `/client`:
+Use `better_auth-rails` for Rails apps.
 
-```ts title="server.ts"
-import { createAuthClient } from "better-auth/client";
+```ruby title="Gemfile"
+gem "better_auth-rails"
 ```
 
-</Accordion>
+Use `better_auth-sinatra` or `better_auth-hanami` when you want the dedicated adapter for those frameworks.
 
-<Accordion id="getsession-not-working" title="getSession not working">
-If you try to call `authClient.getSession` on a server environment (e.g, a Next.js server component), it doesn't work since it can't access the cookies. You can use the `auth.api.getSession` instead and pass the request headers to it. 
+## How do I mount Better Auth?
 
-```tsx title="server.tsx"
-import { auth } from "./auth";
-import { headers } from "next/headers";
+Rack:
 
-const session = await auth.api.getSession({
-    headers: await headers()
-})
+```ruby title="config.ru"
+require_relative "config/auth"
+
+map "/api/auth" do
+  run auth
+end
 ```
 
-if you need to use the auth client on the server for different purposes, you still can pass the request headers to it:
+Rails:
 
-```tsx title="server.tsx"
-import { authClient } from "./auth-client";
-import { headers } from "next/headers";
-
-const session = await authClient.getSession({
-    fetchOptions:{
-      headers: await headers()
-    }
-})
-```
-</Accordion>
-
-<Accordion id="corporate-proxy-configuration" title="How to configure a corporate proxy for server-side requests">
-If you need to configure a corporate proxy for Better Auth's outbound requests (e.g., OAuth provider requests), you can use undici's ProxyAgent to set up a global fetch proxy.
-
-```typescript title="auth.ts"
-import { betterAuth } from "better-auth";
-import { ProxyAgent, setGlobalDispatcher } from "undici";
-
-const proxyAgent = new ProxyAgent("http://your-proxy.example.com:8080");
-setGlobalDispatcher(proxyAgent);
-
-export const auth = betterAuth({
-  // your configuration
-});
+```ruby title="config/routes.rb"
+Rails.application.routes.draw do
+  better_auth
+end
 ```
 
-Since Better Auth runs on the server side, you have full control over Node.js's fetch behavior through undici's global dispatcher. This approach allows all outbound requests from Better Auth to go through your corporate proxy.
+The default base path is `/api/auth`.
 
-<Callout type="info">
-  Learn more about undici ProxyAgent in the [undici documentation](https://github.com/nodejs/undici/blob/main/docs/docs/api/ProxyAgent.md).
-</Callout>
-</Accordion>
+## Why does OAuth redirect to the wrong URL?
 
-<Accordion id="adding-custom-fields-to-the-users-table" title="Adding custom fields to the users table">
+Check `base_url`, `base_path`, and your provider callback URL.
 
-Better Auth provides a type-safe way to extend the user and session schemas, take a look at our docs on <Link href="/docs/concepts/database#extending-core-schema">extending core schema</Link>.
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  base_url: "https://example.com",
+  base_path: "/api/auth",
+  secret: ENV.fetch("BETTER_AUTH_SECRET")
+)
+```
 
-</Accordion>
+The provider callback should usually be:
 
-<Accordion id="difference-between-getsession-and-usesession" title="Difference between getSession and useSession">
-Both `useSession` and `getSession` instances are used fundamentally different based on the situation.
+```txt
+https://example.com/api/auth/callback/github
+```
 
-`useSession` is a hook, meaning it can trigger re-renders whenever session data changes.
+If your app is behind a reverse proxy and `base_url` is intentionally omitted, enable `advanced.trusted_proxy_headers` only when your proxy controls the forwarded headers.
 
-If you have UI you need to change based on user or session data, you can use this hook.
+## Why do I get `state_mismatch` during OAuth?
 
-<Callout type="warn">
-  For performance reasons, do not use this hook on your `layout.tsx` file. We
-  recommend using RSC and use your server auth instance to get the session data
-  via `auth.api.getSession`.
-</Callout>
+`state_mismatch` means the callback could not validate the state generated when the flow started. Common causes are:
 
-`getSession` returns a promise containing data and error.
+- The callback reached a different domain than the one that started the flow.
+- The state cookie was blocked or not sent.
+- The verification record expired or was deleted.
+- Multiple app instances do not share the same database or secondary storage.
+- `BETTER_AUTH_SECRET` changed during an active OAuth flow.
 
-For all other situations where you shouldn't use `useSession`, is when you should be using `getSession`.
+See [state_mismatch](/docs/reference/errors/state_mismatch).
 
-<Callout type="info">
-   `getSession` is available on both server and client auth instances.
-   Not just the latter.
-</Callout>
-</Accordion>
+## Why do I get `Invalid origin`?
 
-<Accordion id="common-typescript-errors" title="Common TypeScript Errors">
-If you're facing typescript errors, make sure your tsconfig has `strict` set to `true`:
-```json title="tsconfig.json"
-{
-  "compilerOptions": {
-    "strict": true,
+Unsafe requests that include cookies must come from a trusted origin. Add your frontend origin to `trusted_origins`.
+
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  base_url: "https://auth.example.com",
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  trusted_origins: ["https://app.example.com"]
+)
+```
+
+Do not disable CSRF or origin checks unless you have a narrow, well-understood integration that cannot be modeled with trusted origins.
+
+## How do I call server APIs?
+
+Use `auth.api`. Method names are Ruby `snake_case` versions of upstream endpoint keys.
+
+```ruby title="app/services/auth_lookup.rb"
+session = auth.api.get_session(
+  headers: {
+    "cookie" => request.get_header("HTTP_COOKIE").to_s
   }
-}
+)
 ```
 
-if you can't set strict to true, you can enable strictNullChecks:
-```json title="tsconfig.json"
-{
-  "compilerOptions": {
-    "strictNullChecks": true,
-  }
-}
-```
+Use `as_response: true` when you need the Rack response tuple with headers.
 
-You can learn more in our <Link href="/docs/concepts/typescript#typescript-config">TypeScript docs</Link>.
-</Accordion>
-<Accordion id="can-i-remove-name-image-or-email-fields-from-the-user-table" title="Can I remove `name`, `image`, or `email` fields from the user table?">
-At this time, you can't remove the `name`, `image`, or `email` fields from the user table.
-
-We do plan to have more customizability in the future in this regard, but for now, you can't remove these fields.
-</Accordion>
-
-<Accordion id="dual-module-hazard-issue" title="Dual Module Hazard Issue">
-If you're encountering errors like:
-
-```
-No request state found. Please make sure you are calling this function within a `runWithRequestState` callback.
-```
-
-This is typically caused by a **dual module hazard** - when multiple versions of `better-auth` or `@better-auth/core` exist in your dependency tree. This commonly occurs after upgrading to v1.4+, especially in Cloudflare Workers, Nuxt, or when using plugins like `oauthProvider`.
-
-### How to Diagnose
-
-Check if you have duplicate versions of Better Auth packages:
-
-```bash
-# For pnpm users
-pnpm why @better-auth/core
-pnpm why better-auth
-
-# For npm users
-npm ls @better-auth/core
-npm ls better-auth
-
-# For yarn users
-yarn why @better-auth/core
-yarn why better-auth
-```
-
-If you see multiple versions listed, you have a dual module hazard.
-
-### How to Fix
-
-#### Basic Steps
-
-Start by ensuring your dependencies are clean and all Better Auth packages use compatible versions.
-
-<Callout type="tip">
-**Clean reinstall:**
-
-```bash
-# Remove node_modules and lockfile
-rm -rf node_modules
-rm pnpm-lock.yaml # or package-lock.json or yarn.lock
-
-# Reinstall dependencies
-pnpm install # or npm install or yarn install
-```
-
-Check your `package.json` and make sure all Better Auth related packages (`better-auth`, `@better-auth/core`, `@better-auth/oauth-provider`, etc.) are using compatible versions.
-</Callout>
-
-#### Package Manager Resolution Issues
-
-If you're using Yarn v1 (Classic) or potentially other package managers like pnpm v9, you may need to force `better-call` to resolve to a single instance.
-
-<Callout type="warn">
-**For Yarn v1 / pnpm v9 users:**
-
-Manually install `better-call` and add it to both `dependencies` and `resolutions` to force it to be hoisted to the top level:
-
-```json title="package.json"
-{
-  "dependencies": {
-    "better-call": "^1.1.8",
-    // ... other dependencies
+```ruby title="app/controllers/sessions_controller.rb"
+status, headers, body = auth.api.sign_out(
+  headers: {
+    "cookie" => request.get_header("HTTP_COOKIE").to_s
   },
-  "resolutions": {
-    "better-call": "^1.1.8"
+  as_response: true
+)
+```
+
+## Does `auth.api` apply rate limits?
+
+No. Rate limits apply to HTTP requests handled by the Rack router. Server-side calls through `auth.api` are trusted application calls. If a controller, job, or RPC endpoint exposes `auth.api` behavior to users, rate limit that public entry point separately.
+
+## How do I configure Rails?
+
+Run the installer and then edit the initializer.
+
+```bash title="Terminal"
+bin/rails generate better_auth:install
+```
+
+```ruby title="config/initializers/better_auth.rb"
+BetterAuth::Rails.configure do |config|
+  config.secret = ENV.fetch("BETTER_AUTH_SECRET")
+  config.base_url = ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000")
+  config.email_and_password = {
+    enabled: true
   }
-}
+end
 ```
 
-Then reinstall your dependencies:
+See [Rails Integration](/docs/integrations/rails).
 
-```bash
-yarn install # or pnpm install
+## Can I use the upstream JavaScript client?
+
+Better Auth Ruby exposes upstream-compatible HTTP routes where implemented, so a frontend can call those routes over HTTP. The Ruby port does not provide TypeScript type inference or React hooks. Use the HTTP API, your framework's fetch utilities, or the route methods exposed by your app.
+
+## Can I use TypeScript examples from upstream docs?
+
+Use them as behavior references, then translate to Ruby:
+
+- `betterAuth({...})` becomes `BetterAuth.auth(...)`.
+- `camelCase` options become `snake_case`.
+- `auth.api.getSession` becomes `auth.api.get_session`.
+- JavaScript callbacks become Ruby lambdas or callables.
+
+## Why is my session missing on the server?
+
+Pass the inbound cookie header to server-side API calls.
+
+```ruby title="app/controllers/application_controller.rb"
+session = auth.api.get_session(
+  headers: {
+    "cookie" => request.get_header("HTTP_COOKIE").to_s
+  }
+)
 ```
 
-Note: Yarn v3 and pnpm v10 don't typically have this issue.
-</Callout>
+If you are forwarding through another app or proxy, make sure `Cookie` and `Set-Cookie` headers are preserved.
 
-<Callout type="error">
-**Important:** Make sure to install `better-auth` and related packages in `dependencies`, not `devDependencies`.
-</Callout>
+## Can I remove `name`, `image`, or `email` from the user table?
 
-#### Bundler Resolution Issues
+The core user schema expects the upstream user fields. You can add fields using schema extension patterns, but removing core fields is not supported.
 
-This is a bundler-level issue where the same module gets resolved to different instances. The goal is to make your bundler resolve the module to the same instance.
+See [Users And Accounts](/docs/concepts/users-accounts).
 
-<Callout type="info">
-**For Next.js users:**
+## How do I debug production auth issues?
 
-Add `better-auth` to `serverExternalPackages` in your `next.config.js`:
+Start with:
 
-```ts title="next.config.js"
-const config = {
-  serverExternalPackages: ['better-auth']
-};
-```
-</Callout>
+- Server logs from the auth route.
+- Browser DevTools network tab for callback and cookie headers.
+- `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, and provider credentials.
+- Whether all app instances share the same database or secondary storage.
+- Whether reverse proxies preserve query strings and forwarded headers.
 
-<Callout type="info">
-**For Cloudflare Workers users:**
-
-Make sure you have the `nodejs_compat` compatibility flag enabled in your `wrangler.toml`:
-
-```toml title="wrangler.toml"
-compatibility_flags = ["nodejs_compat"]
-```
-</Callout>
-
-#### Verify the Fix
-
-Run the diagnostic commands again to confirm only one version of each package exists:
-
-```bash
-pnpm why @better-auth/core
-pnpm why better-auth
-pnpm why better-call
-```
-
-You should see only one version listed for each package.
-
-<Callout type="info">
-  Related issues: [#6613](https://github.com/sebasxsala/better-auth/issues/6613), [yjs#438](https://github.com/yjs/yjs/issues/438)
-</Callout>
-</Accordion>
-</Accordions>
-
-*/}
+For OAuth issues, inspect the provider dashboard callback URL and compare it to the URL received by your app.

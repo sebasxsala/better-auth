@@ -8,8 +8,8 @@ date: 2025-03-01
 
 To upgrade, run:
 
-```package-install
-npm install better-auth@1.2
+```ruby title="Gemfile"
+gem "better_auth"
 ```
 
 ---
@@ -18,30 +18,31 @@ npm install better-auth@1.2
 
 Stripe integration for customer management, subscriptions, and webhooks.
 
-```package-install
-npm install @better-auth/stripe
+```ruby title="Gemfile"
+gem "better_auth-stripe"
 ```
 
-```ts title="auth.ts"
-import { stripe } from "@better-auth/stripe"; // [!code highlight]
+```ruby title="config/auth.rb"
+require "better_auth/stripe" # [!code highlight]
 
-export const auth = betterAuth({
+auth = BetterAuth.auth(
   plugins: [
-    stripe({
-      // [!code highlight]
-      createCustomerOnSignup: true, // [!code highlight]
-      subscription: { // [!code highlight]
-        enabled: true, // [!code highlight]
-        plans: [// [!code highlight]
-          { // [!code highlight]
-            name: "pro", // [!code highlight]
-            priceId: "price_1234567890", // [!code highlight]
-          }, // [!code highlight]
-        ], // [!code highlight]
-      }, // [!code highlight]
-    }), // [!code highlight]
-  ],
-});
+    BetterAuth::Plugins.stripe( # [!code highlight]
+      stripe_api_key: ENV.fetch("STRIPE_SECRET_KEY"), # [!code highlight]
+      stripe_webhook_secret: ENV.fetch("STRIPE_WEBHOOK_SECRET"), # [!code highlight]
+      create_customer_on_sign_up: true, # [!code highlight]
+      subscription: { # [!code highlight]
+        enabled: true, # [!code highlight]
+        plans: [ # [!code highlight]
+          { # [!code highlight]
+            name: "pro", # [!code highlight]
+            price_id: "price_1234567890" # [!code highlight]
+          } # [!code highlight]
+        ] # [!code highlight]
+      } # [!code highlight]
+    ) # [!code highlight]
+  ]
+)
 ```
 
 Read the [Stripe Plugin docs](/docs/plugins/stripe) for more information.
@@ -175,8 +176,8 @@ A lot of fixes and refinements to make everything smoother, faster, and more rel
 
 ---
 
-```package-install
-npm install better-auth@1.2.0
+```ruby title="Gemfile"
+gem "better_auth", "1.2.0"
 ```
 
 **Upgrade now and take advantage of these powerful new features!** 🚀

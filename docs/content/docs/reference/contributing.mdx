@@ -1,212 +1,134 @@
 ---
-title: Contributing to BetterAuth
-description: A concise guide to contributing to BetterAuth
+title: Contributing
+description: A concise guide to contributing to Better Auth Ruby.
 ---
 
-<Callout type="warn">
-This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
-</Callout>
+Thanks for helping improve Better Auth Ruby. This port tracks upstream Better Auth behavior where it makes sense for Ruby, Rack, Rails, Sinatra, Hanami, and database adapters.
 
-{/*
-Hidden upstream content for Contributing to BetterAuth.
+## Before You Start
 
-
-<Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
-</Callout>
-
-Thank you for your interest in contributing to Better Auth! This guide is a concise guide to contributing to Better Auth.
-
-## Getting Started
-
-Before diving in, here are a few important resources:
-
-- Take a look at our existing <Link href="https://github.com/sebasxsala/better-auth/issues">issues</Link> and <Link href="https://github.com/sebasxsala/better-auth/pulls">pull requests</Link>
-- Join our community discussions in <Link href="https://discord.gg/better-auth">Discord</Link>
-
+- Check existing [issues](https://github.com/sebasxsala/better-auth/issues) and pull requests.
+- Read the root `AGENTS.md` if you are using an AI coding assistant in this repository.
+- For core gem work, read `packages/better_auth/AGENTS.md`.
+- For Rails adapter work, read `packages/better_auth-rails/AGENTS.md`.
+- Inspect matching upstream source and tests in `upstream/` before porting behavior.
 
 ## Development Setup
 
-To get started with development:
-
-<Callout type="warn">
-  Make sure you have <Link href="https://nodejs.org/en/download">Node.JS</Link>{" "}
-  installed, preferably on LTS.
-</Callout>
-
 <Steps>
 
-    <Step>
-        ### 1. Fork the repository
+<Step>
+### 1. Fork And Clone
 
-        Visit https://github.com/sebasxsala/better-auth
+```bash title="Terminal"
+git clone https://github.com/YOUR-USERNAME/better-auth.git
+cd better-auth
+```
+</Step>
 
-        Click the "Fork" button in the top right.
+<Step>
+### 2. Install Ruby Dependencies
 
-    </Step>
+```bash title="Terminal"
+bundle install
+```
+</Step>
 
-    <Step>
-        ### 2. Clone your fork
+<Step>
+### 3. Install Docs Dependencies
 
-        ```bash
-        # Replace YOUR-USERNAME with your GitHub username
-        git clone https://github.com/YOUR-USERNAME/better-auth.git
-        cd better-auth
-        ```
-    </Step>
+```bash title="Terminal"
+cd docs
+pnpm install
+```
+</Step>
 
-    <Step>
-        ### 3. Install dependencies
+<Step>
+### 4. Initialize Upstream When Needed
 
-        Make sure you have <Link href="https://pnpm.io/installation">pnpm</Link> installed!
+The `upstream/` submodule is the behavior source of truth.
 
-        ```bash
-        pnpm install
-        ```
-    </Step>
-
-    <Step>
-        ### 4. Prepare ENV files
-
-        Copy the example env file to create your new `.env` file.
-
-        ```bash
-        cp -n ./docs/.env.example ./docs/.env
-        ```
-    </Step>
+```bash title="Terminal"
+git submodule update --init --recursive upstream
+cd upstream
+git fetch --tags origin
+git checkout v1.6.9
+cd ..
+```
+</Step>
 
 </Steps>
 
-## Making changes
+## Running Tests
 
-Once you have an idea of what you want to contribute, you can start making changes. Here are some steps to get started:
+Run the core test suite:
 
-<Steps>
-    <Step>
-        ### 1. Create a new branch
-
-        ```bash
-        # Add upstream remote (if not already added)
-        git remote add upstream https://github.com/sebasxsala/better-auth.git
-
-        # Make sure you're on canary
-        git checkout canary
-
-        # Pull latest changes
-        git pull upstream canary
-
-        # Create and switch to a new branch
-        git checkout -b feature/your-feature-name
-        ```
-    </Step>
-    <Step>
-        ### 2. Start development server
-
-        Start the development server:
-
-        ```bash
-        pnpm dev
-        ```
-
-        To start the docs server:
-
-        ```bash
-        pnpm -F docs dev
-        ```
-    </Step>
-    <Step>
-        ### 3. Make Your Changes
-
-        * Make your changes to the codebase.
-
-        * Write tests if needed. (Read more about testing <Link href="/docs/reference/contributing#testing">here</Link>)
-
-        * Update documentation.  (Read more about documenting <Link href="/docs/reference/contributing#documentation">here</Link>)
-
-    </Step>
-
-</Steps>
-
-
-### Issues and Bug Fixes
-
-- Check our [GitHub issues](https://github.com/sebasxsala/better-auth/issues) for tasks labeled `good first issue`
-- When reporting bugs, include steps to reproduce and expected behavior
-- Comment on issues you'd like to work on to avoid duplicate efforts
-
-### Framework Integrations
-
-We welcome contributions to support more frameworks:
-
-- Focus on framework-agnostic solutions where possible
-- Keep integrations minimal and maintainable
-- All integrations currently live in the main package
-
-### Plugin Development
-
-- For core plugins: Open an issue first to discuss your idea
-- For community plugins: Feel free to develop independently
-- Follow our plugin architecture guidelines
-
-### Documentation
-
-- Fix typos and errors
-- Add examples and clarify existing content
-- Ensure documentation is up to date with code changes
-
-## Testing
-
-We use Vitest for testing. Place test files next to the source files they test:
-
-```ts
-import { describe, it, expect } from "vitest";
-import { getTestInstance } from "./test-utils/test-instance";
-
-describe("Feature", () => {
-    it("should work as expected", async () => {
-        const { client } = await getTestInstance();
-        // Test code here
-        expect(result).toBeDefined();
-    });
-});
+```bash title="Terminal"
+bundle exec rake test
 ```
 
-### Using the Test Instance Helper
+Run a single test file:
 
-The test instance helper now includes improved async context support for managing user sessions:
-
-```ts
-const { client, runWithUser, signInWithTestUser } = await getTestInstance();
-
-// Run tests with a specific user context
-await runWithUser("user@example.com", "password", async (headers) => {
-    // All client calls within this block will use the user's session
-    const response = await client.getSession();
-    // headers are automatically applied
-});
-
-// Or use the test user with async context
-const { runWithDefaultUser } = await signInWithTestUser();
-await runWithDefaultUser(async (headers) => {
-    // Code here runs with the test user's session context
-});
+```bash title="Terminal"
+bundle exec ruby -Itest packages/better_auth/test/better_auth/routes/sign_in_test.rb
 ```
 
-### Testing Best Practices
+Run style checks:
 
-- Write clear commit messages
-- Update documentation to reflect your changes
-- Add tests for new features
-- Follow our coding standards
-- Keep pull requests focused on a single change
+```bash title="Terminal"
+bundle exec standardrb
+```
 
-## Need Help?
+Build docs:
 
-Don't hesitate to ask for help! You can:
+```bash title="Terminal"
+cd docs
+pnpm build
+```
 
-- Open an <Link href="https://github.com/sebasxsala/better-auth/issues">issue</Link> with questions
-- Join our <Link href="https://discord.gg/better-auth">community discussions</Link>
-- Reach out to project maintainers
+## Testing Guidelines
 
-Thank you for contributing to Better Auth!
-*/}
+- Prefer real adapters or realistic in-memory behavior over mocks.
+- Test public behavior, not private implementation details.
+- Check upstream tests in `upstream/packages/better-auth/src/**/*.test.ts` for expected behavior and edge cases.
+- Database tests are preferred when behavior depends on persistence, constraints, transactions, or adapter shape.
+- Include regression tests for bug fixes.
+
+## Porting From Upstream
+
+When porting a feature:
+
+1. Read the upstream implementation.
+2. Read the upstream tests.
+3. Identify JavaScript-specific pieces that need Ruby adaptation.
+4. Implement Ruby behavior with `snake_case` options and idiomatic Ruby APIs.
+5. Add or update docs when public behavior changes.
+6. Note meaningful deviations in the relevant `.docs/features/` or `.docs/plans/` document.
+
+## Documentation
+
+Docs live in `docs/content/docs`. Use Ruby examples unless a page explicitly documents an upstream JavaScript comparison.
+
+When adapting upstream docs:
+
+- Convert option names to Ruby `snake_case`.
+- Replace TypeScript imports with Ruby `require` or framework examples.
+- Remove unsupported JavaScript framework helpers.
+- Link to existing Ruby pages for concepts, adapters, integrations, and plugins.
+
+## Pull Requests
+
+Keep pull requests focused on one behavior area. Include:
+
+- A clear description of the change.
+- Tests or a reason tests are not applicable.
+- Docs updates for public behavior.
+- Notes about upstream parity or intentional Ruby-specific differences.
+
+## Versioning
+
+Do not bump every gem version for ordinary unreleased changes. Version bumps are done per package when preparing a publishable release.
+
+## Need Help
+
+Open an [issue](https://github.com/sebasxsala/better-auth/issues) with the context, reproduction steps, expected behavior, and actual behavior.

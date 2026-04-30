@@ -13,4 +13,4 @@ export const GITHUB_REPO = {
 };
 
 export const SHOW_UPSTREAM_BLOG_CONTENT = false;
-export const SHOW_UPSTREAM_CHANGELOG_CONTENT = false;
+export const SHOW_UPSTREAM_CHANGELOG_CONTENT = true;

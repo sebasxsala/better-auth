@@ -1,0 +1,174 @@
+---
+title: Supported Features
+description: Current Better Auth Ruby support matrix.
+---
+
+Better Auth Ruby tracks upstream Better Auth `v1.6.9`. The Ruby port focuses on
+server-side behavior: Rack apps, framework adapters, database adapters, auth
+routes, cookies, sessions, and server plugins.
+
+<Callout type="info">
+Browser clients, TypeScript inference, React hooks, and native client storage are
+outside the Ruby server scope unless a Ruby package explicitly documents an
+equivalent.
+</Callout>
+
+## At a Glance
+
+<div className="grid gap-3 md:grid-cols-3 not-prose my-6">
+  <div className="rounded-lg border bg-card p-4">
+    <p className="text-sm text-muted-foreground">Target</p>
+    <p className="mt-1 text-2xl font-semibold">v1.6.9</p>
+    <p className="mt-2 text-sm text-muted-foreground">Upstream Better Auth release used as the source of truth.</p>
+  </div>
+  <div className="rounded-lg border bg-card p-4">
+    <p className="text-sm text-muted-foreground">Runtime</p>
+    <p className="mt-1 text-2xl font-semibold">Rack first</p>
+    <p className="mt-2 text-sm text-muted-foreground">Rails, Sinatra, and Hanami mount the same Rack auth object.</p>
+  </div>
+  <div className="rounded-lg border bg-card p-4">
+    <p className="text-sm text-muted-foreground">Scope</p>
+    <p className="mt-1 text-2xl font-semibold">Server APIs</p>
+    <p className="mt-2 text-sm text-muted-foreground">Ruby docs describe implemented server behavior, not client packages.</p>
+  </div>
+</div>
+
+## Status Key
+
+<div className="grid gap-3 md:grid-cols-3 not-prose my-6">
+  <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4">
+    <p className="font-medium">Supported</p>
+    <p className="mt-2 text-sm text-muted-foreground">Implemented with local Ruby tests for the documented server behavior.</p>
+  </div>
+  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+    <p className="font-medium">Partial</p>
+    <p className="mt-2 text-sm text-muted-foreground">Main behavior exists, but upstream edge cases or docs coverage are still in progress.</p>
+  </div>
+  <div className="rounded-lg border border-muted-foreground/30 bg-muted/30 p-4">
+    <p className="font-medium">Not supported</p>
+    <p className="mt-2 text-sm text-muted-foreground">Not implemented in Ruby, intentionally out of scope, or not exposed as a public package.</p>
+  </div>
+</div>
+
+## Frameworks
+
+<div className="grid gap-3 md:grid-cols-2 not-prose my-6">
+  <FeatureCard title="Rack" status="Supported" body="Core auth object is a Rack app and can be mounted directly in Rack-compatible servers." />
+  <FeatureCard title="Rails" status="Partial" body="Mount helpers, ActiveRecord adapter, controller helpers, migrations, generators, and plugin schema coverage are implemented." />
+  <FeatureCard title="Sinatra" status="Supported" body="Sinatra extension, Rack mounting, request helpers, and SQL migration Rake tasks are implemented." />
+  <FeatureCard title="Hanami" status="Supported" body="Hanami 2.3+ integration includes route mounting, action helpers, Sequel adapter, ROM::SQL migrations, relations, repos, and generators." />
+</div>
+
+## Core Runtime
+
+<div className="grid gap-3 md:grid-cols-2 not-prose my-6">
+  <FeatureCard title="Auth factory and API object" status="Partial" body="BetterAuth.auth, Rack calls, direct server API access, plugin initialization, and error-code merging are implemented." />
+  <FeatureCard title="Endpoint router and middleware" status="Partial" body="Rack routing, route params, hooks, plugin middleware, redirects, cookies, origin checks, and rate-limit hooks are implemented." />
+  <FeatureCard title="Email and password" status="Partial" body="Sign-up, sign-in, password hashing, verification requirements, reset password, set/change password, and user updates are implemented." />
+  <FeatureCard title="Social OAuth" status="Partial" body="Authorization URLs, callbacks, sessions, token storage, account linking, unlinking, refresh, and access-token routes are implemented." />
+  <FeatureCard title="Sessions and cookies" status="Partial" body="Signed cookies, cache cookies, chunking, deletion, revocation routes, secondary storage, and Redis-backed session storage are implemented." />
+  <FeatureCard title="CSRF and trusted origins" status="Partial" body="Origin checks, trusted origins, proxy-aware IP handling, and selected callback validation are implemented." />
+  <FeatureCard title="Database schema and hooks" status="Supported" body="Base schema, plugin schema merge, SQL and Rails migration generation, adapter hooks, and Better Auth logical field names are implemented." />
+  <FeatureCard title="OpenAPI" status="Partial" body="OpenAPI 3.1.1 metadata, route and model inventory, security schemes, servers, selected request bodies, path params, and reference HTML are implemented." />
+</div>
+
+## Storage And Adapters
+
+<div className="grid gap-3 md:grid-cols-2 not-prose my-6">
+  <FeatureCard title="Memory adapter" status="Supported" body="Development and test adapter. Not intended for production persistence." />
+  <FeatureCard title="SQL adapters" status="Partial" body="PostgreSQL, MySQL, SQLite, and MSSQL adapter wrappers plus DDL generation are implemented." />
+  <FeatureCard title="Rails ActiveRecord adapter" status="Partial" body="ActiveRecord persistence, migrations, mounting helpers, controller helpers, and generators are implemented." />
+  <FeatureCard title="MongoDB adapter" status="Partial" body="External package with document storage, ObjectId conversion, joins, transactions, and auth-route persistence." />
+  <FeatureCard title="Redis secondary storage" status="Partial" body="External package for sessions, active-session indexes, verification-like state, and rate limits." />
+</div>
+
+## Server Plugins
+
+<div className="grid gap-3 md:grid-cols-2 not-prose my-6">
+  <FeatureCard title="Access control" status="Supported" body="Roles, statements, permissions, and resource/action checks." />
+  <FeatureCard title="Additional fields" status="Supported" body="Schema extension and route integration." />
+  <FeatureCard title="Admin" status="Supported" body="User management, sessions, roles, bans, impersonation, destructive endpoints, and permissions." />
+  <FeatureCard title="Anonymous" status="Supported" body="Anonymous sign-in/delete and link cleanup." />
+  <FeatureCard title="API key" status="Supported" body="Creation, verification, hashing, expiration, quotas, metadata, permissions, storage modes, and API-key sessions." />
+  <FeatureCard title="Bearer" status="Supported" body="Bearer session resolution, signed/unsigned token modes, and cookie fallback." />
+  <FeatureCard title="Captcha" status="Supported" body="reCAPTCHA, hCaptcha, Turnstile, CaptchaFox, protected routes, and score checks." />
+  <FeatureCard title="Custom session" status="Supported" body="Custom get-session shaping and optional multi-session list mutation." />
+  <FeatureCard title="Device authorization" status="Supported" body="Device/user codes, polling, slow-down, approval, denial, token exchange, and verification URI behavior." />
+  <FeatureCard title="Email OTP" status="Supported" body="Send, check, verify, sign-in, password-reset, change-email flows, attempts, storage modes, and rate limits." />
+  <FeatureCard title="Expo server integration" status="Supported" body="Server-side authorization proxy, origin override, and trusted deep-link cookie transfer." />
+  <FeatureCard title="Generic OAuth" status="Supported" body="Custom OAuth sign-in, callback, link flows, DB/cookie state, dynamic params, issuer checks, and token/userinfo exchange." />
+  <FeatureCard title="Have I Been Pwned" status="Supported" body="SHA-1 k-anonymity lookup and protected password routes." />
+  <FeatureCard title="JWT/JWKS" status="Supported" body="EdDSA default, RSA/ECDSA algorithms, JWKS publication, rotation helpers, remote verification, and set-auth-jwt." />
+  <FeatureCard title="Last login method" status="Supported" body="Email, SIWE, social, and generic OAuth cookie/user-field updates." />
+  <FeatureCard title="Magic link" status="Supported" body="Send/verify, redirects/errors, signup, latest-token verification, and token storage modes." />
+  <FeatureCard title="MCP" status="Supported" body="OAuth metadata, registration, authorization-code PKCE, token refresh, userinfo, JWKS, and helper challenge headers." />
+  <FeatureCard title="Multi-session" status="Supported" body="Device sessions, active switching, replacement, revocation, and sign-out cleanup." />
+  <FeatureCard title="OAuth proxy" status="Supported" body="Callback rewriting, encrypted cross-origin cookie forwarding, validation, and stateless state restoration." />
+  <FeatureCard title="OAuth provider" status="Supported" body="Metadata, registration, clients, consent, auth code, client credentials, tokens, introspection, revocation, userinfo, and logout." />
+  <FeatureCard title="OIDC provider" status="Supported" body="Discovery, prompt/max-age, registration, consent, token flows, userinfo, logout, and client-secret storage modes." />
+  <FeatureCard title="One tap" status="Supported" body="Google ID-token callback, account reuse/linking, disabled signup, and session cookies." />
+  <FeatureCard title="One-time token" status="Supported" body="Generate/verify, single-use, expiration, cookie behavior, storage modes, and set-ott." />
+  <FeatureCard title="OpenAPI" status="Partial" body="Metadata, route inventory, models, security, selected schemas, and reference HTML. Exact upstream snapshot parity is still in progress." />
+  <FeatureCard title="Organization" status="Supported" body="Org/member CRUD, invitations, teams, roles, hooks, permissions, and schema migrations." />
+  <FeatureCard title="Passkey" status="Supported" body="WebAuthn registration/authentication, challenge cookies, credential management, and schema output." />
+  <FeatureCard title="Phone number" status="Supported" body="OTP send/verify, sign-in/sign-up, updates, reset password, attempt limits, and validation hooks." />
+  <FeatureCard title="SCIM" status="Supported" body="Token envelopes, Bearer middleware, metadata, user CRUD, provider management, mappings, filters, PATCH, and org enforcement." />
+  <FeatureCard title="SIWE" status="Supported" body="Nonce, wallet sign-in, ENS hook, account/session creation, EIP-55 casing, and multi-chain wallets." />
+  <FeatureCard title="SSO" status="Supported" body="OIDC and SAML provider lifecycle, sign-in/callbacks, domain verification, metadata, and SAML validation in better_auth-sso." />
+  <FeatureCard title="Stripe" status="Supported" body="Checkout, portal, webhooks, subscription state transitions, seats, trials, org subscriptions, and metadata helpers." />
+  <FeatureCard title="Two-factor" status="Supported" body="TOTP, OTP, backup codes, trusted devices, disable/recovery, and post-login verification." />
+  <FeatureCard title="Username" status="Supported" body="Username sign-up/sign-in, availability, normalization, validation, duplicates, and leak-prevention behavior." />
+</div>
+
+## Payments
+
+<div className="grid gap-3 md:grid-cols-2 not-prose my-6">
+  <FeatureCard title="Stripe" status="Supported" body="The Ruby payment plugin surface is Stripe only." />
+</div>
+
+## Other Upstream Plugins
+
+<div className="grid gap-3 md:grid-cols-2 not-prose my-6">
+  <FeatureCard title="Test Utils" status="Not supported" body="There is no public BetterAuth::Plugins.test_utils Ruby plugin yet. Ruby packages use local test helpers and direct auth.api calls." />
+  <FeatureCard title="Dub" status="Not supported" body="No Ruby package or server plugin implementation exists in packages/." />
+  <FeatureCard title="Community Plugins" status="Not supported" body="The upstream community plugin page lists JavaScript ecosystem plugins and is not a Ruby support promise." />
+  <FeatureCard title="Agent Auth and i18n" status="Not supported" body="No Ruby package or server plugin implementation exists in this repository today." />
+</div>
+
+## Social Providers
+
+Built-in Ruby provider factories are implemented for Apple, Atlassian, Cognito,
+Discord, Dropbox, Facebook, Figma, GitHub, GitLab, Google, Hugging Face, Kakao,
+Kick, Line, Linear, LinkedIn, Microsoft Entra ID, Naver, Notion, Paybin, PayPal,
+Polar, Railway, Reddit, Roblox, Salesforce, Slack, Spotify, TikTok, Twitch,
+Twitter/X, Vercel, VK, WeChat, and Zoom.
+
+Use `BetterAuth::Plugins.generic_oauth` for custom providers that are not part of
+the built-in set.
+
+## Source Of Truth
+
+The detailed working notes live in:
+
+- [Feature notes](https://github.com/sebasxsala/better-auth/tree/canary/.docs/features)
+- [Implementation plans](https://github.com/sebasxsala/better-auth/tree/canary/.docs/plans)
+- [Upstream submodule](https://github.com/sebasxsala/better-auth/tree/canary/upstream)
+
+export function FeatureCard({ title, status, body }) {
+  const tone =
+    status === "Supported"
+      ? "border-emerald-500/30 bg-emerald-500/10"
+      : status === "Partial"
+        ? "border-amber-500/30 bg-amber-500/10"
+        : "border-muted-foreground/30 bg-muted/30";
+
+  return (
+    <div className={`rounded-lg border p-4 ${tone}`}>
+      <div className="flex items-start justify-between gap-3">
+        <p className="font-medium">{title}</p>
+        <span className="shrink-0 rounded-md border bg-background/70 px-2 py-0.5 text-xs text-muted-foreground">{status}</span>
+      </div>
+      <p className="mt-2 text-sm text-muted-foreground">{body}</p>
+    </div>
+  );
+}
