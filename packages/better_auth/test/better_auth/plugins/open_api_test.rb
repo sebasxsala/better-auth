@@ -161,7 +161,7 @@ class BetterAuthPluginsOpenAPITest < Minitest::Test
     auth = build_auth(plugins: [BetterAuth::Plugins.open_api])
 
     schema = auth.api.generate_open_api_schema
-    callback = schema.dig(:paths, "/callback/{providerId}", :get)
+    callback = schema.dig(:paths, "/callback/{id}", :get)
 
     assert callback
     assert_equal ["Default"], callback[:tags]

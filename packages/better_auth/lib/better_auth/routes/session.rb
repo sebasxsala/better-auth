@@ -3,7 +3,7 @@
 module BetterAuth
   module Routes
     def self.get_session
-      Endpoint.new(path: "/get-session", method: "GET") do |ctx|
+      Endpoint.new(path: "/get-session", method: ["GET", "POST"]) do |ctx|
         session = current_session(ctx, allow_nil: true)
         next ctx.json(nil) unless session
 

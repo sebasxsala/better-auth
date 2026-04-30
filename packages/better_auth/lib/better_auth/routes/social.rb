@@ -66,21 +66,21 @@ module BetterAuth
 
     def self.callback_oauth
       Endpoint.new(
-        path: "/callback/:providerId",
+        path: "/callback/:id",
         method: ["GET", "POST"],
         metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}
       ) do |ctx|
+        provider_id = (fetch_value(ctx.params, "id") || fetch_value(ctx.params, "providerId")).to_s
         if ctx.method == "POST"
           merged = normalize_hash(ctx.query).merge(normalize_hash(ctx.body))
           query = URI.encode_www_form(merged.reject { |_key, value| value.nil? || value.to_s.empty? })
-          target = "#{ctx.context.base_url}/callback/#{fetch_value(ctx.params, "providerId")}"
+          target = "#{ctx.context.base_url}/callback/#{provider_id}"
           target = "#{target}?#{query}" unless query.empty?
           raise ctx.redirect(target)
         end
 
         source = ctx.query
         data = normalize_hash(source)
-        provider_id = fetch_value(ctx.params, "providerId").to_s
         provider = social_provider(ctx.context, provider_id)
         state = data["state"].to_s
         state_data = state.empty? ? nil : Crypto.verify_jwt(state, ctx.context.secret)

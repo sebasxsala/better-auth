@@ -7,6 +7,12 @@ require_relative "../../test_helper"
 class BetterAuthRoutesSocialTest < Minitest::Test
   SECRET = "phase-five-secret-with-enough-entropy-123"
 
+  def test_callback_oauth_endpoint_uses_upstream_id_param
+    auth = build_auth
+
+    assert_equal "/callback/:id", auth.api.endpoints.fetch(:callback_oauth).path
+  end
+
   def test_sign_in_social_with_id_token_creates_user_account_and_session
     auth = build_auth(
       social_providers: {

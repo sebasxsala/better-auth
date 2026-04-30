@@ -74,8 +74,8 @@ module BetterAuth
       case path
       when "/sign-in/email", "/sign-up/email"
         "email"
-      when "/callback/:providerId"
-        fetch_value(ctx.params, "providerId")
+      when "/callback/:id"
+        fetch_value(ctx.params, "id") || fetch_value(ctx.params, "providerId")
       when "/oauth2/callback/:providerId"
         fetch_value(ctx.params, "providerId")
       else

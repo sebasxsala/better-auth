@@ -8,6 +8,12 @@ require_relative "../../test_helper"
 class BetterAuthPluginsGenericOAuthTest < Minitest::Test
   SECRET = "phase-eight-secret-with-enough-entropy-123"
 
+  def test_oauth2_callback_endpoint_is_get_only_like_upstream
+    auth = build_auth
+
+    assert_equal ["GET"], auth.api.endpoints.fetch(:o_auth2_callback).methods
+  end
+
   def test_sign_in_oauth2_generates_authorization_url_with_state_and_scopes
     auth = build_auth
 

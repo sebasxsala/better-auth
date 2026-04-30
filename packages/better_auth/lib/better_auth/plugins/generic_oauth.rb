@@ -243,7 +243,7 @@ module BetterAuth
     def o_auth2_callback_endpoint(config)
       Endpoint.new(
         path: "/oauth2/callback/:providerId",
-        method: ["GET", "POST"],
+        method: "GET",
         metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}
       ) do |ctx|
         query = normalize_hash(ctx.query)

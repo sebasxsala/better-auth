@@ -12,6 +12,12 @@ class BetterAuthRoutesSessionTest < Minitest::Test
     assert_nil auth.api.get_session
   end
 
+  def test_get_session_endpoint_accepts_get_and_post_like_upstream
+    auth = build_auth
+
+    assert_equal ["GET", "POST"], auth.api.endpoints.fetch(:get_session).methods
+  end
+
   def test_get_session_returns_current_session_and_user
     auth = build_auth
     cookie = sign_up_cookie(auth, email: "session@example.com")
