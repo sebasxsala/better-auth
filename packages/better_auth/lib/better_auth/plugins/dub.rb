@@ -31,7 +31,28 @@ module BetterAuth
     end
 
     def dub_link_endpoint(oauth_plugin)
-      Endpoint.new(path: "/dub/link", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/dub/link",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "dubLink",
+            description: "Link a Dub OAuth account",
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Authorization URL generated successfully for linking a Dub account",
+                OpenAPI.object_schema(
+                  {
+                    url: {type: "string"},
+                    redirect: {type: "boolean"}
+                  },
+                  required: ["url", "redirect"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         unless oauth_plugin
           raise APIError.new("NOT_FOUND", message: "Dub OAuth is not configured")
         end

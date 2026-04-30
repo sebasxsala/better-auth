@@ -29,7 +29,23 @@ module BetterAuth
     end
 
     def expo_authorization_proxy_endpoint
-      Endpoint.new(path: "/expo-authorization-proxy", method: "GET") do |ctx|
+      Endpoint.new(
+        path: "/expo-authorization-proxy",
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "expoAuthorizationProxy",
+            description: "Proxy an Expo authorization redirect",
+            parameters: [
+              {in: "query", name: "authorizationURL", required: true, schema: {type: "string", format: "uri"}},
+              {in: "query", name: "oauthState", required: false, schema: {type: "string"}}
+            ],
+            responses: {
+              "302" => {description: "Redirects to the authorization URL"}
+            }
+          }
+        }
+      ) do |ctx|
         authorization_url = ctx.query[:authorizationURL] || ctx.query["authorizationURL"] || ctx.query[:authorization_url] || ctx.query["authorization_url"]
         oauth_state = ctx.query[:oauthState] || ctx.query["oauthState"] || ctx.query[:oauth_state] || ctx.query["oauth_state"]
         raise APIError.new("BAD_REQUEST", message: "Unexpected error") if authorization_url.to_s.empty?

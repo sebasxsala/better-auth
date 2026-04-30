@@ -151,6 +151,23 @@ class BetterAuthRoutesAccountTest < Minitest::Test
     assert_equal "not-valid-encrypted-data", BetterAuth::Routes.oauth_token_value(encrypted_ctx, "not-valid-encrypted-data")
   end
 
+  def test_encrypted_oauth_token_storage_survives_secret_rotation
+    old_auth = build_auth(
+      account: {encrypt_oauth_tokens: true},
+      secrets: [{version: 1, value: "old-account-token-secret-with-enough-entropy"}]
+    )
+    encrypted = BetterAuth::Routes.oauth_token_for_storage(fake_ctx(old_auth), "rotated-oauth-token")
+    new_auth = build_auth(
+      account: {encrypt_oauth_tokens: true},
+      secrets: [
+        {version: 2, value: "new-account-token-secret-with-enough-entropy"},
+        {version: 1, value: "old-account-token-secret-with-enough-entropy"}
+      ]
+    )
+
+    assert_equal "rotated-oauth-token", BetterAuth::Routes.oauth_token_value(fake_ctx(new_auth), encrypted)
+  end
+
   def test_get_access_token_decrypts_stored_tokens_and_refresh_stores_encrypted_values
     refreshed_at = Time.now + 3600
     auth = build_auth(

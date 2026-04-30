@@ -184,6 +184,34 @@ class BetterAuthPluginsTwoFactorTest < Minitest::Test
     assert_equal "boolean", schema.fetch("twoFactor").fetch(:fields).fetch("verified").fetch(:type)
   end
 
+  def test_encrypted_two_factor_values_survive_secret_rotation
+    old_auth = build_auth(
+      secrets: [{version: 1, value: "old-two-factor-secret-with-enough-entropy"}],
+      plugins: [BetterAuth::Plugins.two_factor]
+    )
+    cookie = sign_up_cookie(old_auth, email: "rotated-2fa@example.com")
+    old_auth.api.enable_two_factor(headers: {"cookie" => cookie}, body: {password: "password123"})
+
+    new_auth = build_auth(
+      database: old_auth.context.adapter,
+      secrets: [
+        {version: 2, value: "new-two-factor-secret-with-enough-entropy"},
+        {version: 1, value: "old-two-factor-secret-with-enough-entropy"}
+      ],
+      plugins: [BetterAuth::Plugins.two_factor]
+    )
+    record = new_auth.context.adapter.find_one(model: "twoFactor", where: [{field: "userId", value: user_id(old_auth, cookie)}])
+    secret = BetterAuth::Crypto.symmetric_decrypt(key: new_auth.context.secret_config, data: record.fetch("secret"))
+    backup_codes = BetterAuth::Plugins.two_factor_read_backup_codes(
+      new_auth.context.secret_config,
+      record.fetch("backupCodes"),
+      {store_backup_codes: "encrypted"}
+    )
+
+    assert_match(/\A[A-Z2-7]+=*\z/, secret)
+    assert_equal 10, backup_codes.length
+  end
+
   def test_second_factor_verification_preserves_dont_remember_me_session
     auth = build_auth(plugins: [BetterAuth::Plugins.two_factor(skip_verification_on_enable: true)])
     cookie = sign_up_cookie(auth, email: "dont-remember-2fa@example.com")

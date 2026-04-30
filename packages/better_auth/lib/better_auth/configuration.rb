@@ -35,6 +35,7 @@ module BetterAuth
       :base_path,
       :context_base_url,
       :secret,
+      :secret_config,
       :database,
       :plugins,
       :trusted_origins,
@@ -76,7 +77,15 @@ module BetterAuth
       @trusted_origins_callbacks = []
       @trusted_origins_callbacks << options[:trusted_origins] if options[:trusted_origins].respond_to?(:call)
       @trusted_origins_callback = combined_trusted_origins_callback
-      @secret = resolve_secret(options)
+      legacy_secret = resolve_secret(options, allow_test_default: false)
+      secrets = options.key?(:secrets) ? options[:secrets] : SecretConfig.parse_env(ENV["BETTER_AUTH_SECRETS"])
+      if secrets
+        @secret_config = SecretConfig.build(secrets, legacy_secret, logger: logger)
+        @secret = @secret_config.current_secret
+      else
+        @secret = legacy_secret || (test_environment? ? DEFAULT_SECRET : nil)
+        @secret_config = @secret
+      end
       @base_url_config = options[:base_url]
       @base_url, @context_base_url = normalize_base_url(options[:base_url])
       @session = normalize_session(options[:session])
@@ -125,6 +134,7 @@ module BetterAuth
         base_url: base_url,
         base_path: base_path,
         secret: secret,
+        secret_config: secret_config,
         database: database,
         plugins: plugins,
         trusted_origins: trusted_origins,
@@ -278,9 +288,9 @@ module BetterAuth
       ].find { |value| value && !value.empty? }
     end
 
-    def resolve_secret(options)
+    def resolve_secret(options, allow_test_default: true)
       [options[:secret], ENV["BETTER_AUTH_SECRET"], ENV["AUTH_SECRET"]].find { |value| value && !value.empty? } ||
-        (test_environment? ? DEFAULT_SECRET : nil)
+        ((allow_test_default && test_environment?) ? DEFAULT_SECRET : nil)
     end
 
     def validate_secret

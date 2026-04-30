@@ -73,6 +73,11 @@ module BetterAuth
     end
 
     def symmetric_encrypt(key:, data:)
+      if key.is_a?(SecretConfig)
+        ciphertext = symmetric_encrypt(key: key.current_secret, data: data)
+        return "#{SecretConfig::ENVELOPE_PREFIX}#{key.current_version}$#{ciphertext}"
+      end
+
       cipher = OpenSSL::Cipher.new("aes-256-gcm")
       cipher.encrypt
       cipher.key = OpenSSL::Digest.digest("SHA256", key.to_s)
@@ -88,6 +93,20 @@ module BetterAuth
     end
 
     def symmetric_decrypt(key:, data:)
+      if key.is_a?(SecretConfig)
+        envelope = parse_envelope(data)
+        if envelope
+          secret = key.keys[envelope[:version]]
+          return nil unless secret
+
+          return symmetric_decrypt(key: secret, data: envelope[:ciphertext])
+        end
+
+        return nil unless key.legacy_secret
+
+        return symmetric_decrypt(key: key.legacy_secret, data: data)
+      end
+
       payload = JSON.parse(base64url_decode(data.to_s))
       cipher = OpenSSL::Cipher.new("aes-256-gcm")
       cipher.decrypt
@@ -135,6 +154,19 @@ module BetterAuth
       return value.map { |entry| stringify_keys(entry) } if value.is_a?(Array)
 
       value
+    end
+
+    def parse_envelope(data)
+      value = data.to_s
+      return nil unless value.start_with?(SecretConfig::ENVELOPE_PREFIX)
+
+      rest = value.delete_prefix(SecretConfig::ENVELOPE_PREFIX)
+      version, ciphertext = rest.split("$", 2)
+      return nil if version.to_s.empty? || ciphertext.to_s.empty?
+
+      {version: SecretConfig.parse_version!(version, source: "encrypted envelope"), ciphertext: ciphertext}
+    rescue Error
+      nil
     end
 
     def keccak256_bytes(input)

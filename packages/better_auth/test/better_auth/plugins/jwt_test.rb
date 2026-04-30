@@ -123,6 +123,27 @@ class BetterAuthPluginsJWTTest < Minitest::Test
     assert_match(/BEGIN/, plain_key)
   end
 
+  def test_encrypted_private_key_survives_secret_rotation
+    old_auth = build_auth(
+      secrets: [{version: 1, value: "old-jwt-plugin-secret-with-enough-entropy"}],
+      plugins: [BetterAuth::Plugins.jwt]
+    )
+    old_auth.api.sign_jwt(body: {payload: {sub: "seed"}})
+
+    new_auth = build_auth(
+      database: old_auth.context.adapter,
+      secrets: [
+        {version: 2, value: "new-jwt-plugin-secret-with-enough-entropy"},
+        {version: 1, value: "old-jwt-plugin-secret-with-enough-entropy"}
+      ],
+      plugins: [BetterAuth::Plugins.jwt]
+    )
+
+    signed = new_auth.api.sign_jwt(body: {payload: {sub: "rotated-private-key"}})
+
+    assert_equal "rotated-private-key", new_auth.api.verify_jwt(body: {token: signed[:token]})[:payload]["sub"]
+  end
+
   def test_jwt_rotates_keys_when_latest_key_is_expired
     storage = []
     auth = build_auth(

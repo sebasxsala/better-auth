@@ -13,7 +13,8 @@ module BetterAuth
       :logger,
       :session_config,
       :rate_limit_config,
-      :secret
+      :secret,
+      :secret_config
 
     def initialize(configuration)
       @app_name = configuration.app_name
@@ -30,6 +31,7 @@ module BetterAuth
       @rate_limit_config = configuration.rate_limit
       @trusted_origins = configuration.trusted_origins
       @secret = configuration.secret
+      @secret_config = configuration.secret_config
       @current_session = nil
       @new_session = nil
     end
@@ -130,6 +132,7 @@ module BetterAuth
       @rate_limit_config = options.rate_limit
       @trusted_origins = options.trusted_origins
       @secret = options.secret
+      @secret_config = options.secret_config
     end
 
     def method_missing(name, *arguments, &block)

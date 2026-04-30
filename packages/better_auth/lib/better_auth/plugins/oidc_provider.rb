@@ -113,7 +113,7 @@ module BetterAuth
     end
 
     def oidc_register_endpoint(config)
-      Endpoint.new(path: "/oauth2/register", method: "POST") do |ctx|
+      Endpoint.new(path: "/oauth2/register", method: "POST", metadata: oidc_openapi("registerOAuthApplication", "Register an OAuth2 application", "OAuth2 application registered successfully", oidc_client_schema)) do |ctx|
         session = Routes.current_session(ctx, allow_nil: true)
         unless session || config[:allow_dynamic_client_registration]
           raise APIError.new("UNAUTHORIZED", message: "invalid_token")
@@ -146,7 +146,7 @@ module BetterAuth
     end
 
     def oidc_get_client_endpoint
-      Endpoint.new(path: "/oauth2/client/:id", method: "GET") do |ctx|
+      Endpoint.new(path: "/oauth2/client/:id", method: "GET", metadata: oidc_openapi("getOAuthClient", "Get OAuth2 client details", "OAuth2 client retrieved successfully", oidc_client_schema)) do |ctx|
         client = OAuthProtocol.find_client(ctx, "oauthApplication", ctx.params["id"] || ctx.params[:id])
         raise APIError.new("NOT_FOUND", message: "client not found") unless client
 
@@ -155,7 +155,7 @@ module BetterAuth
     end
 
     def oidc_list_clients_endpoint
-      Endpoint.new(path: "/oauth2/clients", method: "GET") do |ctx|
+      Endpoint.new(path: "/oauth2/clients", method: "GET", metadata: oidc_openapi("listOAuthApplications", "List OAuth2 applications", "OAuth2 applications retrieved successfully", {type: "array", items: oidc_client_schema})) do |ctx|
         session = Routes.current_session(ctx)
         clients = ctx.context.adapter.find_many(model: "oauthApplication", where: [{field: "userId", value: session[:user]["id"]}])
         ctx.json(clients.map { |client| OAuthProtocol.client_response(client, include_secret: false) })
@@ -163,7 +163,7 @@ module BetterAuth
     end
 
     def oidc_update_client_endpoint
-      Endpoint.new(path: "/oauth2/client/:id", method: "PATCH") do |ctx|
+      Endpoint.new(path: "/oauth2/client/:id", method: "PATCH", metadata: oidc_openapi("updateOAuthApplication", "Update an OAuth2 application", "OAuth2 application updated successfully", oidc_client_schema)) do |ctx|
         session = Routes.current_session(ctx)
         client = oidc_find_owned_client!(ctx, session)
         body = OAuthProtocol.stringify_keys(ctx.body)
@@ -191,7 +191,7 @@ module BetterAuth
     end
 
     def oidc_rotate_client_secret_endpoint(config)
-      Endpoint.new(path: "/oauth2/client/:id/rotate-secret", method: "POST") do |ctx|
+      Endpoint.new(path: "/oauth2/client/:id/rotate-secret", method: "POST", metadata: oidc_openapi("rotateOAuthApplicationSecret", "Rotate an OAuth2 application secret", "OAuth2 application secret rotated successfully", oidc_client_schema)) do |ctx|
         session = Routes.current_session(ctx)
         client = oidc_find_owned_client!(ctx, session)
         if OAuthProtocol.stringify_keys(client)["tokenEndpointAuthMethod"] == "none"
@@ -209,7 +209,7 @@ module BetterAuth
     end
 
     def oidc_delete_client_endpoint
-      Endpoint.new(path: "/oauth2/client/:id", method: "DELETE") do |ctx|
+      Endpoint.new(path: "/oauth2/client/:id", method: "DELETE", metadata: oidc_openapi("deleteOAuthApplication", "Delete an OAuth2 application", "OAuth2 application deleted successfully", OpenAPI.success_response_schema)) do |ctx|
         session = Routes.current_session(ctx)
         client = oidc_find_owned_client!(ctx, session)
         ctx.context.adapter.delete(model: "oauthApplication", where: [{field: "id", value: client.fetch("id")}])
@@ -218,7 +218,7 @@ module BetterAuth
     end
 
     def oidc_authorize_endpoint(config)
-      Endpoint.new(path: "/oauth2/authorize", method: "GET") do |ctx|
+      Endpoint.new(path: "/oauth2/authorize", method: "GET", metadata: oidc_openapi("oauth2Authorize", "Authorize an OAuth2 request", "Authorization response generated successfully", {type: "object", additionalProperties: true})) do |ctx|
         query = OAuthProtocol.stringify_keys(ctx.query)
         prompts = OIDCProvider.parse_prompt(query["prompt"])
         session = Routes.current_session(ctx, allow_nil: true)
@@ -308,7 +308,7 @@ module BetterAuth
     end
 
     def oidc_consent_endpoint(config)
-      Endpoint.new(path: "/oauth2/consent", method: "POST") do |ctx|
+      Endpoint.new(path: "/oauth2/consent", method: "POST", metadata: oidc_openapi("oauth2Consent", "Handle OAuth2 consent", "OAuth2 consent handled successfully", oidc_redirect_response_schema)) do |ctx|
         Routes.current_session(ctx)
         body = OAuthProtocol.stringify_keys(ctx.body)
         consent = config[:store][:consents].delete(body["consent_code"].to_s)
@@ -338,7 +338,11 @@ module BetterAuth
     end
 
     def oidc_token_endpoint(config)
-      Endpoint.new(path: "/oauth2/token", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
+      Endpoint.new(
+        path: "/oauth2/token",
+        method: "POST",
+        metadata: oidc_openapi("oauth2Token", "Exchange OAuth2 code for tokens", "OAuth2 tokens issued successfully", oidc_token_response_schema).merge(allowed_media_types: ["application/x-www-form-urlencoded", "application/json"])
+      ) do |ctx|
         body = OAuthProtocol.stringify_keys(ctx.body)
         client = OAuthProtocol.authenticate_client!(ctx, "oauthApplication", store_client_secret: config[:store_client_secret])
         raise APIError.new("UNAUTHORIZED", message: "invalid_client") unless client
@@ -374,13 +378,17 @@ module BetterAuth
     end
 
     def oidc_userinfo_endpoint(config)
-      Endpoint.new(path: "/oauth2/userinfo", method: "GET") do |ctx|
+      Endpoint.new(path: "/oauth2/userinfo", method: "GET", metadata: oidc_openapi("oauth2Userinfo", "Get OAuth2 user information", "User information retrieved successfully", oidc_userinfo_schema)) do |ctx|
         ctx.json(OAuthProtocol.userinfo(config[:store], ctx.headers["authorization"], additional_claim: config[:get_additional_user_info_claim]))
       end
     end
 
     def oidc_introspect_endpoint(config)
-      Endpoint.new(path: "/oauth2/introspect", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
+      Endpoint.new(
+        path: "/oauth2/introspect",
+        method: "POST",
+        metadata: oidc_openapi("oauth2Introspect", "Introspect an OAuth2 token", "OAuth2 token introspection result", oidc_introspection_schema).merge(allowed_media_types: ["application/x-www-form-urlencoded", "application/json"])
+      ) do |ctx|
         OAuthProtocol.authenticate_client!(ctx, "oauthApplication", store_client_secret: config[:store_client_secret])
         body = OAuthProtocol.stringify_keys(ctx.body)
         token = config[:store][:tokens][body["token"].to_s] || config[:store][:refresh_tokens][body["token"].to_s]
@@ -396,7 +404,11 @@ module BetterAuth
     end
 
     def oidc_revoke_endpoint(config)
-      Endpoint.new(path: "/oauth2/revoke", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
+      Endpoint.new(
+        path: "/oauth2/revoke",
+        method: "POST",
+        metadata: oidc_openapi("oauth2Revoke", "Revoke an OAuth2 token", "OAuth2 token revoked successfully", OpenAPI.object_schema({revoked: {type: "boolean"}}, required: ["revoked"])).merge(allowed_media_types: ["application/x-www-form-urlencoded", "application/json"])
+      ) do |ctx|
         OAuthProtocol.authenticate_client!(ctx, "oauthApplication", store_client_secret: config[:store_client_secret])
         body = OAuthProtocol.stringify_keys(ctx.body)
         if (token = config[:store][:tokens][body["token"].to_s] || config[:store][:refresh_tokens][body["token"].to_s])
@@ -407,7 +419,11 @@ module BetterAuth
     end
 
     def oidc_end_session_endpoint
-      Endpoint.new(path: "/oauth2/endsession", method: ["GET", "POST"], metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
+      Endpoint.new(
+        path: "/oauth2/endsession",
+        method: ["GET", "POST"],
+        metadata: oidc_openapi("oauth2EndSession", "RP-Initiated Logout endpoint", "Logout request handled").merge(allowed_media_types: ["application/x-www-form-urlencoded", "application/json"])
+      ) do |ctx|
         input_source = (ctx.method == "GET") ? ctx.query : ctx.body
         input = OAuthProtocol.stringify_keys(input_source)
         if input["post_logout_redirect_uri"]
@@ -423,6 +439,79 @@ module BetterAuth
         redirect = OAuthProtocol.redirect_uri_with_params(redirect, state: input["state"]) if input["state"]
         raise ctx.redirect(redirect)
       end
+    end
+
+    def oidc_openapi(operation_id, description, response_description = "Success", response_schema = {type: "object"})
+      {
+        openapi: {
+          operationId: operation_id,
+          description: description,
+          responses: {
+            "200" => OpenAPI.json_response(response_description, response_schema)
+          }
+        }
+      }
+    end
+
+    def oidc_client_schema
+      OpenAPI.object_schema(
+        {
+          clientId: {type: "string"},
+          clientSecret: {type: ["string", "null"]},
+          name: {type: "string"},
+          redirectUris: {type: "array", items: {type: "string"}},
+          grantTypes: {type: "array", items: {type: "string"}},
+          responseTypes: {type: "array", items: {type: "string"}}
+        },
+        required: ["clientId", "name"]
+      )
+    end
+
+    def oidc_redirect_response_schema
+      OpenAPI.object_schema(
+        {redirectURI: {type: "string", format: "uri"}},
+        required: ["redirectURI"]
+      )
+    end
+
+    def oidc_token_response_schema
+      OpenAPI.object_schema(
+        {
+          access_token: {type: "string"},
+          token_type: {type: "string"},
+          expires_in: {type: "number"},
+          refresh_token: {type: ["string", "null"]},
+          id_token: {type: ["string", "null"]},
+          scope: {type: ["string", "null"]}
+        },
+        required: ["access_token", "token_type", "expires_in"]
+      )
+    end
+
+    def oidc_userinfo_schema
+      OpenAPI.object_schema(
+        {
+          sub: {type: "string"},
+          email: {type: ["string", "null"]},
+          email_verified: {type: ["boolean", "null"]},
+          name: {type: ["string", "null"]},
+          picture: {type: ["string", "null"]}
+        },
+        required: ["sub"]
+      )
+    end
+
+    def oidc_introspection_schema
+      OpenAPI.object_schema(
+        {
+          active: {type: "boolean"},
+          client_id: {type: ["string", "null"]},
+          scope: {type: ["string", "null"]},
+          sub: {type: ["string", "null"]},
+          exp: {type: ["number", "null"]}
+        },
+        required: ["active"]
+      )
     end
 
     def oidc_provider_schema

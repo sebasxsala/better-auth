@@ -3,7 +3,22 @@
 module BetterAuth
   module Routes
     def self.list_accounts
-      Endpoint.new(path: "/list-accounts", method: "GET") do |ctx|
+      Endpoint.new(
+        path: "/list-accounts",
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "listAccounts",
+            description: "List linked accounts for the current user",
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Linked accounts",
+                {type: "array", items: {type: "object", "$ref": "#/components/schemas/Account"}}
+              )
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx)
         accounts = ctx.context.internal_adapter.find_accounts(session[:user]["id"]).map do |account|
           parsed = Schema.parse_output(ctx.context.options, "account", account)
@@ -15,7 +30,28 @@ module BetterAuth
     end
 
     def self.unlink_account
-      Endpoint.new(path: "/unlink-account", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/unlink-account",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "unlinkAccount",
+            description: "Unlink an account from the current user",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  providerId: {type: "string"},
+                  accountId: {type: ["string", "null"]}
+                },
+                required: ["providerId"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Account unlinked", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx, sensitive: true)
         body = normalize_hash(ctx.body)
         accounts = ctx.context.internal_adapter.find_accounts(session[:user]["id"])
@@ -36,7 +72,40 @@ module BetterAuth
     end
 
     def self.get_access_token
-      Endpoint.new(path: "/get-access-token", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/get-access-token",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "getAccessToken",
+            description: "Get an access token for a linked provider account",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  providerId: {type: "string"},
+                  accountId: {type: ["string", "null"]},
+                  userId: {type: ["string", "null"]}
+                },
+                required: ["providerId"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Provider access token",
+                OpenAPI.object_schema(
+                  {
+                    accessToken: {type: ["string", "null"]},
+                    accessTokenExpiresAt: {type: ["string", "null"], format: "date-time"},
+                    scopes: {type: "array", items: {type: "string"}},
+                    idToken: {type: ["string", "null"]}
+                  },
+                  required: ["scopes"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx, allow_nil: true)
         body = normalize_hash(ctx.body)
         user_id = session&.dig(:user, "id") || body["userId"] || body["user_id"]
@@ -67,7 +136,44 @@ module BetterAuth
     end
 
     def self.refresh_token
-      Endpoint.new(path: "/refresh-token", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/refresh-token",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "refreshToken",
+            description: "Refresh an OAuth provider access token",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  providerId: {type: "string"},
+                  accountId: {type: ["string", "null"]},
+                  userId: {type: ["string", "null"]}
+                },
+                required: ["providerId"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Refreshed provider tokens",
+                OpenAPI.object_schema(
+                  {
+                    accessToken: {type: ["string", "null"]},
+                    refreshToken: {type: ["string", "null"]},
+                    accessTokenExpiresAt: {type: ["string", "null"], format: "date-time"},
+                    refreshTokenExpiresAt: {type: ["string", "null"], format: "date-time"},
+                    scope: {type: ["string", "null"]},
+                    idToken: {type: ["string", "null"]},
+                    providerId: {type: "string"},
+                    accountId: {type: "string"}
+                  },
+                  required: ["providerId", "accountId"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx, allow_nil: true)
         body = normalize_hash(ctx.body)
         user_id = session&.dig(:user, "id") || body["userId"] || body["user_id"]
@@ -102,7 +208,27 @@ module BetterAuth
     end
 
     def self.account_info
-      Endpoint.new(path: "/account-info", method: "GET") do |ctx|
+      Endpoint.new(
+        path: "/account-info",
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "accountInfo",
+            description: "Get user info from a linked provider account",
+            parameters: [
+              {
+                name: "accountId",
+                in: "query",
+                required: true,
+                schema: {type: "string"}
+              }
+            ],
+            responses: {
+              "200" => OpenAPI.json_response("Provider user info", {type: "object"})
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx)
         account_id = fetch_value(ctx.query, "accountId")
         account = if account_id
@@ -199,14 +325,14 @@ module BetterAuth
       return token if token.to_s.empty?
       return token unless ctx.context.options.account[:encrypt_oauth_tokens]
 
-      Crypto.symmetric_encrypt(key: ctx.context.secret, data: token)
+      Crypto.symmetric_encrypt(key: ctx.context.secret_config, data: token)
     end
 
     def self.oauth_token_value(ctx, token)
       return token if token.to_s.empty?
       return token unless ctx.context.options.account[:encrypt_oauth_tokens]
 
-      Crypto.symmetric_decrypt(key: ctx.context.secret, data: token) || token
+      Crypto.symmetric_decrypt(key: ctx.context.secret_config, data: token) || token
     end
 
     def self.provider_callable(provider, key)

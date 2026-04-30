@@ -3,7 +3,19 @@
 module BetterAuth
   module Routes
     def self.sign_out
-      Endpoint.new(path: "/sign-out", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/sign-out",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "signOut",
+            description: "Sign out the current session",
+            responses: {
+              "200" => OpenAPI.json_response("Successfully signed out", OpenAPI.success_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         token_cookie = ctx.context.auth_cookies[:session_token]
         token = ctx.get_signed_cookie(token_cookie.name, ctx.context.secret)
         ctx.context.internal_adapter.delete_session(token) if token

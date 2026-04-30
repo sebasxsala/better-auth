@@ -47,7 +47,19 @@ module BetterAuth
     end
 
     def device_code_endpoint(config)
-      Endpoint.new(path: "/device/code", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/device/code",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "requestDeviceCode",
+            description: "Request a device and user code",
+            responses: {
+              "200" => OpenAPI.json_response("Success", device_code_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         body = OAuthProtocol.stringify_keys(ctx.body)
         client_id = body["client_id"]
         if config[:validate_client] && !config[:validate_client].call(client_id)
@@ -86,7 +98,20 @@ module BetterAuth
     end
 
     def device_token_endpoint(config)
-      Endpoint.new(path: "/device/token", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
+      Endpoint.new(
+        path: "/device/token",
+        method: "POST",
+        metadata: {
+          allowed_media_types: ["application/x-www-form-urlencoded", "application/json"],
+          openapi: {
+            operationId: "exchangeDeviceToken",
+            description: "Exchange device code for access token",
+            responses: {
+              "200" => OpenAPI.json_response("Success", device_token_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         body = OAuthProtocol.stringify_keys(ctx.body)
         raise device_authorization_error("BAD_REQUEST", "invalid_request", "Unsupported grant type") unless body["grant_type"] == OAuthProtocol::DEVICE_CODE_GRANT
         if config[:validate_client] && !config[:validate_client].call(body["client_id"])
@@ -141,7 +166,19 @@ module BetterAuth
     end
 
     def device_verify_endpoint
-      Endpoint.new(path: "/device", method: "GET") do |ctx|
+      Endpoint.new(
+        path: "/device",
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "getDeviceVerification",
+            description: "Get device verification status",
+            responses: {
+              "200" => OpenAPI.json_response("Success", device_verification_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         code = normalize_user_code(OAuthProtocol.stringify_keys(ctx.query)["user_code"])
         record = find_device_user_code(ctx, code)
         raise device_authorization_error("BAD_REQUEST", "invalid_request", DEVICE_AUTHORIZATION_ERROR_CODES["INVALID_USER_CODE"]) unless record
@@ -153,7 +190,19 @@ module BetterAuth
     end
 
     def device_approve_endpoint
-      Endpoint.new(path: "/device/approve", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/device/approve",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "approveDevice",
+            description: "Approve a device authorization request",
+            responses: {
+              "200" => OpenAPI.json_response("Success", OpenAPI.success_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         session = Routes.current_session(ctx, allow_nil: true)
         raise device_authorization_error("UNAUTHORIZED", "unauthorized", DEVICE_AUTHORIZATION_ERROR_CODES["AUTHENTICATION_REQUIRED"]) unless session
 
@@ -162,7 +211,19 @@ module BetterAuth
     end
 
     def device_deny_endpoint
-      Endpoint.new(path: "/device/deny", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/device/deny",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "denyDevice",
+            description: "Deny a device authorization request",
+            responses: {
+              "200" => OpenAPI.json_response("Success", OpenAPI.success_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         session = Routes.current_session(ctx, allow_nil: true)
         raise device_authorization_error("UNAUTHORIZED", "unauthorized", DEVICE_AUTHORIZATION_ERROR_CODES["AUTHENTICATION_REQUIRED"]) unless session
 
@@ -189,6 +250,42 @@ module BetterAuth
         update: {"status" => status, "userId" => record["userId"] || session[:user]["id"]}
       )
       ctx.json({success: true})
+    end
+
+    def device_code_response_schema
+      OpenAPI.object_schema(
+        {
+          device_code: {type: "string", description: "The device verification code"},
+          user_code: {type: "string", description: "The user code to display"},
+          verification_uri: {type: "string", format: "uri"},
+          verification_uri_complete: {type: "string", format: "uri"},
+          expires_in: {type: "number"},
+          interval: {type: "number"}
+        },
+        required: ["device_code", "user_code", "verification_uri", "verification_uri_complete", "expires_in", "interval"]
+      )
+    end
+
+    def device_token_response_schema
+      OpenAPI.object_schema(
+        {
+          access_token: {type: "string"},
+          token_type: {type: "string"},
+          expires_in: {type: "number"},
+          scope: {type: "string"}
+        },
+        required: ["access_token", "token_type", "expires_in"]
+      )
+    end
+
+    def device_verification_response_schema
+      OpenAPI.object_schema(
+        {
+          user_code: {type: "string"},
+          status: {type: "string"}
+        },
+        required: ["user_code", "status"]
+      )
     end
 
     def find_device_code(ctx, code)

@@ -66,6 +66,30 @@ auth = BetterAuth.auth(
 )
 ```
 
+### Secret Rotation
+
+Better Auth Ruby supports upstream-style non-destructive rotation for encrypted data through versioned secrets. The first entry is used for new encrypted payloads; older entries remain available for decrypting existing data.
+
+```ruby
+auth = BetterAuth.auth(
+  secret: ENV["BETTER_AUTH_SECRET"], # legacy fallback for older encrypted data
+  secrets: [
+    { version: 2, value: ENV.fetch("BETTER_AUTH_SECRET_V2") },
+    { version: 1, value: ENV.fetch("BETTER_AUTH_SECRET_V1") }
+  ],
+  database: :memory
+)
+```
+
+You can also configure the same list via `BETTER_AUTH_SECRETS`:
+
+```bash
+BETTER_AUTH_SECRETS="2:new-secret-base64,1:old-secret-base64"
+BETTER_AUTH_SECRET="legacy-secret-for-pre-rotation-data"
+```
+
+Signed cookies and HMAC/JWT signatures continue to use the current `secret`, matching upstream Better Auth behavior.
+
 ### Password Hashing
 
 Better Auth Ruby uses upstream-compatible `scrypt` password hashes by default through Ruby's `OpenSSL::KDF.scrypt`, so no extra password-hashing gem is required for the default setup.
