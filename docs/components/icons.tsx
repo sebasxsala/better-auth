@@ -35,6 +35,66 @@ export const Icons = {
 			/>
 		</svg>
 	),
+	sinatra: (props?: SVGProps<any>) => (
+		<svg
+			className={props?.className}
+			xmlns="http://www.w3.org/2000/svg"
+			width="1.2em"
+			height="1.2em"
+			viewBox="0 0 24 24"
+			fill="none"
+			aria-hidden="true"
+		>
+			<path
+				d="M4 11.5c2.4-4 5-6 8-6s5.6 2 8 6"
+				stroke="currentColor"
+				strokeWidth="2"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			/>
+			<path
+				d="M5.5 11.5h13c1.1 0 2 .9 2 2v.5H3.5v-.5c0-1.1.9-2 2-2Z"
+				fill="currentColor"
+			/>
+			<path
+				d="M7 15h10v3.5H7z"
+				stroke="currentColor"
+				strokeWidth="2"
+				strokeLinejoin="round"
+			/>
+		</svg>
+	),
+	hanami: (props?: SVGProps<any>) => (
+		<svg
+			className={props?.className}
+			xmlns="http://www.w3.org/2000/svg"
+			width="1.2em"
+			height="1.2em"
+			viewBox="0 0 24 24"
+			fill="none"
+			aria-hidden="true"
+		>
+			<path
+				d="M12 12c-2.4-1.6-3.3-3.4-2.6-5.2C10 5 12 3.5 12 3.5s2 1.5 2.6 3.3c.7 1.8-.2 3.6-2.6 5.2Z"
+				fill="currentColor"
+			/>
+			<path
+				d="M12 12c1.6-2.4 3.4-3.3 5.2-2.6C19 10 20.5 12 20.5 12s-1.5 2-3.3 2.6c-1.8.7-3.6-.2-5.2-2.6Z"
+				fill="currentColor"
+				opacity=".78"
+			/>
+			<path
+				d="M12 12c2.4 1.6 3.3 3.4 2.6 5.2C14 19 12 20.5 12 20.5S10 19 9.4 17.2c-.7-1.8.2-3.6 2.6-5.2Z"
+				fill="currentColor"
+			/>
+			<path
+				d="M12 12c-1.6 2.4-3.4 3.3-5.2 2.6C5 14 3.5 12 3.5 12S5 10 6.8 9.4c1.8-.7 3.6.2 5.2 2.6Z"
+				fill="currentColor"
+				opacity=".78"
+			/>
+			<circle cx="12" cy="12" r="2" fill="var(--background)" />
+		</svg>
+	),
 	nextJS: (props?: SVGProps<any>) => (
 		<svg
 			className={props?.className}
