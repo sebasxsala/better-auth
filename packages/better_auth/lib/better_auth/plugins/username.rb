@@ -53,7 +53,34 @@ module BetterAuth
           allowed_media_types: [
             "application/x-www-form-urlencoded",
             "application/json"
-          ]
+          ],
+          openapi: {
+            operationId: "signInUsername",
+            description: "Sign in with username and password",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  username: {type: "string"},
+                  password: {type: "string"},
+                  callbackURL: {type: ["string", "null"]},
+                  rememberMe: {type: ["boolean", "null"]}
+                },
+                required: ["username", "password"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Signed in",
+                OpenAPI.object_schema(
+                  {
+                    token: {type: "string"},
+                    user: {type: "object", "$ref": "#/components/schemas/User"}
+                  },
+                  required: ["token", "user"]
+                )
+              )
+            }
+          }
         }
       ) do |ctx|
         body = normalize_hash(ctx.body)
@@ -115,7 +142,35 @@ module BetterAuth
     end
 
     def is_username_available_endpoint(config)
-      Endpoint.new(path: "/is-username-available", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/is-username-available",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "isUsernameAvailable",
+            description: "Check whether a username is available",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  username: {type: "string"}
+                },
+                required: ["username"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Username availability",
+                OpenAPI.object_schema(
+                  {
+                    available: {type: "boolean"}
+                  },
+                  required: ["available"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         body = normalize_hash(ctx.body)
         username = body[:username].to_s
         raise APIError.new("UNPROCESSABLE_ENTITY", message: USERNAME_ERROR_CODES["INVALID_USERNAME"]) if username.empty?

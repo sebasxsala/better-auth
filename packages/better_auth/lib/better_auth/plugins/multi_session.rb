@@ -36,7 +36,25 @@ module BetterAuth
     end
 
     def list_device_sessions_endpoint
-      Endpoint.new(path: "/multi-session/list-device-sessions", method: "GET") do |ctx|
+      Endpoint.new(
+        path: "/multi-session/list-device-sessions",
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "listDeviceSessions",
+            description: "List device sessions",
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Device sessions",
+                {
+                  type: "array",
+                  items: OpenAPI.session_response_schema_pair
+                }
+              )
+            }
+          }
+        }
+      ) do |ctx|
         tokens = verified_multi_session_tokens(ctx)
         sessions = ctx.context.internal_adapter.find_sessions(tokens)
           .reject { |entry| entry[:session]["expiresAt"] && entry[:session]["expiresAt"] <= Time.now }
@@ -47,7 +65,27 @@ module BetterAuth
     end
 
     def set_active_session_endpoint
-      Endpoint.new(path: "/multi-session/set-active", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/multi-session/set-active",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "setActiveSession",
+            description: "Set the active session",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  sessionToken: {type: "string", description: "The session token"}
+                },
+                required: ["sessionToken"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Active session", OpenAPI.session_response_schema_pair)
+            }
+          }
+        }
+      ) do |ctx|
         token = fetch_value(ctx.body, "sessionToken").to_s
         cookie_name = multi_session_cookie_name(ctx, token)
         unless !token.empty? && ctx.get_signed_cookie(cookie_name, ctx.context.secret)
@@ -66,7 +104,27 @@ module BetterAuth
     end
 
     def revoke_device_session_endpoint
-      Endpoint.new(path: "/multi-session/revoke", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/multi-session/revoke",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "revokeDeviceSession",
+            description: "Revoke a device session",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  sessionToken: {type: "string", description: "The session token"}
+                },
+                required: ["sessionToken"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Device session revoked", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         current = Routes.current_session(ctx)
         token = fetch_value(ctx.body, "sessionToken").to_s
         cookie_name = multi_session_cookie_name(ctx, token)

@@ -15,7 +15,38 @@ module BetterAuth
           allowed_media_types: [
             "application/x-www-form-urlencoded",
             "application/json"
-          ]
+          ],
+          openapi: {
+            operationId: "signUpWithEmailAndPassword",
+            description: "Sign up a user using email and password",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  name: {type: "string", description: "The name of the user"},
+                  email: {type: "string", description: "The email of the user"},
+                  password: {type: "string", description: "The password of the user"},
+                  image: {type: "string", description: "The profile image URL of the user"},
+                  callbackURL: {type: "string", description: "The URL to use for email verification callback"},
+                  rememberMe: {type: "boolean", description: "If this is false, the session will not be remembered. Default is `true`."}
+                },
+                required: ["name", "email", "password"]
+              ),
+              required: false
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Successfully created user",
+                OpenAPI.object_schema(
+                  {
+                    token: {type: "string", nullable: true, description: "Authentication token for the session"},
+                    user: {type: "object", "$ref": "#/components/schemas/User"}
+                  },
+                  required: ["user"]
+                )
+              ),
+              "422" => OpenAPI.error_response("Unprocessable Entity. User already exists or failed to create user.")
+            }
+          }
         }
       ) do |ctx|
         options = ctx.context.options

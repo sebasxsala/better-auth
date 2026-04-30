@@ -24,7 +24,37 @@ module BetterAuth
     end
 
     def get_siwe_nonce_endpoint(config)
-      Endpoint.new(path: "/siwe/nonce", method: "POST", body_schema: ->(body) { siwe_nonce_body(body) }) do |ctx|
+      Endpoint.new(
+        path: "/siwe/nonce",
+        method: "POST",
+        body_schema: ->(body) { siwe_nonce_body(body) },
+        metadata: {
+          openapi: {
+            operationId: "getSiweNonce",
+            description: "Generate a nonce for Sign-In with Ethereum",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  walletAddress: {type: "string"},
+                  chainId: {type: ["number", "string", "null"]}
+                },
+                required: ["walletAddress"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "SIWE nonce",
+                OpenAPI.object_schema(
+                  {
+                    nonce: {type: "string"}
+                  },
+                  required: ["nonce"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         body = normalize_hash(ctx.body)
         wallet_address = siwe_normalize_wallet!(body[:wallet_address])
         chain_id = siwe_chain_id(body[:chain_id])
@@ -42,7 +72,42 @@ module BetterAuth
     end
 
     def verify_siwe_message_endpoint(config)
-      Endpoint.new(path: "/siwe/verify", method: "POST", body_schema: ->(body) { siwe_verify_body(body, config) }) do |ctx|
+      Endpoint.new(
+        path: "/siwe/verify",
+        method: "POST",
+        body_schema: ->(body) { siwe_verify_body(body, config) },
+        metadata: {
+          openapi: {
+            operationId: "verifySiweMessage",
+            description: "Verify a Sign-In with Ethereum message",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  walletAddress: {type: "string"},
+                  chainId: {type: ["number", "string", "null"]},
+                  message: {type: "string"},
+                  signature: {type: "string"},
+                  email: {type: ["string", "null"]}
+                },
+                required: ["walletAddress", "message", "signature"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "SIWE message verified",
+                OpenAPI.object_schema(
+                  {
+                    token: {type: "string"},
+                    success: {type: "boolean"},
+                    user: {type: "object"}
+                  },
+                  required: ["token", "success", "user"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         body = normalize_hash(ctx.body)
         wallet_address = siwe_normalize_wallet!(body[:wallet_address])
         chain_id = siwe_chain_id(body[:chain_id])

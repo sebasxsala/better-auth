@@ -3,7 +3,27 @@
 module BetterAuth
   module Routes
     def self.update_user
-      Endpoint.new(path: "/update-user", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/update-user",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "updateUser",
+            description: "Update the current user's profile",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  name: {type: ["string", "null"], description: "The user's name"},
+                  image: {type: ["string", "null"], description: "The user's profile image URL"}
+                }
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("User updated", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx)
         body = normalize_hash(ctx.body)
         raise APIError.new("BAD_REQUEST", message: "Body must be an object") unless body.is_a?(Hash)
@@ -18,7 +38,38 @@ module BetterAuth
     end
 
     def self.change_password
-      Endpoint.new(path: "/change-password", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/change-password",
+        method: "POST",
+        metadata: {
+          openapi: {
+            description: "Change the password of the user",
+            operationId: "changePassword",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  newPassword: {type: "string", description: "The new password to set"},
+                  currentPassword: {type: "string", description: "The current password is required"},
+                  revokeOtherSessions: {type: ["boolean", "null"], description: "Must be a boolean value"}
+                },
+                required: ["newPassword", "currentPassword"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Password successfully changed",
+                OpenAPI.object_schema(
+                  {
+                    token: {type: "string", nullable: true, description: "New session token if other sessions were revoked"},
+                    user: OpenAPI.user_response_schema
+                  },
+                  required: ["user"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx, sensitive: true)
         body = normalize_hash(ctx.body)
         new_password = body["newPassword"] || body["new_password"]
@@ -42,7 +93,27 @@ module BetterAuth
     end
 
     def self.set_password
-      Endpoint.new(path: "/set-password", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/set-password",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "setPassword",
+            description: "Set a password for the current user",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  newPassword: {type: "string", description: "The password to set"}
+                },
+                required: ["newPassword"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Password set", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx, sensitive: true)
         body = normalize_hash(ctx.body)
         new_password = body["newPassword"] || body["new_password"]
@@ -61,7 +132,36 @@ module BetterAuth
     end
 
     def self.delete_user
-      Endpoint.new(path: "/delete-user", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/delete-user",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "deleteUser",
+            description: "Delete the current user",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  password: {type: ["string", "null"], description: "The user's password"},
+                  token: {type: ["string", "null"], description: "Delete account verification token"}
+                }
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "User deleted or verification email sent",
+                OpenAPI.object_schema(
+                  {
+                    success: {type: "boolean"},
+                    message: {type: "string"}
+                  },
+                  required: ["success", "message"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         enabled = ctx.context.options.user.dig(:delete_user, :enabled)
         raise APIError.new("NOT_FOUND") unless enabled
 
@@ -97,7 +197,42 @@ module BetterAuth
     end
 
     def self.delete_user_callback
-      Endpoint.new(path: "/delete-user/callback", method: "GET") do |ctx|
+      Endpoint.new(
+        path: "/delete-user/callback",
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "deleteUserCallback",
+            description: "Delete the current user using a verification token",
+            parameters: [
+              {
+                name: "token",
+                in: "query",
+                required: true,
+                schema: {type: "string"}
+              },
+              {
+                name: "callbackURL",
+                in: "query",
+                required: false,
+                schema: {type: "string"}
+              }
+            ],
+            responses: {
+              "200" => OpenAPI.json_response(
+                "User deleted",
+                OpenAPI.object_schema(
+                  {
+                    success: {type: "boolean"},
+                    message: {type: "string"}
+                  },
+                  required: ["success", "message"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         enabled = ctx.context.options.user.dig(:delete_user, :enabled)
         raise APIError.new("NOT_FOUND") unless enabled
         session = current_session(ctx)
@@ -113,7 +248,43 @@ module BetterAuth
     end
 
     def self.change_email
-      Endpoint.new(path: "/change-email", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/change-email",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "changeEmail",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  callbackURL: {type: ["string", "null"], description: "The URL to redirect to after email verification"},
+                  newEmail: {type: "string", description: "The new email address to set must be a valid email address"}
+                },
+                required: ["newEmail"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Email change request processed successfully",
+                OpenAPI.object_schema(
+                  {
+                    message: {
+                      type: "string",
+                      nullable: true,
+                      enum: ["Email updated", "Verification email sent"],
+                      description: "Status message of the email change process"
+                    },
+                    status: {type: "boolean", description: "Indicates if the request was successful"},
+                    user: {type: "object", "$ref": "#/components/schemas/User"}
+                  },
+                  required: ["status"]
+                )
+              ),
+              "422" => OpenAPI.error_response("Unprocessable Entity. Email already exists")
+            }
+          }
+        }
+      ) do |ctx|
         enabled = ctx.context.options.user.dig(:change_email, :enabled)
         raise APIError.new("BAD_REQUEST", message: "Change email is disabled") unless enabled
         session = current_session(ctx, sensitive: true)

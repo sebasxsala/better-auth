@@ -29,7 +29,27 @@ module BetterAuth
     end
 
     def generate_one_time_token_endpoint(config)
-      Endpoint.new(path: "/one-time-token/generate", method: "GET") do |ctx|
+      Endpoint.new(
+        path: "/one-time-token/generate",
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "generateOneTimeToken",
+            description: "Generate a one-time token for the current session",
+            responses: {
+              "200" => OpenAPI.json_response(
+                "One-time token",
+                OpenAPI.object_schema(
+                  {
+                    token: {type: "string"}
+                  },
+                  required: ["token"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         if config[:disable_client_request] && ctx.request
           raise APIError.new("BAD_REQUEST", message: "Client requests are disabled")
         end
@@ -41,7 +61,27 @@ module BetterAuth
     end
 
     def verify_one_time_token_endpoint(config)
-      Endpoint.new(path: "/one-time-token/verify", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/one-time-token/verify",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "verifyOneTimeToken",
+            description: "Verify a one-time token and restore its session",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  token: {type: "string"}
+                },
+                required: ["token"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Session restored", OpenAPI.session_response_schema_pair)
+            }
+          }
+        }
+      ) do |ctx|
         body = normalize_hash(ctx.body)
         token = body[:token].to_s
         stored_token = one_time_token_stored_value(config, token)

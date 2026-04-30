@@ -3,7 +3,19 @@
 module BetterAuth
   module Routes
     def self.get_session
-      Endpoint.new(path: "/get-session", method: ["GET", "POST"]) do |ctx|
+      Endpoint.new(
+        path: "/get-session",
+        method: ["GET", "POST"],
+        metadata: {
+          openapi: {
+            operationId: "getSession",
+            description: "Get the current session",
+            responses: {
+              "200" => OpenAPI.json_response("Current session or null", OpenAPI.session_response_schema_pair.merge(nullable: true))
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx, allow_nil: true)
         next ctx.json(nil) unless session
 
@@ -17,7 +29,22 @@ module BetterAuth
     end
 
     def self.list_sessions
-      Endpoint.new(path: "/list-sessions", method: "GET") do |ctx|
+      Endpoint.new(
+        path: "/list-sessions",
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "listSessions",
+            description: "List active sessions for the current user",
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Active sessions",
+                {type: "array", items: {type: "object", "$ref": "#/components/schemas/Session"}}
+              )
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx)
         sessions = ctx.context.internal_adapter.list_sessions(session[:user]["id"])
         active = sessions
@@ -29,7 +56,19 @@ module BetterAuth
     end
 
     def self.update_session
-      Endpoint.new(path: "/update-session", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/update-session",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "updateSession",
+            description: "Update the current session",
+            responses: {
+              "200" => OpenAPI.json_response("Updated session", OpenAPI.session_response_schema_pair)
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx, sensitive: true)
         body = Routes.parse_declared_input(ctx, "session", ctx.body, allowed_base: [])
         raise APIError.new("BAD_REQUEST", message: "No fields to update") if body.empty?
@@ -43,7 +82,27 @@ module BetterAuth
     end
 
     def self.revoke_session
-      Endpoint.new(path: "/revoke-session", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/revoke-session",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "revokeSession",
+            description: "Revoke a session by token",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  token: {type: "string", description: "The session token to revoke"}
+                },
+                required: ["token"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Session revoked", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx, sensitive: true)
         body = normalize_hash(ctx.body)
         token = body["token"].to_s
@@ -58,7 +117,19 @@ module BetterAuth
     end
 
     def self.revoke_sessions
-      Endpoint.new(path: "/revoke-sessions", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/revoke-sessions",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "revokeSessions",
+            description: "Revoke all sessions for the current user",
+            responses: {
+              "200" => OpenAPI.json_response("Sessions revoked", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx, sensitive: true)
         ctx.context.internal_adapter.delete_sessions(session[:user]["id"])
         Cookies.delete_session_cookie(ctx)
@@ -67,7 +138,19 @@ module BetterAuth
     end
 
     def self.revoke_other_sessions
-      Endpoint.new(path: "/revoke-other-sessions", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/revoke-other-sessions",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "revokeOtherSessions",
+            description: "Revoke all sessions except the current one",
+            responses: {
+              "200" => OpenAPI.json_response("Other sessions revoked", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx, sensitive: true)
         current_token = session[:session]["token"]
         sessions = ctx.context.internal_adapter.list_sessions(session[:user]["id"])

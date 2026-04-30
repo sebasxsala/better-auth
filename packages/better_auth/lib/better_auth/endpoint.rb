@@ -21,6 +21,7 @@ module BetterAuth
       @params_schema = params_schema
       @headers_schema = headers_schema
       @metadata = metadata || {}
+      apply_default_open_api_metadata!
       @use = Array(use)
       @handler = handler || ->(_ctx) {}
     end
@@ -45,6 +46,14 @@ module BetterAuth
     end
 
     private
+
+    def apply_default_open_api_metadata!
+      return unless path
+      return if metadata[:openapi] || metadata[:hide] || metadata[:SERVER_ONLY] || metadata[:server_only]
+      return unless defined?(BetterAuth::OpenAPI)
+
+      metadata[:openapi] = BetterAuth::OpenAPI.default_metadata(path, methods)
+    end
 
     def apply_schemas!(context)
       context.body = validate_schema(:body, body_schema, context.body)

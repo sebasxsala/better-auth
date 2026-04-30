@@ -139,6 +139,49 @@ class BetterAuthConfigurationTest < Minitest::Test
     end
   end
 
+  def test_versioned_secrets_prefer_current_secret_and_preserve_legacy_secret
+    config = BetterAuth::Configuration.new(
+      secret: "legacy-secret-that-is-long-enough-for-validation",
+      secrets: [
+        {version: 2, value: "new-secret-that-is-long-enough-for-validation"},
+        {version: 1, value: "old-secret-that-is-long-enough-for-validation"}
+      ]
+    )
+
+    assert_equal "new-secret-that-is-long-enough-for-validation", config.secret
+    assert_equal 2, config.secret_config.current_version
+    assert_equal "new-secret-that-is-long-enough-for-validation", config.secret_config.current_secret
+    assert_equal "old-secret-that-is-long-enough-for-validation", config.secret_config.keys.fetch(1)
+    assert_equal "legacy-secret-that-is-long-enough-for-validation", config.secret_config.legacy_secret
+  end
+
+  def test_versioned_secrets_can_be_loaded_from_environment
+    with_env(
+      "BETTER_AUTH_SECRETS" => "2: env-new-secret-that-is-long-enough, 1: env-old-secret-that-is-long-enough",
+      "BETTER_AUTH_SECRET" => "env-legacy-secret-that-is-long-enough"
+    ) do
+      config = BetterAuth::Configuration.new
+
+      assert_equal "env-new-secret-that-is-long-enough", config.secret
+      assert_equal 2, config.secret_config.current_version
+      assert_equal "env-legacy-secret-that-is-long-enough", config.secret_config.legacy_secret
+    end
+  end
+
+  def test_versioned_secrets_reject_invalid_and_duplicate_versions
+    assert_raises(BetterAuth::Error) do
+      BetterAuth::Configuration.new(secrets: [{version: "1e2", value: SECRET}])
+    end
+
+    assert_raises(BetterAuth::Error) do
+      BetterAuth::Configuration.new(secrets: [{version: 1, value: SECRET}, {version: "1", value: SECRET}])
+    end
+
+    with_env("BETTER_AUTH_SECRETS" => "noseparator") do
+      assert_raises(BetterAuth::Error) { BetterAuth::Configuration.new }
+    end
+  end
+
   def test_missing_secret_fails_outside_tests
     with_env("BETTER_AUTH_SECRET" => nil, "AUTH_SECRET" => nil, "RACK_ENV" => "production") do
       error = assert_raises(BetterAuth::Error) { BetterAuth::Configuration.new }
@@ -225,6 +268,7 @@ class BetterAuthConfigurationTest < Minitest::Test
     assert_equal "Better Auth", context.app_name
     assert_equal "http://localhost:3000/api/auth", context.base_url
     assert_equal SECRET, context.secret
+    assert_equal SECRET, context.secret_config
     assert_equal auth.options, context.options
     assert_nil context.current_session
     assert_nil context.new_session

@@ -470,6 +470,38 @@ class BetterAuthPluginsEmailOTPTest < Minitest::Test
     assert_equal first, sent.last[:otp]
   end
 
+  def test_encrypted_email_otp_survives_secret_rotation
+    sent = []
+    old_auth = build_auth(
+      secrets: [{version: 1, value: "old-email-otp-secret-with-enough-entropy"}],
+      plugins: [
+        BetterAuth::Plugins.email_otp(
+          store_otp: "encrypted",
+          send_verification_otp: ->(data, _ctx = nil) { sent << data }
+        )
+      ]
+    )
+    old_auth.api.send_verification_otp(body: {email: "rotated-email-otp@example.com", type: "sign-in"})
+
+    new_auth = build_auth(
+      database: old_auth.context.adapter,
+      secrets: [
+        {version: 2, value: "new-email-otp-secret-with-enough-entropy"},
+        {version: 1, value: "old-email-otp-secret-with-enough-entropy"}
+      ],
+      plugins: [
+        BetterAuth::Plugins.email_otp(
+          store_otp: "encrypted",
+          send_verification_otp: ->(_data, _ctx = nil) {}
+        )
+      ]
+    )
+
+    result = new_auth.api.sign_in_email_otp(body: {email: "rotated-email-otp@example.com", otp: sent.last.fetch(:otp)})
+
+    assert_equal "rotated-email-otp@example.com", result[:user]["email"]
+  end
+
   def test_send_verification_otp_rejects_change_email_type_with_upstream_message
     auth = build_auth(
       plugins: [

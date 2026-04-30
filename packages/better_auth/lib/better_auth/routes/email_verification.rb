@@ -5,7 +5,28 @@ require "uri"
 module BetterAuth
   module Routes
     def self.send_verification_email
-      Endpoint.new(path: "/send-verification-email", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/send-verification-email",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "sendVerificationEmail",
+            description: "Send an email verification link",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  email: {type: "string", description: "The email address to verify"},
+                  callbackURL: {type: ["string", "null"], description: "The URL to redirect to after verification"}
+                },
+                required: ["email"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Verification email sent", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         sender = ctx.context.options.email_verification[:send_verification_email]
         raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["VERIFICATION_EMAIL_NOT_ENABLED"]) unless sender.respond_to?(:call)
 
@@ -32,7 +53,42 @@ module BetterAuth
     end
 
     def self.verify_email
-      Endpoint.new(path: "/verify-email", method: "GET") do |ctx|
+      Endpoint.new(
+        path: "/verify-email",
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "verifyEmail",
+            description: "Verify an email address by token",
+            parameters: [
+              {
+                name: "token",
+                in: "query",
+                required: true,
+                schema: {type: "string"}
+              },
+              {
+                name: "callbackURL",
+                in: "query",
+                required: false,
+                schema: {type: "string"}
+              }
+            ],
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Email verified",
+                OpenAPI.object_schema(
+                  {
+                    status: {type: "boolean"},
+                    user: {type: ["object", "null"], "$ref": "#/components/schemas/User"}
+                  },
+                  required: ["status"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         token = fetch_value(ctx.query, "token").to_s
         callback_url = fetch_value(ctx.query, "callbackURL")
         validate_callback_url!(ctx.context, callback_url)

@@ -85,6 +85,275 @@ class BetterAuthPluginsOpenAPITest < Minitest::Test
     refute_includes social_body.fetch(:required), "idToken"
   end
 
+  def test_core_route_open_api_metadata_lives_on_endpoints
+    {
+      account_info: "accountInfo",
+      change_email: "changeEmail",
+      change_password: "changePassword",
+      callback_oauth: "callbackOAuth",
+      delete_user: "deleteUser",
+      delete_user_callback: "deleteUserCallback",
+      get_access_token: "getAccessToken",
+      get_session: "getSession",
+      link_social: "linkSocial",
+      list_accounts: "listAccounts",
+      list_sessions: "listSessions",
+      refresh_token: "refreshToken",
+      request_password_reset: "requestPasswordReset",
+      request_password_reset_callback: "requestPasswordResetCallback",
+      reset_password: "resetPassword",
+      revoke_other_sessions: "revokeOtherSessions",
+      revoke_session: "revokeSession",
+      revoke_sessions: "revokeSessions",
+      send_verification_email: "sendVerificationEmail",
+      set_password: "setPassword",
+      sign_in_email: "signInEmail",
+      sign_in_social: "socialSignIn",
+      sign_out: "signOut",
+      sign_up_email: "signUpWithEmailAndPassword",
+      unlink_account: "unlinkAccount",
+      update_session: "updateSession",
+      update_user: "updateUser",
+      verify_email: "verifyEmail",
+      verify_password: "verifyPassword"
+    }.each do |route, operation_id|
+      metadata = BetterAuth::Core.base_endpoints.fetch(route).metadata.fetch(:openapi)
+
+      assert_equal operation_id, metadata.fetch(:operationId)
+      assert metadata[:requestBody] || metadata[:responses]
+    end
+  end
+
+  def test_auth_plugin_route_open_api_metadata_lives_on_endpoints
+    {
+      BetterAuth::Plugins.anonymous => {
+        sign_in_anonymous: "signInAnonymous",
+        delete_anonymous_user: "deleteAnonymousUser"
+      },
+      BetterAuth::Plugins.magic_link => {
+        sign_in_magic_link: "signInMagicLink",
+        magic_link_verify: "magicLinkVerify"
+      },
+      BetterAuth::Plugins.one_time_token => {
+        generate_one_time_token: "generateOneTimeToken",
+        verify_one_time_token: "verifyOneTimeToken"
+      },
+      BetterAuth::Plugins.username => {
+        sign_in_username: "signInUsername",
+        is_username_available: "isUsernameAvailable"
+      },
+      BetterAuth::Plugins.phone_number => {
+        sign_in_phone_number: "signInPhoneNumber",
+        send_phone_number_otp: "sendPhoneNumberOTP",
+        verify_phone_number: "verifyPhoneNumber",
+        request_password_reset_phone_number: "requestPasswordResetPhoneNumber",
+        reset_password_phone_number: "resetPasswordPhoneNumber"
+      },
+      BetterAuth::Plugins.email_otp => {
+        send_verification_otp: "sendVerificationOTP",
+        get_verification_otp: "getVerificationOTP",
+        check_verification_otp: "checkVerificationOTP",
+        verify_email_otp: "verifyEmailOTP",
+        sign_in_email_otp: "signInEmailOTP",
+        request_email_change_email_otp: "requestEmailChangeOTP",
+        change_email_email_otp: "changeEmailWithEmailOTP",
+        request_password_reset_email_otp: "requestPasswordResetEmailOTP",
+        forget_password_email_otp: "forgetPasswordEmailOTP",
+        reset_password_email_otp: "resetPasswordEmailOTP"
+      },
+      BetterAuth::Plugins.siwe => {
+        get_siwe_nonce: "getSiweNonce",
+        verify_siwe_message: "verifySiweMessage"
+      }
+    }.each do |plugin, routes|
+      routes.each do |route, operation_id|
+        metadata = plugin.endpoints.fetch(route).metadata.fetch(:openapi)
+
+        assert_equal operation_id, metadata.fetch(:operationId)
+        assert metadata[:requestBody] || metadata[:responses]
+      end
+    end
+  end
+
+  def test_public_plugin_endpoints_receive_default_open_api_metadata
+    endpoint = BetterAuth::Endpoint.new(path: "/custom-plugin-route", method: "POST") {}
+    metadata = endpoint.metadata.fetch(:openapi)
+
+    assert_equal "postCustomPluginRoute", metadata.fetch(:operationId)
+    assert_equal "POST /custom-plugin-route", metadata.fetch(:description)
+  end
+
+  def test_admin_and_multi_session_route_open_api_metadata_lives_on_endpoints
+    {
+      BetterAuth::Plugins.admin => {
+        set_role: "setUserRole",
+        get_user: "getUser",
+        create_user: "createUser",
+        admin_update_user: "adminUpdateUser",
+        list_users: "listUsers",
+        list_user_sessions: "adminListUserSessions",
+        unban_user: "unbanUser",
+        ban_user: "banUser",
+        impersonate_user: "impersonateUser",
+        stop_impersonating: "stopImpersonating",
+        revoke_user_session: "revokeUserSession",
+        revoke_user_sessions: "revokeUserSessions",
+        remove_user: "removeUser",
+        set_user_password: "setUserPassword",
+        user_has_permission: "hasPermission"
+      },
+      BetterAuth::Plugins.multi_session => {
+        list_device_sessions: "listDeviceSessions",
+        set_active_session: "setActiveSession",
+        revoke_device_session: "revokeDeviceSession"
+      }
+    }.each do |plugin, routes|
+      routes.each do |route, operation_id|
+        metadata = plugin.endpoints.fetch(route).metadata.fetch(:openapi)
+
+        assert_equal operation_id, metadata.fetch(:operationId)
+        assert metadata[:requestBody] || metadata[:responses]
+      end
+    end
+  end
+
+  def test_organization_route_open_api_metadata_lives_on_endpoints
+    plugin = BetterAuth::Plugins.organization(
+      teams: {enabled: true},
+      dynamic_access_control: {enabled: true}
+    )
+
+    {
+      create_organization: "createOrganization",
+      check_organization_slug: "checkOrganizationSlug",
+      list_organizations: "listOrganizations",
+      update_organization: "updateOrganization",
+      delete_organization: "deleteOrganization",
+      set_active_organization: "setActiveOrganization",
+      get_full_organization: "getOrganization",
+      create_invitation: "createOrganizationInvitation",
+      accept_invitation: "acceptOrganizationInvitation",
+      reject_invitation: "rejectOrganizationInvitation",
+      cancel_invitation: "cancelOrganizationInvitation",
+      get_invitation: "getOrganizationInvitation",
+      list_invitations: "listOrganizationInvitations",
+      list_user_invitations: "listUserInvitations",
+      add_member: "addOrganizationMember",
+      remove_member: "removeOrganizationMember",
+      update_member_role: "updateOrganizationMemberRole",
+      get_active_member: "getActiveOrganizationMember",
+      get_active_member_role: "getActiveOrganizationMemberRole",
+      leave_organization: "leaveOrganization",
+      list_members: "listOrganizationMembers",
+      has_permission: "hasOrganizationPermission",
+      create_team: "createOrganizationTeam",
+      list_organization_teams: "listOrganizationTeams",
+      update_team: "updateOrganizationTeam",
+      remove_team: "removeOrganizationTeam",
+      set_active_team: "setActiveOrganizationTeam",
+      list_user_teams: "listUserTeams",
+      list_team_members: "listTeamMembers",
+      add_team_member: "addTeamMember",
+      remove_team_member: "removeTeamMember",
+      create_org_role: "createOrganizationRole",
+      list_org_roles: "listOrganizationRoles",
+      get_org_role: "getOrganizationRole",
+      update_org_role: "updateOrganizationRole",
+      delete_org_role: "deleteOrganizationRole"
+    }.each do |route, operation_id|
+      metadata = plugin.endpoints.fetch(route).metadata.fetch(:openapi)
+
+      assert_equal operation_id, metadata.fetch(:operationId)
+      assert metadata.fetch(:responses)
+    end
+  end
+
+  def test_oauth_jwt_mcp_and_device_route_open_api_metadata_lives_on_endpoints
+    {
+      BetterAuth::Plugins.jwt => {
+        get_jwks: "getJSONWebKeySet",
+        get_token: "getJSONWebToken"
+      },
+      BetterAuth::Plugins.generic_oauth(config: []) => {
+        sign_in_with_oauth2: "signInOAuth2",
+        o_auth2_callback: "oauth2Callback",
+        o_auth2_link_account: "linkOAuth2"
+      },
+      BetterAuth::Plugins.device_authorization => {
+        device_code: "requestDeviceCode",
+        device_token: "exchangeDeviceToken",
+        device_verify: "getDeviceVerification",
+        device_approve: "approveDevice",
+        device_deny: "denyDevice"
+      },
+      BetterAuth::Plugins.oauth_proxy => {
+        o_auth_proxy: "oauthProxyCallback"
+      },
+      BetterAuth::Plugins.oidc_provider => {
+        register_o_auth_application: "registerOAuthApplication",
+        get_o_auth_client: "getOAuthClient",
+        list_o_auth_applications: "listOAuthApplications",
+        update_o_auth_application: "updateOAuthApplication",
+        rotate_o_auth_application_secret: "rotateOAuthApplicationSecret",
+        delete_o_auth_application: "deleteOAuthApplication",
+        o_auth2_authorize: "oauth2Authorize",
+        o_auth_consent: "oauth2Consent",
+        o_auth2_token: "oauth2Token",
+        o_auth2_user_info: "oauth2Userinfo",
+        o_auth2_introspect: "oauth2Introspect",
+        o_auth2_revoke: "oauth2Revoke",
+        end_session: "oauth2EndSession"
+      },
+      BetterAuth::Plugins.mcp => {
+        mcp_register: "registerMcpClient",
+        mcp_o_auth_authorize: "mcpOAuthAuthorize",
+        mcp_o_auth_token: "mcpOAuthToken",
+        mcp_o_auth_user_info: "mcpOAuthUserinfo",
+        get_mcp_session: "getMcpSession",
+        mcp_jwks: "getMcpJSONWebKeySet"
+      }
+    }.each do |plugin, routes|
+      routes.each do |route, operation_id|
+        metadata = plugin.endpoints.fetch(route).metadata.fetch(:openapi)
+
+        assert_equal operation_id, metadata.fetch(:operationId)
+        assert metadata.fetch(:responses)
+      end
+    end
+  end
+
+  def test_two_factor_and_small_plugin_route_open_api_metadata_lives_on_endpoints
+    {
+      BetterAuth::Plugins.two_factor => {
+        enable_two_factor: "enableTwoFactor",
+        disable_two_factor: "disableTwoFactor",
+        generate_totp: "generateTOTP",
+        get_totp_uri: "getTOTPURI",
+        verify_totp: "verifyTOTP",
+        send_two_factor_otp: "sendTwoFactorOTP",
+        verify_two_factor_otp: "verifyTwoFactorOTP",
+        verify_backup_code: "verifyBackupCode",
+        generate_backup_codes: "generateBackupCodes"
+      },
+      BetterAuth::Plugins.dub => {
+        dub_link: "dubLink"
+      },
+      BetterAuth::Plugins.expo => {
+        expo_authorization_proxy: "expoAuthorizationProxy"
+      },
+      BetterAuth::Plugins.one_tap => {
+        one_tap_callback: "oneTapCallback"
+      }
+    }.each do |plugin, routes|
+      routes.each do |route, operation_id|
+        metadata = plugin.endpoints.fetch(route).metadata.fetch(:openapi)
+
+        assert_equal operation_id, metadata.fetch(:operationId)
+        assert metadata.fetch(:responses)
+      end
+    end
+  end
+
   def test_open_api_unwraps_default_values_and_boolean_types
     auth = build_auth(plugins: [BetterAuth::Plugins.open_api])
 
@@ -166,7 +435,10 @@ class BetterAuthPluginsOpenAPITest < Minitest::Test
     assert callback
     assert_equal ["Default"], callback[:tags]
     assert_equal [{bearerAuth: []}], callback[:security]
-    assert_equal [], callback[:parameters]
+    assert_equal(
+      [{name: "id", in: "path", required: true, schema: {type: "string"}}],
+      callback[:parameters]
+    )
     assert_includes callback[:responses].keys, "400"
     assert_equal(
       "Bad Request. Usually due to missing parameters, or invalid parameters.",

@@ -29,8 +29,12 @@ module BetterAuth
         },
         metadata: {
           openapi: {
+            operationId: "oneTapCallback",
             summary: "One tap callback",
-            description: "Use this endpoint to authenticate with Google One Tap"
+            description: "Use this endpoint to authenticate with Google One Tap",
+            responses: {
+              "200" => OpenAPI.json_response("Success", OpenAPI.session_response_schema_pair)
+            }
           }
         }
       ) do |ctx|

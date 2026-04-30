@@ -135,7 +135,20 @@ module BetterAuth
     end
 
     def admin_set_role_endpoint(config)
-      Endpoint.new(path: "/admin/set-role", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/admin/set-role",
+        method: "POST",
+        metadata: admin_user_mutation_openapi(
+          operation_id: "setUserRole",
+          description: "Set the role of a user",
+          response_description: "User role updated",
+          properties: {
+            userId: {type: "string", description: "The user id"},
+            role: {type: ["string", "array"], description: "The role or roles to set"}
+          },
+          required: ["userId", "role"]
+        )
+      ) do |ctx|
         admin_require_permission!(ctx, config, {user: ["set-role"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE"))
         body = normalize_hash(ctx.body)
         user_id = body[:user_id].to_s
@@ -147,7 +160,24 @@ module BetterAuth
     end
 
     def admin_get_user_endpoint(config)
-      Endpoint.new(path: "/admin/get-user", method: "GET") do |ctx|
+      Endpoint.new(
+        path: "/admin/get-user",
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "getUser",
+            description: "Get an existing user",
+            parameters: [
+              {name: "id", in: "query", required: false, schema: {type: "string"}},
+              {name: "userId", in: "query", required: false, schema: {type: "string"}},
+              {name: "email", in: "query", required: false, schema: {type: "string"}}
+            ],
+            responses: {
+              "200" => OpenAPI.json_response("User", {type: "object", "$ref": "#/components/schemas/User"})
+            }
+          }
+        }
+      ) do |ctx|
         admin_require_permission!(ctx, config, {user: ["get"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_GET_USER"))
         query = normalize_hash(ctx.query)
         user = if query[:id] || query[:user_id]
@@ -161,7 +191,23 @@ module BetterAuth
     end
 
     def admin_create_user_endpoint(config)
-      Endpoint.new(path: "/admin/create-user", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/admin/create-user",
+        method: "POST",
+        metadata: admin_user_mutation_openapi(
+          operation_id: "createUser",
+          description: "Create a new user",
+          response_description: "User created",
+          properties: {
+            email: {type: "string", description: "The email of the user"},
+            password: {type: ["string", "null"], description: "The password of the user"},
+            name: {type: "string", description: "The name of the user"},
+            role: {type: ["string", "array", "null"], description: "The role or roles of the user"},
+            data: {type: ["object", "null"], description: "Additional user data"}
+          },
+          required: ["email", "name"]
+        )
+      ) do |ctx|
         session = Routes.current_session(ctx, allow_nil: true)
         if session
           unless admin_permission?(session[:user], session[:user]["role"], {user: ["create"]}, config)
@@ -194,7 +240,28 @@ module BetterAuth
     end
 
     def admin_update_user_endpoint(config)
-      Endpoint.new(path: "/admin/update-user", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/admin/update-user",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "adminUpdateUser",
+            description: "Update a user's details",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  userId: {type: "string", description: "The user id"},
+                  data: {type: "object", description: "The user data to update"}
+                },
+                required: ["userId", "data"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("User updated", {type: "object", "$ref": "#/components/schemas/User"})
+            }
+          }
+        }
+      ) do |ctx|
         admin_require_permission!(ctx, config, {user: ["update"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS"))
         body = normalize_hash(ctx.body)
         data = normalize_hash(body[:data] || body).except(:user_id, :data)
@@ -209,7 +276,31 @@ module BetterAuth
     end
 
     def admin_list_users_endpoint(config)
-      Endpoint.new(path: "/admin/list-users", method: "GET") do |ctx|
+      Endpoint.new(
+        path: "/admin/list-users",
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "listUsers",
+            description: "List users",
+            parameters: admin_list_users_parameters,
+            responses: {
+              "200" => OpenAPI.json_response(
+                "List of users",
+                OpenAPI.object_schema(
+                  {
+                    users: {type: "array", items: {type: "object", "$ref": "#/components/schemas/User"}},
+                    total: {type: "number"},
+                    limit: {type: ["number", "null"]},
+                    offset: {type: ["number", "null"]}
+                  },
+                  required: ["users", "total"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         admin_require_permission!(ctx, config, {user: ["list"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_LIST_USERS"))
         query = normalize_hash(ctx.query)
         where = admin_user_where(query)
@@ -228,7 +319,15 @@ module BetterAuth
     end
 
     def admin_list_user_sessions_endpoint(config)
-      Endpoint.new(path: "/admin/list-user-sessions", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/admin/list-user-sessions",
+        method: "POST",
+        metadata: admin_sessions_openapi(
+          operation_id: "adminListUserSessions",
+          description: "List user sessions",
+          response_description: "List of user sessions"
+        )
+      ) do |ctx|
         admin_require_permission!(ctx, config, {session: ["list"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_LIST_USERS_SESSIONS"))
         sessions = ctx.context.internal_adapter.list_sessions(normalize_hash(ctx.body)[:user_id])
         ctx.json({sessions: sessions.map { |session| Schema.parse_output(ctx.context.options, "session", session) }})
@@ -236,7 +335,21 @@ module BetterAuth
     end
 
     def admin_ban_user_endpoint(config)
-      Endpoint.new(path: "/admin/ban-user", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/admin/ban-user",
+        method: "POST",
+        metadata: admin_user_mutation_openapi(
+          operation_id: "banUser",
+          description: "Ban a user",
+          response_description: "User banned",
+          properties: {
+            userId: {type: "string", description: "The user id"},
+            banReason: {type: ["string", "null"], description: "The reason for the ban"},
+            banExpiresIn: {type: ["number", "null"], description: "The number of seconds until the ban expires"}
+          },
+          required: ["userId"]
+        )
+      ) do |ctx|
         session = admin_require_permission!(ctx, config, {user: ["ban"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_BAN_USERS"))
         body = normalize_hash(ctx.body)
         found = ctx.context.internal_adapter.find_user_by_id(body[:user_id])
@@ -250,7 +363,19 @@ module BetterAuth
     end
 
     def admin_unban_user_endpoint(config)
-      Endpoint.new(path: "/admin/unban-user", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/admin/unban-user",
+        method: "POST",
+        metadata: admin_user_mutation_openapi(
+          operation_id: "unbanUser",
+          description: "Unban a user",
+          response_description: "User unbanned",
+          properties: {
+            userId: {type: "string", description: "The user id"}
+          },
+          required: ["userId"]
+        )
+      ) do |ctx|
         admin_require_permission!(ctx, config, {user: ["ban"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_BAN_USERS"))
         user = ctx.context.internal_adapter.update_user(normalize_hash(ctx.body)[:user_id], banned: false, banReason: nil, banExpires: nil, updatedAt: Time.now)
         ctx.json({user: Schema.parse_output(ctx.context.options, "user", user)})
@@ -258,7 +383,27 @@ module BetterAuth
     end
 
     def admin_impersonate_user_endpoint(config)
-      Endpoint.new(path: "/admin/impersonate-user", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/admin/impersonate-user",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "impersonateUser",
+            description: "Impersonate a user",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  userId: {type: "string", description: "The user id"}
+                },
+                required: ["userId"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Impersonation session created", OpenAPI.session_response_schema_pair)
+            }
+          }
+        }
+      ) do |ctx|
         session = admin_require_permission!(ctx, config, {user: ["impersonate"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS"))
         body = normalize_hash(ctx.body)
         target = ctx.context.internal_adapter.find_user_by_id(body[:user_id])
@@ -284,7 +429,19 @@ module BetterAuth
     end
 
     def admin_stop_impersonating_endpoint
-      Endpoint.new(path: "/admin/stop-impersonating", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/admin/stop-impersonating",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "stopImpersonating",
+            description: "Stop impersonating a user",
+            responses: {
+              "200" => OpenAPI.json_response("Impersonation stopped", OpenAPI.session_response_schema_pair)
+            }
+          }
+        }
+      ) do |ctx|
         session = Routes.current_session(ctx, sensitive: true)
         admin_id = session[:session]["impersonatedBy"]
         raise APIError.new("BAD_REQUEST", message: "You are not impersonating anyone") unless admin_id
@@ -312,7 +469,27 @@ module BetterAuth
     end
 
     def admin_revoke_user_session_endpoint(config)
-      Endpoint.new(path: "/admin/revoke-user-session", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/admin/revoke-user-session",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "revokeUserSession",
+            description: "Revoke a user session",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  sessionToken: {type: "string", description: "The session token"}
+                },
+                required: ["sessionToken"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Session revoked", OpenAPI.success_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         admin_require_permission!(ctx, config, {session: ["revoke"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS"))
         ctx.context.internal_adapter.delete_session(normalize_hash(ctx.body)[:session_token])
         ctx.json({success: true})
@@ -320,7 +497,27 @@ module BetterAuth
     end
 
     def admin_revoke_user_sessions_endpoint(config)
-      Endpoint.new(path: "/admin/revoke-user-sessions", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/admin/revoke-user-sessions",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "revokeUserSessions",
+            description: "Revoke all user sessions",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  userId: {type: "string", description: "The user id"}
+                },
+                required: ["userId"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Sessions revoked", OpenAPI.success_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         admin_require_permission!(ctx, config, {session: ["revoke"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS"))
         ctx.context.internal_adapter.delete_sessions(normalize_hash(ctx.body)[:user_id])
         ctx.json({success: true})
@@ -328,7 +525,27 @@ module BetterAuth
     end
 
     def admin_remove_user_endpoint(config)
-      Endpoint.new(path: "/admin/remove-user", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/admin/remove-user",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "removeUser",
+            description: "Remove a user",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  userId: {type: "string", description: "The user id"}
+                },
+                required: ["userId"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("User removed", OpenAPI.success_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         session = admin_require_permission!(ctx, config, {user: ["delete"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS"))
         user_id = normalize_hash(ctx.body)[:user_id]
         raise APIError.new("BAD_REQUEST", message: ADMIN_ERROR_CODES.fetch("YOU_CANNOT_REMOVE_YOURSELF")) if user_id == session[:user]["id"]
@@ -339,7 +556,28 @@ module BetterAuth
     end
 
     def admin_set_user_password_endpoint(config)
-      Endpoint.new(path: "/admin/set-user-password", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/admin/set-user-password",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "setUserPassword",
+            description: "Set a user's password",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  userId: {type: "string", description: "The user id"},
+                  newPassword: {type: "string", description: "The new password"}
+                },
+                required: ["userId", "newPassword"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Password set", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         admin_require_permission!(ctx, config, {user: ["set-password"]}, ADMIN_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_SET_USERS_PASSWORD"))
         body = normalize_hash(ctx.body)
         user_id = body[:user_id].to_s
@@ -355,7 +593,38 @@ module BetterAuth
     end
 
     def admin_has_permission_endpoint(config)
-      Endpoint.new(path: "/admin/has-permission", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/admin/has-permission",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "hasPermission",
+            description: "Check if the user has permission",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  permissions: {type: "object", description: "The permissions to check"},
+                  userId: {type: ["string", "null"], description: "The user id"},
+                  role: {type: ["string", "null"], description: "The role to check"}
+                },
+                required: ["permissions"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Success",
+                OpenAPI.object_schema(
+                  {
+                    error: {type: ["string", "null"]},
+                    success: {type: "boolean"}
+                  },
+                  required: ["success"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         session = Routes.current_session(ctx, allow_nil: true)
         body = normalize_hash(ctx.body)
         permissions = body[:permissions] || body[:permission]
@@ -384,6 +653,64 @@ module BetterAuth
         end
         ctx.json({error: nil, success: admin_permission?(user, role, permissions, config)})
       end
+    end
+
+    def admin_user_mutation_openapi(operation_id:, description:, response_description:, properties:, required:)
+      {
+        openapi: {
+          operationId: operation_id,
+          description: description,
+          requestBody: OpenAPI.json_request_body(OpenAPI.object_schema(properties, required: required)),
+          responses: {
+            "200" => OpenAPI.json_response(
+              response_description,
+              OpenAPI.object_schema(
+                {user: {type: "object", "$ref": "#/components/schemas/User"}},
+                required: ["user"]
+              )
+            )
+          }
+        }
+      }
+    end
+
+    def admin_sessions_openapi(operation_id:, description:, response_description:)
+      {
+        openapi: {
+          operationId: operation_id,
+          description: description,
+          requestBody: OpenAPI.json_request_body(
+            OpenAPI.object_schema(
+              {userId: {type: "string", description: "The user id"}},
+              required: ["userId"]
+            )
+          ),
+          responses: {
+            "200" => OpenAPI.json_response(
+              response_description,
+              OpenAPI.object_schema(
+                {sessions: {type: "array", items: {type: "object", "$ref": "#/components/schemas/Session"}}},
+                required: ["sessions"]
+              )
+            )
+          }
+        }
+      }
+    end
+
+    def admin_list_users_parameters
+      [
+        {name: "searchValue", in: "query", required: false, schema: {type: "string"}},
+        {name: "searchField", in: "query", required: false, schema: {type: "string"}},
+        {name: "searchOperator", in: "query", required: false, schema: {type: "string"}},
+        {name: "limit", in: "query", required: false, schema: {type: "number"}},
+        {name: "offset", in: "query", required: false, schema: {type: "number"}},
+        {name: "sortBy", in: "query", required: false, schema: {type: "string"}},
+        {name: "sortDirection", in: "query", required: false, schema: {type: "string"}},
+        {name: "filterField", in: "query", required: false, schema: {type: "string"}},
+        {name: "filterValue", in: "query", required: false, schema: {type: "string"}},
+        {name: "filterOperator", in: "query", required: false, schema: {type: "string"}}
+      ]
     end
 
     def admin_require_permission!(ctx, config, permissions, message)

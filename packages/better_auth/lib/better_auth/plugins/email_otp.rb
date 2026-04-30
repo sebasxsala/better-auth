@@ -77,7 +77,28 @@ module BetterAuth
     end
 
     def send_verification_otp_endpoint(config)
-      Endpoint.new(path: "/email-otp/send-verification-otp", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/email-otp/send-verification-otp",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "sendVerificationOTP",
+            description: "Send an email verification OTP",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  email: {type: "string"},
+                  type: {type: "string", enum: ["email-verification", "sign-in", "forget-password"]}
+                },
+                required: ["email", "type"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("OTP sent", OpenAPI.success_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         body = normalize_hash(ctx.body)
         email = body[:email].to_s.downcase
         type = body[:type].to_s
@@ -111,7 +132,30 @@ module BetterAuth
     end
 
     def get_verification_otp_endpoint(config)
-      Endpoint.new(path: "/email-otp/get-verification-otp", method: "GET") do |ctx|
+      Endpoint.new(
+        path: "/email-otp/get-verification-otp",
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "getVerificationOTP",
+            description: "Get a stored verification OTP when storage allows plaintext access",
+            parameters: [
+              {name: "email", in: "query", required: true, schema: {type: "string"}},
+              {name: "type", in: "query", required: true, schema: {type: "string"}}
+            ],
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Stored OTP",
+                OpenAPI.object_schema(
+                  {
+                    otp: {type: ["string", "null"]}
+                  }
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         query = normalize_hash(ctx.query)
         email = query[:email].to_s.downcase
         type = query[:type].to_s
@@ -124,7 +168,7 @@ module BetterAuth
         when "hashed"
           raise APIError.new("BAD_REQUEST", message: "OTP is hashed, cannot return the plain text OTP")
         when "encrypted"
-          next ctx.json({otp: Crypto.symmetric_decrypt(key: ctx.context.secret, data: stored_otp)})
+          next ctx.json({otp: Crypto.symmetric_decrypt(key: ctx.context.secret_config, data: stored_otp)})
         end
 
         storage = config[:store_otp]
@@ -139,7 +183,29 @@ module BetterAuth
     end
 
     def check_verification_otp_endpoint(config)
-      Endpoint.new(path: "/email-otp/check-verification-otp", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/email-otp/check-verification-otp",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "checkVerificationOTP",
+            description: "Check an email verification OTP without consuming it",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  email: {type: "string"},
+                  type: {type: "string"},
+                  otp: {type: "string"}
+                },
+                required: ["email", "type", "otp"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("OTP is valid", OpenAPI.success_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         body = normalize_hash(ctx.body)
         email = body[:email].to_s.downcase
         type = body[:type].to_s
@@ -154,7 +220,38 @@ module BetterAuth
     end
 
     def verify_email_otp_endpoint(config)
-      Endpoint.new(path: "/email-otp/verify-email", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/email-otp/verify-email",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "verifyEmailOTP",
+            description: "Verify an email address with an OTP",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  email: {type: "string"},
+                  otp: {type: "string"}
+                },
+                required: ["email", "otp"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Email verified",
+                OpenAPI.object_schema(
+                  {
+                    status: {type: "boolean"},
+                    token: {type: ["string", "null"]},
+                    user: {type: "object", "$ref": "#/components/schemas/User"}
+                  },
+                  required: ["status", "user"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         body = normalize_hash(ctx.body)
         email = body[:email].to_s.downcase
         otp = body[:otp].to_s
@@ -183,7 +280,37 @@ module BetterAuth
     end
 
     def sign_in_email_otp_endpoint(config)
-      Endpoint.new(path: "/sign-in/email-otp", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/sign-in/email-otp",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "signInEmailOTP",
+            description: "Sign in with an email OTP",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  email: {type: "string"},
+                  otp: {type: "string"}
+                },
+                required: ["email", "otp"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Signed in",
+                OpenAPI.object_schema(
+                  {
+                    token: {type: "string"},
+                    user: {type: "object", "$ref": "#/components/schemas/User"}
+                  },
+                  required: ["token", "user"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         body = normalize_hash(ctx.body)
         email = body[:email].to_s.downcase
         otp = body[:otp].to_s
@@ -209,7 +336,28 @@ module BetterAuth
     end
 
     def request_email_change_email_otp_endpoint(config)
-      Endpoint.new(path: "/email-otp/request-email-change", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/email-otp/request-email-change",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "requestEmailChangeOTP",
+            description: "Request an OTP to change the current user's email",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  newEmail: {type: "string"},
+                  otp: {type: ["string", "null"]}
+                },
+                required: ["newEmail"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Change email OTP sent", OpenAPI.success_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         email_otp_change_email_enabled!(config)
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
@@ -235,7 +383,28 @@ module BetterAuth
     end
 
     def change_email_email_otp_endpoint(config)
-      Endpoint.new(path: "/email-otp/change-email", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/email-otp/change-email",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "changeEmailWithEmailOTP",
+            description: "Change the current user's email with an OTP",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  newEmail: {type: "string"},
+                  otp: {type: "string"}
+                },
+                required: ["newEmail", "otp"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Email changed", OpenAPI.success_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         email_otp_change_email_enabled!(config)
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
@@ -259,19 +428,81 @@ module BetterAuth
     end
 
     def request_password_reset_email_otp_endpoint(config)
-      Endpoint.new(path: "/email-otp/request-password-reset", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/email-otp/request-password-reset",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "requestPasswordResetEmailOTP",
+            description: "Request a password reset OTP by email",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  email: {type: "string"}
+                },
+                required: ["email"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Password reset OTP requested", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         email_otp_password_reset_request(ctx, config)
       end
     end
 
     def forget_password_email_otp_endpoint(config)
-      Endpoint.new(path: "/forget-password/email-otp", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/forget-password/email-otp",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "forgetPasswordEmailOTP",
+            description: "Request a password reset OTP by email",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  email: {type: "string"}
+                },
+                required: ["email"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Password reset OTP requested", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         email_otp_password_reset_request(ctx, config)
       end
     end
 
     def reset_password_email_otp_endpoint(config)
-      Endpoint.new(path: "/email-otp/reset-password", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/email-otp/reset-password",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "resetPasswordEmailOTP",
+            description: "Reset a password with an email OTP",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  email: {type: "string"},
+                  otp: {type: "string"},
+                  password: {type: "string"}
+                },
+                required: ["email", "otp", "password"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Password reset", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         body = normalize_hash(ctx.body)
         email = body[:email].to_s.downcase
         otp = body[:otp].to_s
@@ -445,7 +676,7 @@ module BetterAuth
     def email_otp_stored_value(ctx, config, otp)
       storage = config[:store_otp]
       return Crypto.sha256(otp, encoding: :base64url) if storage.to_s == "hashed"
-      return Crypto.symmetric_encrypt(key: ctx.context.secret, data: otp) if storage.to_s == "encrypted"
+      return Crypto.symmetric_encrypt(key: ctx.context.secret_config, data: otp) if storage.to_s == "encrypted"
 
       if storage.is_a?(Hash)
         return storage[:hash].call(otp) if storage[:hash].respond_to?(:call)
@@ -460,7 +691,7 @@ module BetterAuth
       actual, expected = if storage.to_s == "hashed"
         [Crypto.sha256(otp, encoding: :base64url), stored_otp]
       elsif storage.to_s == "encrypted"
-        [Crypto.symmetric_decrypt(key: ctx.context.secret, data: stored_otp), otp]
+        [Crypto.symmetric_decrypt(key: ctx.context.secret_config, data: stored_otp), otp]
       elsif storage.is_a?(Hash) && storage[:hash].respond_to?(:call)
         [storage[:hash].call(otp), stored_otp]
       elsif storage.is_a?(Hash) && storage[:decrypt].respond_to?(:call)
@@ -477,7 +708,7 @@ module BetterAuth
     def email_otp_plain_value(ctx, config, stored_otp)
       storage = config[:store_otp]
       return stored_otp if storage.to_s == "plain" || storage.nil?
-      return Crypto.symmetric_decrypt(key: ctx.context.secret, data: stored_otp) if storage.to_s == "encrypted"
+      return Crypto.symmetric_decrypt(key: ctx.context.secret_config, data: stored_otp) if storage.to_s == "encrypted"
       return storage[:decrypt].call(stored_otp) if storage.is_a?(Hash) && storage[:decrypt].respond_to?(:call)
 
       nil

@@ -124,7 +124,7 @@ module BetterAuth
     end
 
     def mcp_register_endpoint(config)
-      Endpoint.new(path: "/mcp/register", method: "POST") do |ctx|
+      Endpoint.new(path: "/mcp/register", method: "POST", metadata: mcp_openapi("registerMcpClient", "Register an OAuth2 application", "OAuth2 application registered successfully", mcp_client_schema)) do |ctx|
         mcp_set_cors_headers(ctx)
         ctx.json(
           OAuthProtocol.create_client(
@@ -141,7 +141,7 @@ module BetterAuth
     end
 
     def mcp_authorize_endpoint(config)
-      Endpoint.new(path: "/mcp/authorize", method: "GET") do |ctx|
+      Endpoint.new(path: "/mcp/authorize", method: "GET", metadata: mcp_openapi("mcpOAuthAuthorize", "Authorize an OAuth2 request using MCP", "Authorization response generated successfully", {type: "object", additionalProperties: true})) do |ctx|
         query = OAuthProtocol.stringify_keys(ctx.query)
         session = Routes.current_session(ctx, allow_nil: true)
         unless session
@@ -245,7 +245,11 @@ module BetterAuth
     end
 
     def mcp_token_endpoint(config)
-      Endpoint.new(path: "/mcp/token", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
+      Endpoint.new(
+        path: "/mcp/token",
+        method: "POST",
+        metadata: mcp_openapi("mcpOAuthToken", "Exchange OAuth2 code for MCP tokens", "OAuth2 tokens issued successfully", mcp_token_response_schema).merge(allowed_media_types: ["application/x-www-form-urlencoded", "application/json"])
+      ) do |ctx|
         mcp_set_cors_headers(ctx)
         body = OAuthProtocol.stringify_keys(ctx.body)
         client = mcp_authenticate_token_client!(ctx, body, config)
@@ -285,13 +289,13 @@ module BetterAuth
     end
 
     def mcp_userinfo_endpoint(config)
-      Endpoint.new(path: "/mcp/userinfo", method: "GET") do |ctx|
+      Endpoint.new(path: "/mcp/userinfo", method: "GET", metadata: mcp_openapi("mcpOAuthUserinfo", "Get MCP OAuth2 user information", "User information retrieved successfully", mcp_userinfo_schema)) do |ctx|
         ctx.json(OAuthProtocol.userinfo(config[:store], ctx.headers["authorization"]))
       end
     end
 
     def mcp_get_session_endpoint(config)
-      Endpoint.new(path: "/mcp/get-session", method: "GET") do |ctx|
+      Endpoint.new(path: "/mcp/get-session", method: "GET", metadata: mcp_openapi("getMcpSession", "Get the MCP session", "MCP session retrieved successfully", {type: ["object", "null"]})) do |ctx|
         authorization = ctx.headers["authorization"].to_s
         token = authorization.start_with?("Bearer ") ? authorization.delete_prefix("Bearer ").strip : ""
         next ctx.json(nil) if token.empty?
@@ -301,11 +305,67 @@ module BetterAuth
     end
 
     def mcp_jwks_endpoint(config)
-      Endpoint.new(path: "/mcp/jwks", method: "GET") do |ctx|
+      Endpoint.new(path: "/mcp/jwks", method: "GET", metadata: mcp_openapi("getMcpJSONWebKeySet", "Get the MCP JSON Web Key Set", "JSON Web Key Set retrieved successfully", mcp_jwks_response_schema)) do |ctx|
         jwt_config = config[:jwt] || {}
         create_jwk(ctx, jwt_config) if all_jwks(ctx, jwt_config).empty?
         ctx.json({keys: public_jwks(ctx, jwt_config).map { |key| public_jwk(key, jwt_config) }})
       end
+    end
+
+    def mcp_openapi(operation_id, description, response_description, response_schema)
+      {
+        openapi: {
+          operationId: operation_id,
+          description: description,
+          responses: {
+            "200" => OpenAPI.json_response(response_description, response_schema)
+          }
+        }
+      }
+    end
+
+    def mcp_client_schema
+      OpenAPI.object_schema(
+        {
+          clientId: {type: "string"},
+          clientSecret: {type: ["string", "null"]},
+          name: {type: ["string", "null"]},
+          redirectUris: {type: "array", items: {type: "string"}}
+        },
+        required: ["clientId"]
+      )
+    end
+
+    def mcp_token_response_schema
+      OpenAPI.object_schema(
+        {
+          access_token: {type: "string"},
+          token_type: {type: "string"},
+          expires_in: {type: "number"},
+          refresh_token: {type: ["string", "null"]},
+          scope: {type: ["string", "null"]}
+        },
+        required: ["access_token", "token_type", "expires_in"]
+      )
+    end
+
+    def mcp_userinfo_schema
+      OpenAPI.object_schema(
+        {
+          sub: {type: "string"},
+          email: {type: ["string", "null"]},
+          email_verified: {type: ["boolean", "null"]},
+          name: {type: ["string", "null"]}
+        },
+        required: ["sub"]
+      )
+    end
+
+    def mcp_jwks_response_schema
+      OpenAPI.object_schema(
+        {keys: {type: "array", items: {type: "object"}}},
+        required: ["keys"]
+      )
     end
 
     def mcp_normalize_config(config)

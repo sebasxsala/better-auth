@@ -26,7 +26,7 @@ module BetterAuth
           "exp" => Time.now.to_i + expires_in.to_i,
           "jti" => SecureRandom.uuid
         )
-        key = encryption_key(secret, salt)
+        key = encryption_key(current_secret(secret), salt)
         ::JWE.encrypt(JSON.generate(claims), key, alg: ALG, enc: ENC, kid: thumbprint(key))
       end
 
@@ -35,12 +35,17 @@ module BetterAuth
 
         header = protected_header(token)
         return nil unless valid_header?(header)
-        return nil unless header["kid"].nil? || header["kid"] == thumbprint(encryption_key(secret, salt))
 
-        payload = JSON.parse(::JWE.decrypt(token.to_s, encryption_key(secret, salt)))
-        return nil if expired?(payload)
+        decryption_keys(secret, salt, header["kid"]).each do |key|
+          payload = JSON.parse(::JWE.decrypt(token.to_s, key))
+          return nil if expired?(payload)
 
-        payload
+          return payload
+        rescue JSON::ParserError, ::JWE::DecodeError, ::JWE::InvalidData, ::JWE::BadCEK
+          next
+        end
+
+        nil
       rescue JSON::ParserError, ArgumentError, ::JWE::DecodeError, ::JWE::InvalidData, ::JWE::BadCEK
         nil
       end
@@ -55,6 +60,23 @@ module BetterAuth
           "kty" => "oct"
         }
         Crypto.base64url_encode(OpenSSL::Digest.digest("SHA256", JSON.generate(jwk)))
+      end
+
+      def current_secret(secret)
+        secret.is_a?(SecretConfig) ? secret.current_secret : secret
+      end
+
+      def all_secrets(secret)
+        return [[0, secret]] unless secret.is_a?(SecretConfig)
+
+        secret.all_secrets
+      end
+
+      def decryption_keys(secret, salt, kid)
+        keys = all_secrets(secret).map { |_version, value| encryption_key(value, salt) }
+        return keys if kid.nil?
+
+        keys.select { |key| thumbprint(key) == kid }
       end
 
       def protected_header(token)
