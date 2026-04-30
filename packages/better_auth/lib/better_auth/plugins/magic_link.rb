@@ -97,7 +97,8 @@ module BetterAuth
           user = ctx.context.internal_adapter.create_user(
             email: email,
             emailVerified: true,
-            name: name || ""
+            name: name || "",
+            context: ctx
           )
           new_user = true
           redirect_with_error.call("failed_to_create_user") unless user

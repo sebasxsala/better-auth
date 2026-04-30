@@ -225,7 +225,8 @@ module BetterAuth
           "phoneNumber" => phone_number,
           "phoneNumberVerified" => true,
           "emailVerified" => false
-        )
+        ),
+        context: ctx
       )
     end
 

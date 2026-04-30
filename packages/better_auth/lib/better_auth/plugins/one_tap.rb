@@ -61,7 +61,8 @@ module BetterAuth
               providerId: "google",
               accountId: fetch_value(payload, "sub").to_s,
               idToken: id_token
-            }
+            },
+            context: ctx
           )
           raise APIError.new("INTERNAL_SERVER_ERROR", message: "Could not create user") unless created
 

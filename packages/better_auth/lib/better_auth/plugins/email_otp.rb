@@ -195,7 +195,7 @@ module BetterAuth
         else
           raise APIError.new("BAD_REQUEST", message: EMAIL_OTP_ERROR_CODES["INVALID_OTP"]) if config[:disable_sign_up]
 
-          ctx.context.internal_adapter.create_user(email_otp_sign_up_user_data(ctx, body, email))
+          ctx.context.internal_adapter.create_user(email_otp_sign_up_user_data(ctx, body, email), context: ctx)
         end
 
         unless user["emailVerified"]
