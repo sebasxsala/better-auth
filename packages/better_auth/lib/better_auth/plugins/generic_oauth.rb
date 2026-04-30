@@ -52,19 +52,7 @@ module BetterAuth
         data,
         provider_id: "auth0",
         discovery_url: "https://#{domain}/.well-known/openid-configuration",
-        scopes: ["openid", "profile", "email"],
-        get_user_info: ->(tokens) {
-          profile = generic_oauth_fetch_json("https://#{domain}/userinfo", authorization: "Bearer #{fetch_value(tokens, "accessToken")}")
-          return nil unless profile
-
-          {
-            id: fetch_value(profile, "sub"),
-            name: fetch_value(profile, "name") || fetch_value(profile, "nickname"),
-            email: fetch_value(profile, "email"),
-            image: fetch_value(profile, "picture"),
-            emailVerified: fetch_value(profile, "email_verified") || false
-          }
-        }
+        scopes: ["openid", "profile", "email"]
       )
     end
 
@@ -688,24 +676,12 @@ module BetterAuth
       nil
     end
 
-    def generic_oidc_helper_provider(options, provider_id, issuer, discovery_url, user_info_url)
+    def generic_oidc_helper_provider(options, provider_id, issuer, discovery_url, _user_info_url)
       generic_oauth_provider_config(
         options,
         provider_id: provider_id,
         discovery_url: discovery_url,
-        scopes: ["openid", "profile", "email"],
-        get_user_info: ->(tokens) {
-          profile = generic_oauth_fetch_json(user_info_url, authorization: "Bearer #{fetch_value(tokens, "accessToken")}")
-          return nil unless profile
-
-          {
-            id: fetch_value(profile, "sub"),
-            name: fetch_value(profile, "name") || fetch_value(profile, "preferred_username"),
-            email: fetch_value(profile, "email"),
-            image: fetch_value(profile, "picture"),
-            emailVerified: fetch_value(profile, "email_verified") || false
-          }
-        }
+        scopes: ["openid", "profile", "email"]
       )
     end
 
@@ -730,10 +706,20 @@ module BetterAuth
         result[provider_id.to_sym] = {
           id: provider_id,
           name: provider_id,
-          get_user_info: ->(tokens) { generic_oauth_user_info(provider, tokens) },
+          get_user_info: ->(tokens) { generic_oauth_provider_user_info(provider, tokens) },
           refresh_access_token: ->(refresh_token) { generic_oauth_refresh_access_token(context, provider, refresh_token) }
         }
       end
+    end
+
+    def generic_oauth_provider_user_info(provider, tokens)
+      user_info = generic_oauth_user_info(provider, tokens)
+      return nil unless user_info
+
+      {
+        user: generic_oauth_map_user(provider, user_info),
+        data: user_info
+      }
     end
 
     def generic_oauth_refresh_access_token(ctx, provider, refresh_token)

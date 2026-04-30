@@ -127,6 +127,24 @@ class BetterAuthPluginsGenericOAuthTest < Minitest::Test
     assert_equal "/error?error=please_restart_the_process", headers.fetch("location")
   end
 
+  def test_callback_redirects_when_provider_and_mapped_profile_omit_email
+    auth = build_auth(
+      user_info: {id: "missing-email-sub", name: "Missing Email User", emailVerified: true},
+      on_api_error: {error_url: "/error"}
+    )
+    sign_in = auth.api.sign_in_with_oauth2(body: {providerId: "custom", callbackURL: "/dashboard"})
+    state = Rack::Utils.parse_query(URI.parse(sign_in[:url]).query).fetch("state")
+
+    status, headers, _body = auth.api.o_auth2_callback(
+      params: {providerId: "custom"},
+      query: {code: "oauth-code", state: state},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_includes headers.fetch("location"), "error=email_is_missing"
+  end
+
   def test_additional_data_cannot_override_internal_state_fields
     auth = build_auth(on_api_error: {error_url: "/error"})
     _status, headers, body = auth.api.sign_in_with_oauth2(
@@ -249,6 +267,28 @@ class BetterAuthPluginsGenericOAuthTest < Minitest::Test
     user = auth.context.internal_adapter.find_user_by_email("mapped@example.com")[:user]
     assert_equal "Mapped Original Name", user["name"]
     assert_equal true, user["emailVerified"]
+  end
+
+  def test_social_provider_get_user_info_applies_map_profile_to_user_callable
+    auth = build_auth(
+      user_info: {id: "social-provider-sub", email: "social-provider@example.com", name: "Social Provider", emailVerified: true},
+      provider_overrides: {
+        map_profile_to_user: ->(_profile) { {custom_field: "mapped-data"} }
+      }
+    )
+    provider = auth.context.social_providers.fetch(:custom)
+
+    result = provider.fetch(:get_user_info).call(accessToken: "access-token")
+
+    assert_equal "social-provider@example.com", result.fetch(:user).fetch(:email)
+    assert_equal "mapped-data", result.fetch(:user).fetch(:custom_field)
+    assert_equal "social-provider-sub", result.fetch(:data).fetch(:id)
+  end
+
+  def test_oidc_discovery_provider_helpers_do_not_install_custom_user_info_callbacks
+    refute_includes BetterAuth::Plugins.auth0(client_id: "id", client_secret: "secret", domain: "tenant.auth0.com"), :get_user_info
+    refute_includes BetterAuth::Plugins.okta(client_id: "id", client_secret: "secret", issuer: "https://okta.example.com/oauth2/default"), :get_user_info
+    refute_includes BetterAuth::Plugins.keycloak(client_id: "id", client_secret: "secret", issuer: "https://realm.example.com/realms/main"), :get_user_info
   end
 
   def test_state_cookie_is_set_and_cleared_for_database_state_strategy
@@ -559,8 +599,9 @@ class BetterAuthPluginsGenericOAuthTest < Minitest::Test
       query: {accountId: account.fetch("id")}
     )
 
-    assert_equal "info-sub", info[:id] || info["id"]
-    assert_equal "info@example.com", info[:email] || info["email"]
+    assert_equal "info-sub", info.fetch(:user).fetch(:id)
+    assert_equal "info@example.com", info.fetch(:user).fetch(:email)
+    assert_equal "info-sub", info.fetch(:data).fetch(:id)
   end
 
   def test_generic_oauth_provider_refreshes_access_tokens_through_account_routes
