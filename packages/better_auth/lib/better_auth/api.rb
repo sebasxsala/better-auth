@@ -141,7 +141,7 @@ module BetterAuth
       if result.response.is_a?(APIError)
         return error_response(result.response, headers: result.headers) if input[:as_response]
 
-        raise result.response
+        raise error_with_headers(result.response, result.headers)
       end
 
       return result.to_rack_response if input[:as_response]
@@ -166,6 +166,16 @@ module BetterAuth
         status: error.status_code,
         headers: Endpoint::Result.merge_headers(headers, error.headers)
       ).to_rack_response
+    end
+
+    def error_with_headers(error, headers)
+      APIError.new(
+        error.status,
+        message: error.message,
+        headers: Endpoint::Result.merge_headers(headers, error.headers),
+        code: error.code,
+        body: error.body
+      )
     end
 
     def before_hooks

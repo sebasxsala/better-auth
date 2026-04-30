@@ -153,6 +153,7 @@ module BetterAuth
     def headers_from_source(source)
       return {} unless source
       return source.headers if source.respond_to?(:headers)
+      return rack_request_headers(source) if source.respond_to?(:get_header)
       return source if source.is_a?(Hash)
 
       {}
@@ -167,7 +168,9 @@ module BetterAuth
     end
 
     def source_url(source)
-      source.url if source.respond_to?(:url)
+      return source.url if source.respond_to?(:url)
+
+      source.get_header("REQUEST_URI") if source.respond_to?(:get_header)
     end
 
     def dynamic_config?(config)
@@ -190,6 +193,14 @@ module BetterAuth
       return true unless port
 
       port.to_i.between?(1, 65_535)
+    end
+
+    def rack_request_headers(source)
+      {
+        "x-forwarded-host" => source.get_header("HTTP_X_FORWARDED_HOST"),
+        "x-forwarded-proto" => source.get_header("HTTP_X_FORWARDED_PROTO"),
+        "host" => source.get_header("HTTP_HOST")
+      }.compact
     end
   end
 end
