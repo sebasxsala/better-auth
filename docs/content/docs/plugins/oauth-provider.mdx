@@ -141,4 +141,40 @@ Opaque access tokens are returned by default. If a valid `resource` is supplied,
 
 OpenID metadata is available only when `openid` is in configured scopes. `jwks_uri` is advertised only when explicitly configured through `advertised_metadata[:jwks_uri]`, `jwks_uri`, or `jwks[:remote_url]`.
 
+## Organization Integration
+
+OAuth clients can be tied to an active organization or team through the Ruby organization plugin by providing `client_reference` and, when consent should be scoped to the selected organization, `post_login[:consent_reference_id]`.
+
+```ruby
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL"),
+  plugins: [
+    BetterAuth::Plugins.organization(teams: {enabled: true}),
+    BetterAuth::Plugins.oauth_provider(
+      scopes: ["openid", "read:posts"],
+      allow_dynamic_client_registration: true,
+      client_reference: ->(info) { info[:session]["activeOrganizationId"] },
+      post_login: {
+        page: "/select-organization",
+        should_redirect: ->(info) { info[:session]["activeOrganizationId"].to_s.empty? },
+        consent_reference_id: ->(info) { info[:session]["activeOrganizationId"] }
+      }
+    )
+  ]
+)
+```
+
+When `client_reference` returns an organization id, dynamically registered clients store it as `reference_id` and do not store `user_id`. Client list/get/update/delete operations are then scoped through the current `client_reference`.
+
+When `post_login[:consent_reference_id]` returns an organization id, consent records and authorization codes carry that reference. A user who already consented for one organization must consent again after selecting a different organization.
+
+## Support Boundary
+
+This gem implements the OAuth 2.0/OIDC authorization server behavior from upstream `@better-auth/oauth-provider`: metadata, registration, authorization, consent, token, introspection, revocation, userinfo, logout, pairwise subjects, PKCE, organization references, and rate limits.
+
+It does not currently expose an equivalent to upstream `oauthProviderResourceClient`. That upstream client is for protected resource servers: verifying bearer access tokens, generating OAuth protected resource metadata, and returning `WWW-Authenticate` challenges with `resource_metadata`.
+
+MCP support in Ruby currently lives in the core MCP plugin (`BetterAuth::Plugins.mcp`), not in this OAuth provider gem. The upstream OAuth provider MCP tests combine the resource client, MCP SDK transports, and protected-resource metadata helpers. Porting those tests to this gem would require a new public Ruby resource-client API or a dedicated package for protected resource helpers.
+
 {/* Upstream guide is preserved in upstream/docs/content/docs/plugins/oauth-provider.mdx. */}
