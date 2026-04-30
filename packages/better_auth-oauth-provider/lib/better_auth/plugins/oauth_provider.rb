@@ -12,7 +12,7 @@ module BetterAuth
         uri = URI.parse(value.to_s)
         uri.query = nil
         uri.fragment = nil
-        if uri.scheme == "http" && !["localhost", "127.0.0.1"].include?(uri.host)
+        if uri.scheme == "http" && !["localhost", "127.0.0.1", "::1"].include?(uri.hostname || uri.host)
           uri.scheme = "https"
         end
         uri.to_s.sub(%r{/+\z}, "")
@@ -42,17 +42,39 @@ module BetterAuth
         store_client_secret: "plain",
         prefix: {},
         refresh_token_expires_in: 2_592_000,
+        access_token_expires_in: 3600,
+        m2m_access_token_expires_in: 3600,
+        scope_expirations: {},
         store: OAuthProtocol.stores
       }.merge(normalize_hash(options))
 
       Plugin.new(
         id: "oauth-provider",
         version: BetterAuth::OAuthProvider::VERSION,
+        init: oauth_provider_init(config),
         endpoints: oauth_provider_endpoints(config),
         schema: oauth_provider_schema,
         rate_limit: oauth_provider_rate_limits(config),
         options: config
       )
+    end
+
+    def oauth_provider_init(config)
+      lambda do |context|
+        advertised_scopes = Array(config.dig(:advertised_metadata, :scopes_supported)).map(&:to_s)
+        provider_scopes = OAuthProtocol.parse_scopes(config[:scopes])
+        missing_scopes = advertised_scopes - provider_scopes
+        unless missing_scopes.empty?
+          raise APIError.new("BAD_REQUEST", message: "advertised_metadata.scopes_supported #{missing_scopes.first} not found in scopes")
+        end
+        if config[:pairwise_secret] && config[:pairwise_secret].to_s.length < 32
+          raise APIError.new("BAD_REQUEST", message: "pairwise_secret must be at least 32 characters")
+        end
+        if context.options.secondary_storage && !context.options.session[:store_session_in_database]
+          raise APIError.new("BAD_REQUEST", message: "OAuth Provider requires session.store_session_in_database when using secondary storage")
+        end
+        nil
+      end
     end
 
     def oauth_provider_endpoints(config)
@@ -182,7 +204,10 @@ module BetterAuth
           allowed_scopes: config[:client_registration_allowed_scopes] || config[:scopes],
           store_client_secret: config[:store_client_secret],
           prefix: config[:prefix],
-          dynamic_registration: true
+          dynamic_registration: true,
+          pairwise_secret: config[:pairwise_secret],
+          strip_client_metadata: true,
+          reference_id: oauth_client_reference(config, session)
         )
         ctx.json(client, status: 201, headers: {"Cache-Control" => "no-store", "Pragma" => "no-cache"})
       end
@@ -203,7 +228,10 @@ module BetterAuth
           store_client_secret: config[:store_client_secret],
           prefix: config[:prefix],
           dynamic_registration: false,
-          admin: false
+          admin: false,
+          pairwise_secret: config[:pairwise_secret],
+          strip_client_metadata: true,
+          reference_id: oauth_client_reference(config, session)
         )
         ctx.json(client, status: 201, headers: {"Cache-Control" => "no-store", "Pragma" => "no-cache"})
       end
@@ -290,6 +318,13 @@ module BetterAuth
 
     def oauth_admin_create_client_endpoint(config)
       Endpoint.new(path: "/admin/oauth2/create-client", method: "POST", metadata: {server_only: true}) do |ctx|
+        session = nil
+        if config[:client_privileges].respond_to?(:call)
+          session = Routes.current_session(ctx)
+          oauth_assert_client_privilege!(ctx, config, session, "create")
+        elsif config[:client_reference].respond_to?(:call)
+          session = Routes.current_session(ctx, allow_nil: true)
+        end
         body = OAuthProtocol.stringify_keys(ctx.body)
         client = OAuthProtocol.create_client(
           ctx,
@@ -301,7 +336,10 @@ module BetterAuth
           store_client_secret: config[:store_client_secret],
           prefix: config[:prefix],
           dynamic_registration: false,
-          admin: true
+          admin: true,
+          pairwise_secret: config[:pairwise_secret],
+          strip_client_metadata: true,
+          reference_id: oauth_client_reference(config, session)
         )
         ctx.json(client, status: 201, headers: {"Cache-Control" => "no-store", "Pragma" => "no-cache"})
       end
@@ -443,6 +481,7 @@ module BetterAuth
     end
 
     def oauth_authorize_flow(ctx, config, query, continue_post_login: false)
+      query = oauth_resolve_request_uri!(ctx, config, query)
       response_type = query["response_type"].to_s
 
       client = OAuthProtocol.find_client(ctx, "oauthClient", query["client_id"])
@@ -480,6 +519,10 @@ module BetterAuth
         raise ctx.redirect(oauth_prompt_redirect(ctx, config, query, "login"))
       end
 
+      if prompts.include?("login") && !continue_post_login
+        raise ctx.redirect(oauth_prompt_redirect(ctx, config, query, "login"))
+      end
+
       if prompts.include?("select_account") && !continue_post_login
         if prompts.include?("none")
           raise ctx.redirect(OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], error: "account_selection_required", state: query["state"], iss: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx))))
@@ -499,7 +542,8 @@ module BetterAuth
         end
       end
 
-      requires_consent = !client_data["skipConsent"] && (prompts.include?("consent") || !oauth_consent_granted?(ctx, client_data["clientId"], session[:user]["id"], scopes))
+      consent_reference_id = oauth_consent_reference(config, session, scopes)
+      requires_consent = !client_data["skipConsent"] && (prompts.include?("consent") || !oauth_consent_granted?(ctx, client_data["clientId"], session[:user]["id"], scopes, consent_reference_id))
 
       if requires_consent
         if prompts.include?("none")
@@ -512,12 +556,13 @@ module BetterAuth
           session: session,
           client: client,
           scopes: scopes,
+          reference_id: consent_reference_id,
           expires_at: Time.now + 600
         }
         raise ctx.redirect(OAuthProtocol.redirect_uri_with_params(config[:consent_page], consent_code: consent_code, client_id: client_data["clientId"], scope: OAuthProtocol.scope_string(scopes)))
       end
 
-      oauth_redirect_with_code(ctx, config, query, session, client, scopes)
+      oauth_redirect_with_code(ctx, config, query, session, client, scopes, reference_id: consent_reference_id)
     end
 
     def oauth_prompt_redirect(ctx, config, query, type, page: nil)
@@ -593,7 +638,7 @@ module BetterAuth
 
     def oauth_consent_endpoint(config)
       Endpoint.new(path: "/oauth2/consent", method: "POST") do |ctx|
-        Routes.current_session(ctx)
+        current_session = Routes.current_session(ctx)
         body = OAuthProtocol.stringify_keys(ctx.body)
         consent = config[:store][:consents].delete(body["consent_code"].to_s)
         raise APIError.new("BAD_REQUEST", message: "invalid consent_code") unless consent
@@ -611,8 +656,9 @@ module BetterAuth
           raise APIError.new("BAD_REQUEST", message: "invalid_scope")
         end
 
-        oauth_store_consent(ctx, consent[:client], consent[:session], granted_scopes)
-        redirect = oauth_authorization_redirect(ctx, config, query, consent[:session], consent[:client], granted_scopes)
+        reference_id = oauth_consent_reference(config, current_session, granted_scopes) || consent[:reference_id]
+        oauth_store_consent(ctx, consent[:client], consent[:session], granted_scopes, reference_id)
+        redirect = oauth_authorization_redirect(ctx, config, query, consent[:session], consent[:client], granted_scopes, reference_id: reference_id)
         ctx.json({redirectURI: redirect})
       end
     end
@@ -647,26 +693,32 @@ module BetterAuth
             issuer: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx)),
             prefix: config[:prefix],
             refresh_token_expires_in: config[:refresh_token_expires_in],
+            access_token_expires_in: oauth_access_token_expires_in(config, code[:scopes], machine: false),
             audience: audience,
             grant_type: OAuthProtocol::AUTH_CODE_GRANT,
             custom_token_response_fields: config[:custom_token_response_fields],
             custom_access_token_claims: config[:custom_access_token_claims],
+            custom_id_token_claims: config[:custom_id_token_claims],
             jwt_access_token: oauth_jwt_access_token?(config, audience),
             pairwise_secret: config[:pairwise_secret],
             nonce: code[:nonce],
             auth_time: code[:auth_time],
-            reference_id: code[:reference_id]
+            reference_id: code[:reference_id],
+            filter_id_token_claims_by_scope: true
           )
         when OAuthProtocol::CLIENT_CREDENTIALS_GRANT
           requested = OAuthProtocol.parse_scopes(body["scope"])
           allowed = OAuthProtocol.parse_scopes(OAuthProtocol.stringify_keys(client)["scopes"] || config[:scopes])
+          requested = allowed if requested.empty?
           unless requested.all? { |scope| allowed.include?(scope) }
             raise APIError.new("BAD_REQUEST", message: "invalid_scope")
           end
 
-          OAuthProtocol.issue_tokens(ctx, config[:store], model: "oauthAccessToken", client: client, session: {"user" => {}, "session" => {}}, scopes: requested, include_refresh: false, issuer: OAuthProtocol.issuer(ctx), prefix: config[:prefix], audience: audience, grant_type: OAuthProtocol::CLIENT_CREDENTIALS_GRANT, custom_token_response_fields: config[:custom_token_response_fields], custom_access_token_claims: config[:custom_access_token_claims], jwt_access_token: oauth_jwt_access_token?(config, audience), pairwise_secret: config[:pairwise_secret])
+          OAuthProtocol.issue_tokens(ctx, config[:store], model: "oauthAccessToken", client: client, session: {"user" => {}, "session" => {}}, scopes: requested, include_refresh: false, issuer: OAuthProtocol.issuer(ctx), prefix: config[:prefix], audience: audience, grant_type: OAuthProtocol::CLIENT_CREDENTIALS_GRANT, custom_token_response_fields: config[:custom_token_response_fields], custom_access_token_claims: config[:custom_access_token_claims], custom_id_token_claims: config[:custom_id_token_claims], jwt_access_token: oauth_jwt_access_token?(config, audience), pairwise_secret: config[:pairwise_secret], access_token_expires_in: oauth_access_token_expires_in(config, requested, machine: true), filter_id_token_claims_by_scope: true)
         when OAuthProtocol::REFRESH_GRANT
-          OAuthProtocol.refresh_tokens(ctx, config[:store], model: "oauthAccessToken", client: client, refresh_token: body["refresh_token"], scopes: body["scope"], issuer: OAuthProtocol.issuer(ctx), prefix: config[:prefix], refresh_token_expires_in: config[:refresh_token_expires_in], audience: audience, custom_token_response_fields: config[:custom_token_response_fields], custom_access_token_claims: config[:custom_access_token_claims], jwt_access_token: oauth_jwt_access_token?(config, audience), pairwise_secret: config[:pairwise_secret])
+          refresh_record = OAuthProtocol.find_token_by_hint(config[:store], body["refresh_token"].to_s, "refresh_token", prefix: config[:prefix])
+          refresh_scopes = OAuthProtocol.parse_scopes(body["scope"] || refresh_record&.fetch("scopes", nil))
+          OAuthProtocol.refresh_tokens(ctx, config[:store], model: "oauthAccessToken", client: client, refresh_token: body["refresh_token"], scopes: body["scope"], issuer: OAuthProtocol.issuer(ctx), prefix: config[:prefix], refresh_token_expires_in: config[:refresh_token_expires_in], audience: audience, custom_token_response_fields: config[:custom_token_response_fields], custom_access_token_claims: config[:custom_access_token_claims], custom_id_token_claims: config[:custom_id_token_claims], jwt_access_token: oauth_jwt_access_token?(config, audience), pairwise_secret: config[:pairwise_secret], access_token_expires_in: oauth_access_token_expires_in(config, refresh_scopes, machine: false), filter_id_token_claims_by_scope: true)
         else
           raise APIError.new("BAD_REQUEST", message: "unsupported_grant_type")
         end
@@ -674,8 +726,9 @@ module BetterAuth
       end
     end
 
-    def oauth_authorization_redirect(ctx, config, query, session, client, scopes)
+    def oauth_authorization_redirect(ctx, config, query, session, client, scopes, reference_id: nil)
       code = Crypto.random_string(32)
+      client_reference_id = OAuthProtocol.stringify_keys(client)["referenceId"]
       OAuthProtocol.store_code(
         config[:store],
         code: code,
@@ -686,22 +739,24 @@ module BetterAuth
         code_challenge: query["code_challenge"],
         code_challenge_method: query["code_challenge_method"],
         nonce: query["nonce"],
-        reference_id: OAuthProtocol.stringify_keys(client)["referenceId"]
+        reference_id: reference_id || client_reference_id
       )
       OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], code: code, state: query["state"], iss: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx)))
     end
 
-    def oauth_redirect_with_code(ctx, config, query, session, client, scopes)
-      raise ctx.redirect(oauth_authorization_redirect(ctx, config, query, session, client, scopes))
+    def oauth_redirect_with_code(ctx, config, query, session, client, scopes, reference_id: nil)
+      raise ctx.redirect(oauth_authorization_redirect(ctx, config, query, session, client, scopes, reference_id: reference_id))
     end
 
-    def oauth_consent_granted?(ctx, client_id, user_id, scopes)
+    def oauth_consent_granted?(ctx, client_id, user_id, scopes, reference_id = nil)
+      where = [
+        {field: "clientId", value: client_id},
+        {field: "userId", value: user_id}
+      ]
+      where << {field: "referenceId", value: reference_id} if reference_id
       consent = ctx.context.adapter.find_one(
         model: "oauthConsent",
-        where: [
-          {field: "clientId", value: client_id},
-          {field: "userId", value: user_id}
-        ]
+        where: where
       )
       return false unless consent
 
@@ -709,22 +764,32 @@ module BetterAuth
       scopes.all? { |scope| granted.include?(scope) }
     end
 
-    def oauth_store_consent(ctx, client, session, scopes)
+    def oauth_store_consent(ctx, client, session, scopes, reference_id = nil)
       client_id = OAuthProtocol.stringify_keys(client)["clientId"]
       user_id = session[:user]["id"]
+      where = [
+        {field: "clientId", value: client_id},
+        {field: "userId", value: user_id}
+      ]
+      where << {field: "referenceId", value: reference_id} if reference_id
       existing = ctx.context.adapter.find_one(
         model: "oauthConsent",
-        where: [
-          {field: "clientId", value: client_id},
-          {field: "userId", value: user_id}
-        ]
+        where: where
       )
       data = {clientId: client_id, userId: user_id, scopes: scopes}
+      data[:referenceId] = reference_id if reference_id
       if existing
         ctx.context.adapter.update(model: "oauthConsent", where: [{field: "id", value: existing.fetch("id")}], update: data)
       else
         ctx.context.adapter.create(model: "oauthConsent", data: data)
       end
+    end
+
+    def oauth_consent_reference(config, session, scopes)
+      callback = config.dig(:post_login, :consent_reference_id) || config.dig(:post_login, :consentReferenceId)
+      return nil unless callback.respond_to?(:call)
+
+      callback.call({user: session[:user], session: session[:session], scopes: scopes})
     end
 
     def oauth_introspect_endpoint(config)
@@ -738,8 +803,12 @@ module BetterAuth
             active: true,
             client_id: token["clientId"],
             scope: OAuthProtocol.scope_string(token["scope"] || token["scopes"]),
-            sub: token.dig("user", "id"),
-            exp: token["expiresAt"]&.to_i
+            sub: token["subject"] || token.dig("user", "id"),
+            iss: token["issuer"],
+            iat: token["issuedAt"]&.to_i,
+            exp: token["expiresAt"]&.to_i,
+            sid: token["sessionId"],
+            aud: token["audience"]
           })
         end
 
@@ -752,6 +821,12 @@ module BetterAuth
       Endpoint.new(path: "/oauth2/revoke", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
         OAuthProtocol.authenticate_client!(ctx, "oauthClient", store_client_secret: config[:store_client_secret], prefix: config[:prefix])
         body = OAuthProtocol.stringify_keys(ctx.body)
+        if body["token_type_hint"].to_s == "access_token" && OAuthProtocol.find_token_by_hint(config[:store], body["token"].to_s, "refresh_token", prefix: config[:prefix])
+          raise APIError.new("BAD_REQUEST", message: "invalid_request")
+        end
+        if body["token_type_hint"].to_s == "refresh_token" && OAuthProtocol.find_token_by_hint(config[:store], body["token"].to_s, "access_token", prefix: config[:prefix])
+          raise APIError.new("BAD_REQUEST", message: "invalid_request")
+        end
         if (token = OAuthProtocol.find_token_by_hint(config[:store], body["token"].to_s, body["token_type_hint"], prefix: config[:prefix]))
           token["revoked"] = Time.now
         end
@@ -761,7 +836,7 @@ module BetterAuth
 
     def oauth_userinfo_endpoint(config)
       Endpoint.new(path: "/oauth2/userinfo", method: "GET") do |ctx|
-        ctx.json(OAuthProtocol.userinfo(config[:store], ctx.headers["authorization"], additional_claim: config[:custom_user_info_claims] || config[:additional_claim], prefix: config[:prefix]))
+        ctx.json(OAuthProtocol.userinfo(config[:store], ctx.headers["authorization"], additional_claim: config[:custom_user_info_claims] || config[:additional_claim], prefix: config[:prefix], jwt_secret: ctx.context.secret))
       end
     end
 
@@ -813,6 +888,28 @@ module BetterAuth
       )
     end
 
+    def oauth_resolve_request_uri!(ctx, config, query)
+      query = OAuthProtocol.stringify_keys(query)
+      return query if query["request_uri"].to_s.empty?
+
+      resolver = config[:request_uri_resolver]
+      unless resolver.respond_to?(:call)
+        return oauth_invalid_request_uri!(ctx, query, "request_uri not supported")
+      end
+
+      resolved = resolver.call({request_uri: query["request_uri"], client_id: query["client_id"], context: ctx})
+      return oauth_invalid_request_uri!(ctx, query, "request_uri is invalid or expired") unless resolved
+
+      OAuthProtocol.stringify_keys(resolved)
+    end
+
+    def oauth_invalid_request_uri!(ctx, query, description)
+      redirect_uri = query["redirect_uri"]
+      raise APIError.new("BAD_REQUEST", message: "invalid_request_uri") if redirect_uri.to_s.empty?
+
+      raise ctx.redirect(oauth_authorize_error_redirect(ctx, query, "invalid_request_uri", description))
+    end
+
     def oauth_jwt_access_token?(config, audience)
       !!audience && !config[:disable_jwt_plugin] && !config[:disable_jwt_access_tokens]
     end
@@ -857,6 +954,12 @@ module BetterAuth
         user: session[:user]
       })
       raise APIError.new("UNAUTHORIZED") unless allowed
+    end
+
+    def oauth_client_reference(config, session)
+      return nil unless session && config[:client_reference].respond_to?(:call)
+
+      config[:client_reference].call({user: session[:user], session: session[:session]})
     end
 
     def oauth_client_update_data(source, admin: false)
@@ -955,6 +1058,31 @@ module BetterAuth
         raise APIError.new("BAD_REQUEST", message: "requested resource invalid") unless valid.include?(resource)
       end
       (resources.length == 1) ? resources.first : resources
+    end
+
+    def oauth_access_token_expires_in(config, scopes, machine:)
+      base = machine ? config[:m2m_access_token_expires_in] : config[:access_token_expires_in]
+      expirations = normalize_hash(config[:scope_expirations] || {})
+      matches = OAuthProtocol.parse_scopes(scopes).filter_map do |scope|
+        value = expirations[scope.to_sym] || expirations[scope]
+        oauth_duration_seconds(value) if value
+      end
+      ([base.to_i] + matches).compact.min
+    end
+
+    def oauth_duration_seconds(value)
+      return value.to_i if value.is_a?(Numeric)
+
+      match = value.to_s.match(/\A(\d+)([smhd])?\z/)
+      return value.to_i unless match
+
+      amount = match[1].to_i
+      case match[2]
+      when "m" then amount * 60
+      when "h" then amount * 3600
+      when "d" then amount * 86_400
+      else amount
+      end
     end
 
     def oauth_legacy_get_client_endpoint(config)

@@ -5,3 +5,4 @@ $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 require "minitest/autorun"
 require "better_auth"
 require "better_auth/oauth_provider"
+require_relative "support/oauth_provider_flow_helpers"

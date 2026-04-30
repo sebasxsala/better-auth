@@ -819,7 +819,7 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
       auth.api.o_auth2_user_info(headers: {"authorization" => "Bearer #{tokens[:access_token]}"})
     end
 
-    assert_equal 403, error.status_code
+    assert_equal 400, error.status_code
   end
 
   def test_userinfo_returns_standard_openid_profile_and_email_claims
@@ -1217,8 +1217,7 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
   def test_end_session_validates_id_token_and_redirects_to_registered_logout_uri
     auth = build_auth(scopes: ["openid"])
     cookie = sign_up_cookie(auth)
-    client = auth.api.register_o_auth_client(
-      headers: {"cookie" => cookie},
+    client = auth.api.admin_create_o_auth_client(
       body: {
         redirect_uris: ["https://resource.example/callback"],
         post_logout_redirect_uris: ["https://resource.example/logout"],

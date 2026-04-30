@@ -63,13 +63,15 @@ module BetterAuth
       def loopback_redirect_match?(redirects, redirect_uri)
         requested = URI.parse(redirect_uri.to_s)
         return false unless ["http", "https"].include?(requested.scheme)
-        return false unless loopback_host?(requested.host)
+        requested_host = requested.hostname || requested.host
+        return false unless loopback_host?(requested_host)
 
         redirects.any? do |allowed|
           allowed_uri = URI.parse(allowed.to_s)
+          allowed_host = allowed_uri.hostname || allowed_uri.host
           allowed_uri.scheme == requested.scheme &&
-            loopback_host?(allowed_uri.host) &&
-            allowed_uri.host == requested.host &&
+            loopback_host?(allowed_host) &&
+            allowed_host == requested_host &&
             allowed_uri.path == requested.path &&
             allowed_uri.query == requested.query
         rescue URI::InvalidURIError
@@ -97,7 +99,7 @@ module BetterAuth
         value.to_s.split(",").map(&:strip).reject(&:empty?)
       end
 
-      def create_client(ctx, model:, body:, owner_session: nil, default_auth_method: "client_secret_basic", store_client_secret: "plain", unauthenticated: false, default_scopes: nil, allowed_scopes: nil, prefix: {}, dynamic_registration: false, admin: false)
+      def create_client(ctx, model:, body:, owner_session: nil, default_auth_method: "client_secret_basic", store_client_secret: "plain", unauthenticated: false, default_scopes: nil, allowed_scopes: nil, prefix: {}, dynamic_registration: false, admin: false, pairwise_secret: nil, strip_client_metadata: false, reference_id: nil)
         body = stringify_keys(body || {})
         requested_auth_method = body["token_endpoint_auth_method"] || default_auth_method
         validate_client_metadata_enums!(requested_auth_method, body)
@@ -108,10 +110,13 @@ module BetterAuth
         client_secret = public_client ? nil : Crypto.random_string(32)
         redirects = Array(body["redirect_uris"]).map(&:to_s)
         raise APIError.new("BAD_REQUEST", message: "redirect_uris is required") if redirects.empty?
+        redirects.each { |uri| validate_safe_url!(uri, field: "redirect_uris") }
+        Array(body["post_logout_redirect_uris"]).map(&:to_s).each { |uri| validate_safe_url!(uri, field: "post_logout_redirect_uris") }
 
         grant_types = Array(body["grant_types"] || [AUTH_CODE_GRANT]).map(&:to_s)
         response_types = Array(body["response_types"] || ["code"]).map(&:to_s)
         validate_client_registration!(auth_method, grant_types, response_types, body, unauthenticated: unauthenticated, dynamic_registration: dynamic_registration)
+        validate_pairwise_client!(body, redirects, pairwise_secret)
 
         scopes = parse_scopes(body["scope"] || body["scopes"])
         scopes = parse_scopes(default_scopes) if scopes.empty? && default_scopes
@@ -120,7 +125,7 @@ module BetterAuth
           raise APIError.new("BAD_REQUEST", message: "invalid_scope")
         end
 
-        metadata = stringify_keys(body["metadata"] || {})
+        metadata = client_metadata(body, strip_unknown: strip_client_metadata)
         metadata["software_id"] = body["software_id"] if body["software_id"]
         metadata["software_version"] = body["software_version"] if body["software_version"]
         metadata["software_statement"] = body["software_statement"] if body["software_statement"]
@@ -163,7 +168,8 @@ module BetterAuth
           "metadata" => metadata,
           "disabled" => false
         }
-        data["userId"] = owner_session[:user]["id"] if owner_session
+        data["referenceId"] = reference_id if reference_id
+        data["userId"] = owner_session[:user]["id"] if owner_session && !reference_id
         created = ctx.context.adapter.create(model: model, data: data)
         response = client_response(created).merge(
           client_secret: client_secret ? apply_prefix(client_secret, prefix, :client_secret) : nil,
@@ -192,7 +198,7 @@ module BetterAuth
           type: data["type"],
           user_id: data["userId"],
           reference_id: data["referenceId"],
-          require_pkce: data["requirePKCE"],
+          require_pkce: client_require_pkce(data),
           subject_type: data["subjectType"],
           metadata: metadata,
           contacts: data["contacts"] || [],
@@ -214,6 +220,9 @@ module BetterAuth
         if dynamic_registration && (body["require_pkce"] == false || body["requirePKCE"] == false)
           raise APIError.new("BAD_REQUEST", message: "pkce is required for registered clients")
         end
+        if dynamic_registration && (body["enable_end_session"] || body["enableEndSession"])
+          raise APIError.new("BAD_REQUEST", message: "enable_end_session is not allowed during dynamic client registration")
+        end
         if public_client && grant_types.include?(CLIENT_CREDENTIALS_GRANT)
           raise APIError.new("BAD_REQUEST", message: "public clients cannot use client_credentials")
         end
@@ -226,6 +235,53 @@ module BetterAuth
         if !unauthenticated && auth_method == "none" && body["type"] == "web"
           raise APIError.new("BAD_REQUEST", message: "web clients must be confidential")
         end
+      end
+
+      def validate_pairwise_client!(body, redirects, pairwise_secret)
+        subject_type = body["subject_type"] || body["subjectType"]
+        return unless subject_type == "pairwise"
+
+        raise APIError.new("BAD_REQUEST", message: "pairwise subject_type requires pairwise_secret") if pairwise_secret.to_s.empty?
+
+        hosts = redirects.map { |uri| URI.parse(uri).host }.uniq
+        raise APIError.new("BAD_REQUEST", message: "pairwise redirect_uris must share the same host") if hosts.length > 1
+      rescue URI::InvalidURIError
+        raise APIError.new("BAD_REQUEST", message: "invalid redirect_uris")
+      end
+
+      def validate_safe_url!(value, field:)
+        raise APIError.new("BAD_REQUEST", message: "#{field} is invalid") if value.to_s.empty?
+
+        uri = URI.parse(value.to_s)
+        scheme = uri.scheme.to_s.downcase
+        raise APIError.new("BAD_REQUEST", message: "#{field} is invalid") if scheme.empty?
+        raise APIError.new("BAD_REQUEST", message: "#{field} is invalid") if %w[javascript data vbscript].include?(scheme)
+
+        if scheme == "http"
+          raise APIError.new("BAD_REQUEST", message: "#{field} is invalid") unless ["localhost", "127.0.0.1", "::1"].include?(uri.hostname || uri.host)
+        end
+        true
+      rescue URI::InvalidURIError
+        raise APIError.new("BAD_REQUEST", message: "#{field} is invalid")
+      end
+
+      def client_metadata(body, strip_unknown: false)
+        metadata = stringify_keys(body["metadata"] || {})
+        metadata = metadata.slice("software_id", "software_version", "software_statement", "tos_uri", "policy_uri") if strip_unknown
+        metadata["software_id"] = body["software_id"] if body["software_id"]
+        metadata["software_version"] = body["software_version"] if body["software_version"]
+        metadata["software_statement"] = body["software_statement"] if body["software_statement"]
+        metadata["tos_uri"] = body["tos_uri"] if body["tos_uri"]
+        metadata["policy_uri"] = body["policy_uri"] if body["policy_uri"]
+        metadata
+      end
+
+      def client_require_pkce(data)
+        data = stringify_keys(data || {})
+        return data["requirePKCE"] if data.key?("requirePKCE")
+        return data["requirePkce"] if data.key?("requirePkce")
+
+        nil
       end
 
       def validate_client_metadata_enums!(auth_method, body)
@@ -309,7 +365,11 @@ module BetterAuth
         raise APIError.new("BAD_REQUEST", message: "invalid_grant") if data[:expires_at] <= Time.now
         raise APIError.new("BAD_REQUEST", message: "invalid_grant") unless data[:client_id] == client_id.to_s
         raise APIError.new("BAD_REQUEST", message: "invalid_grant") unless data[:redirect_uri] == redirect_uri.to_s
-        verify_pkce!(data, code_verifier) if data[:code_challenge]
+        if data[:code_challenge]
+          verify_pkce!(data, code_verifier)
+        elsif !code_verifier.to_s.empty?
+          raise APIError.new("BAD_REQUEST", message: "invalid_grant")
+        end
 
         data
       end
@@ -337,12 +397,13 @@ module BetterAuth
       def pkce_required?(client, scopes)
         data = stringify_keys(client)
         return true if parse_scopes(scopes).include?("offline_access")
-        return data["requirePKCE"] unless data["requirePKCE"].nil?
+        require_pkce = client_require_pkce(data)
+        return require_pkce unless require_pkce.nil?
 
         true
       end
 
-      def issue_tokens(ctx, store, model:, client:, session:, scopes:, include_refresh: false, issuer: nil, jwt_audience: nil, access_token_expires_in: 3600, refresh_token_expires_in: 2_592_000, id_token_signer: nil, prefix: {}, audience: nil, grant_type: nil, custom_token_response_fields: nil, custom_access_token_claims: nil, jwt_access_token: false, pairwise_secret: nil, nonce: nil, auth_time: nil, reference_id: nil)
+      def issue_tokens(ctx, store, model:, client:, session:, scopes:, include_refresh: false, issuer: nil, jwt_audience: nil, access_token_expires_in: 3600, refresh_token_expires_in: 2_592_000, id_token_signer: nil, prefix: {}, audience: nil, grant_type: nil, custom_token_response_fields: nil, custom_access_token_claims: nil, custom_id_token_claims: nil, jwt_access_token: false, pairwise_secret: nil, nonce: nil, auth_time: nil, reference_id: nil, filter_id_token_claims_by_scope: false)
         data = stringify_keys(session || {})
         user = stringify_keys(data["user"] || data[:user] || {})
         session_data = stringify_keys(data["session"] || data[:session] || {})
@@ -372,7 +433,11 @@ module BetterAuth
             "expiresAt" => Time.now + refresh_token_expires_in.to_i,
             "createdAt" => Time.now,
             "revoked" => nil,
-            "scopes" => parse_scopes(scope)
+            "scopes" => parse_scopes(scope),
+            "subject" => subject,
+            "audience" => audience,
+            "issuer" => issuer || issuer(ctx),
+            "issuedAt" => Time.now
           }
           created_refresh = schema_model?(ctx, "oauthRefreshToken") ? ctx.context.adapter.create(model: "oauthRefreshToken", data: refresh_record) : nil
           refresh_record = refresh_record.merge("id" => stringify_keys(created_refresh || {})["id"], "user" => user, "session" => session_data, "client" => client_data, "scope" => scope)
@@ -392,7 +457,9 @@ module BetterAuth
             "referenceId" => token_reference_id,
             "authTime" => token_auth_time,
             "refreshId" => refresh_record && refresh_record["id"],
-            "audience" => audience
+            "audience" => audience,
+            "issuer" => issuer || issuer(ctx),
+            "issuedAt" => Time.now
           }
           ctx.context.adapter.create(model: model, data: record)
           stored_record = record.merge("user" => user, "session" => session_data, "client" => client_data)
@@ -404,19 +471,20 @@ module BetterAuth
           access_token: access_token,
           token_type: "Bearer",
           expires_in: access_token_expires_in.to_i,
+          expires_at: expires_at.to_i,
           scope: scope
         }
         response[:audience] = audience if audience
         response[:refresh_token] = refresh_token if refresh_token
-        response[:id_token] = id_token(user.merge("id" => subject), client_data["clientId"], issuer || issuer(ctx), jwt_audience || client_data["clientId"], ctx: ctx, signer: id_token_signer, session_id: session_data["id"], include_sid: !!client_data["enableEndSession"], nonce: nonce, auth_time: token_auth_time) if parse_scopes(scope).include?("openid")
+        response[:id_token] = id_token(user.merge("id" => subject), client_data["clientId"], issuer || issuer(ctx), jwt_audience || client_data["clientId"], ctx: ctx, signer: id_token_signer, session_id: session_data["id"], include_sid: !!client_data["enableEndSession"], nonce: nonce, auth_time: token_auth_time, custom_claims: custom_id_token_claims, scopes: parse_scopes(scope), client: client_data, filter_claims_by_scope: filter_id_token_claims_by_scope) if parse_scopes(scope).include?("openid")
         if custom_token_response_fields.respond_to?(:call)
           extra = custom_token_response_fields.call({grant_type: grant_type, user: user.empty? ? nil : user, scopes: parse_scopes(scope), metadata: stringify_keys(client_data["metadata"] || {})})
-          response.merge!(extra) if extra.is_a?(Hash)
+          response.merge!(stringify_keys(extra).reject { |key, _value| standard_token_response_field?(key) }.transform_keys(&:to_sym)) if extra.is_a?(Hash)
         end
         response
       end
 
-      def refresh_tokens(ctx, store, model:, client:, refresh_token:, scopes: nil, issuer: nil, access_token_expires_in: 3600, refresh_token_expires_in: 2_592_000, id_token_signer: nil, prefix: {}, audience: nil, custom_token_response_fields: nil, custom_access_token_claims: nil, jwt_access_token: false, pairwise_secret: nil)
+      def refresh_tokens(ctx, store, model:, client:, refresh_token:, scopes: nil, issuer: nil, access_token_expires_in: 3600, refresh_token_expires_in: 2_592_000, id_token_signer: nil, prefix: {}, audience: nil, custom_token_response_fields: nil, custom_access_token_claims: nil, custom_id_token_claims: nil, jwt_access_token: false, pairwise_secret: nil, filter_id_token_claims_by_scope: false)
         refresh_token_value = strip_prefix(refresh_token, prefix, :refresh_token)
         data = refresh_token_value ? store[:refresh_tokens][refresh_token_value] : nil
         raise APIError.new("BAD_REQUEST", message: "invalid_grant") unless data
@@ -450,10 +518,12 @@ module BetterAuth
           grant_type: REFRESH_GRANT,
           custom_token_response_fields: custom_token_response_fields,
           custom_access_token_claims: custom_access_token_claims,
+          custom_id_token_claims: custom_id_token_claims,
           jwt_access_token: jwt_access_token,
           pairwise_secret: pairwise_secret,
           auth_time: data["authTime"],
-          reference_id: data["referenceId"]
+          reference_id: data["referenceId"],
+          filter_id_token_claims_by_scope: filter_id_token_claims_by_scope
         )
       end
 
@@ -478,6 +548,9 @@ module BetterAuth
           "azp" => client["clientId"],
           "scope" => scope,
           "sid" => session["id"],
+          "name" => user["name"],
+          "email" => user["email"],
+          "email_verified" => user["emailVerified"],
           "iss" => issuer_value,
           "iat" => Time.now.to_i,
           "exp" => expires_at.to_i
@@ -485,13 +558,20 @@ module BetterAuth
         ::JWT.encode(payload, ctx.context.secret, "HS256")
       end
 
-      def userinfo(store, authorization, additional_claim: nil, prefix: {})
+      def userinfo(store, authorization, additional_claim: nil, prefix: {}, jwt_secret: nil)
+        if authorization.to_s.strip.empty?
+          raise APIError.new(
+            "UNAUTHORIZED",
+            message: "authorization header not found",
+            body: {error: "invalid_request", error_description: "authorization header not found"}
+          )
+        end
         token = authorization.to_s.delete_prefix("Bearer ").strip
         record = token_record(store, token, prefix: prefix)
-        raise APIError.new("UNAUTHORIZED", message: "invalid_token") unless record
+        return jwt_userinfo(token, jwt_secret, additional_claim: additional_claim) unless record
         user = stringify_keys(record["user"])
         scopes = parse_scopes(record["scopes"])
-        raise APIError.new("FORBIDDEN", message: "openid scope is required") unless scopes.include?("openid")
+        raise userinfo_openid_scope_error unless scopes.include?("openid")
 
         response = {sub: record["subject"] || user["id"]}
         response[:name] = user["name"] if scopes.include?("profile")
@@ -511,6 +591,38 @@ module BetterAuth
           response.merge!(extra) if extra.is_a?(Hash)
         end
         response
+      end
+
+      def jwt_userinfo(token, jwt_secret, additional_claim: nil)
+        payload = ::JWT.decode(token, jwt_secret.to_s, true, algorithm: "HS256").first
+        scopes = parse_scopes(payload["scope"])
+        raise userinfo_openid_scope_error unless scopes.include?("openid")
+
+        response = {sub: payload["sub"]}
+        if scopes.include?("profile")
+          response[:name] = payload["name"] if payload["name"]
+          response[:given_name] = payload["name"].to_s.split(/\s+/, 2).first if payload["name"]
+          response[:family_name] = payload["name"].to_s.split(/\s+/, 2).last if payload["name"].to_s.include?(" ")
+        end
+        if scopes.include?("email")
+          response[:email] = payload["email"]
+          response[:email_verified] = !!payload["email_verified"]
+        end
+        if additional_claim.respond_to?(:call)
+          extra = additional_claim.call({user: payload, scopes: scopes, jwt: payload, client: {}})
+          response.merge!(extra) if extra.is_a?(Hash)
+        end
+        response
+      rescue ::JWT::DecodeError
+        raise APIError.new("UNAUTHORIZED", message: "invalid_token")
+      end
+
+      def userinfo_openid_scope_error
+        APIError.new(
+          "BAD_REQUEST",
+          message: "openid scope is required",
+          body: {error: "invalid_request", error_description: "openid scope is required"}
+        )
       end
 
       def find_token_by_hint(store, token, hint, prefix: {})
@@ -588,18 +700,30 @@ module BetterAuth
         end
       end
 
-      def id_token(user, client_id, issuer_value, audience, ctx: nil, signer: nil, session_id: nil, include_sid: false, nonce: nil, auth_time: nil)
+      def id_token(user, client_id, issuer_value, audience, ctx: nil, signer: nil, session_id: nil, include_sid: false, nonce: nil, auth_time: nil, custom_claims: nil, scopes: [], client: {}, filter_claims_by_scope: false)
+        requested_scopes = parse_scopes(scopes)
         payload = {
           sub: user["id"],
           iss: issuer_value,
-          aud: audience || client_id,
-          email: user["email"],
-          email_verified: !!user["emailVerified"],
-          name: user["name"]
+          aud: audience || client_id
         }
+        include_profile_claims = !filter_claims_by_scope || requested_scopes.include?("profile")
+        include_email_claims = !filter_claims_by_scope || requested_scopes.include?("email")
+        payload[:name] = user["name"] if include_profile_claims
+        if include_email_claims
+          payload[:email] = user["email"]
+          payload[:email_verified] = !!user["emailVerified"]
+        end
         payload[:sid] = session_id if include_sid && session_id
         payload[:nonce] = nonce if nonce
         payload[:auth_time] = timestamp_seconds(auth_time) if auth_time
+        if custom_claims.respond_to?(:call)
+          extra = custom_claims.call({user: user, scopes: requested_scopes, client: client})
+          if extra.is_a?(Hash)
+            pinned = %w[sub iss aud exp iat nonce sid]
+            payload.merge!(stringify_keys(extra).except(*pinned).transform_keys(&:to_sym))
+          end
+        end
         return signer.call(ctx, payload) if signer.respond_to?(:call)
 
         Crypto.sign_jwt(
@@ -607,6 +731,10 @@ module BetterAuth
           client_id.to_s.empty? ? "better-auth" : client_id.to_s,
           expires_in: 3600
         )
+      end
+
+      def standard_token_response_field?(key)
+        %w[access_token token_type expires_in scope refresh_token id_token audience].include?(key.to_s)
       end
 
       def subject_identifier(user_id, client, pairwise_secret)
@@ -633,12 +761,27 @@ module BetterAuth
       end
 
       def timestamp_seconds(value)
-        return value.to_i if value.is_a?(Integer)
-        return value.to_i if value.is_a?(Float)
-        return value.to_i if value.respond_to?(:to_i) && !value.is_a?(String)
+        if value.is_a?(Numeric)
+          return nil unless value.finite?
+          return nil if value.abs > 8_640_000_000_000_000
+
+          return (value / 1000.0).floor if value.abs >= 100_000_000_000
+
+          return value.to_i
+        end
+        if value.is_a?(String) && value.match?(/\A[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[-+]?\d+)?\z/i)
+          numeric = value.to_f
+          return nil unless numeric.finite?
+          return nil if numeric.abs > 8_640_000_000_000_000
+
+          return (numeric / 1000.0).floor if numeric.abs >= 100_000_000_000
+
+          return numeric.to_i
+        end
+        return timestamp_seconds(value.to_i) if value.respond_to?(:to_i) && !value.is_a?(String)
 
         Time.parse(value.to_s).to_i
-      rescue ArgumentError, TypeError
+      rescue ArgumentError, TypeError, FloatDomainError
         nil
       end
 
