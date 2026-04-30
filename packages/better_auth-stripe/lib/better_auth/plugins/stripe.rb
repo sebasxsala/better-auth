@@ -257,13 +257,14 @@ module BetterAuth
           raise APIError.new("BAD_REQUEST", message: STRIPE_ERROR_CODES.fetch("SUBSCRIPTION_NOT_FOUND")) unless subscription_to_update && subscription_to_update["referenceId"] == reference_id
         end
 
+        subscriptions = subscription_to_update ? [subscription_to_update] : ctx.context.adapter.find_many(model: "subscription", where: [{field: "referenceId", value: reference_id}])
+        reference_customer_id = subscriptions.find { |entry| entry["stripeCustomerId"] }&.fetch("stripeCustomerId", nil)
         customer_id = if customer_type == "organization"
-          subscription_to_update&.fetch("stripeCustomerId", nil) || stripe_organization_customer(config, ctx, reference_id, body[:metadata])
+          subscription_to_update&.fetch("stripeCustomerId", nil) || reference_customer_id || stripe_organization_customer(config, ctx, reference_id, body[:metadata])
         else
-          subscription_to_update&.fetch("stripeCustomerId", nil) || user["stripeCustomerId"] || stripe_create_customer(config, ctx, user, body[:metadata])
+          subscription_to_update&.fetch("stripeCustomerId", nil) || reference_customer_id || user["stripeCustomerId"] || stripe_create_customer(config, ctx, user, body[:metadata])
         end
 
-        subscriptions = subscription_to_update ? [subscription_to_update] : ctx.context.adapter.find_many(model: "subscription", where: [{field: "referenceId", value: reference_id}])
         active_or_trialing = subscriptions.find { |entry| stripe_active_or_trialing?(entry) }
         active_stripe_subscriptions = stripe_active_subscriptions(config, customer_id)
         active_stripe = active_stripe_subscriptions.find do |entry|
@@ -295,6 +296,8 @@ module BetterAuth
         end
 
         if active_stripe
+          stripe_release_plugin_schedule(ctx, config, customer_id, active_stripe, active_or_trialing || subscription_to_update)
+
           if body[:schedule_at_period_end]
             url = stripe_schedule_plan_change(ctx, config, active_stripe, active_or_trialing, plan, price_id, requested_seats, seat_only_plan, body)
             next ctx.json({url: url, redirect: stripe_redirect?(body)})
@@ -517,7 +520,13 @@ module BetterAuth
         subscription_id = query[:subscription_id]
         if checkout_session_id
           callback = callback.to_s.gsub("{CHECKOUT_SESSION_ID}", checkout_session_id.to_s)
-          checkout_session = stripe_client(config || {}).checkout.sessions.retrieve(checkout_session_id)
+          checkout_session = begin
+            stripe_client(config || {}).checkout.sessions.retrieve(checkout_session_id)
+          rescue
+            nil
+          end
+          raise ctx.redirect(stripe_url(ctx, callback)) unless checkout_session
+
           metadata = normalize_hash(stripe_fetch(checkout_session || {}, "metadata") || {})
           subscription_id = metadata[:subscription_id]
         end
@@ -814,7 +823,12 @@ module BetterAuth
     def stripe_plans(config)
       plans = stripe_subscription_options(config)[:plans] || []
       plans = plans.call if plans.respond_to?(:call)
-      Array(plans).map { |plan| normalize_hash(plan) }
+      Array(plans).map do |plan|
+        normalized = normalize_hash(plan)
+        limits = stripe_fetch(plan, "limits")
+        normalized[:limits] = limits if limits
+        normalized
+      end
     end
 
     def stripe_plan_by_name(config, name)
@@ -844,7 +858,7 @@ module BetterAuth
       raise APIError.new("BAD_REQUEST", message: STRIPE_ERROR_CODES.fetch("ORGANIZATION_SUBSCRIPTION_NOT_ENABLED")) unless config.dig(:organization, :enabled)
 
       reference_id = explicit_reference_id || session.fetch(:session)["activeOrganizationId"]
-      raise APIError.new("BAD_REQUEST", message: STRIPE_ERROR_CODES.fetch("ORGANIZATION_NOT_FOUND")) if reference_id.to_s.empty?
+      raise APIError.new("BAD_REQUEST", message: STRIPE_ERROR_CODES.fetch("ORGANIZATION_REFERENCE_ID_REQUIRED")) if reference_id.to_s.empty?
       reference_id
     end
 
@@ -1021,6 +1035,28 @@ module BetterAuth
         ctx.context.adapter.update(model: "subscription", where: [{field: "id", value: db_subscription.fetch("id")}], update: {stripeScheduleId: stripe_fetch(schedule, "id")})
       end
       stripe_url(ctx, body[:return_url] || "/")
+    end
+
+    def stripe_release_plugin_schedule(ctx, config, customer_id, active_stripe, db_subscription)
+      return unless stripe_schedule_id(active_stripe)
+      return unless stripe_client(config).respond_to?(:subscription_schedules)
+
+      schedules = stripe_client(config).subscription_schedules.list(customer: customer_id)
+      active_subscription_id = stripe_fetch(active_stripe, "id")
+      existing = Array(stripe_fetch(schedules, "data")).find do |schedule|
+        subscription = stripe_fetch(schedule, "subscription")
+        schedule_subscription_id = subscription.is_a?(Hash) ? stripe_id(subscription) : subscription
+        metadata = stripe_fetch(schedule, "metadata") || {}
+        schedule_subscription_id == active_subscription_id &&
+          stripe_fetch(schedule, "status") == "active" &&
+          stripe_metadata_fetch(metadata, "source") == "@better-auth/stripe"
+      end
+      return unless existing
+
+      stripe_client(config).subscription_schedules.release(stripe_id(existing))
+      if db_subscription
+        ctx.context.adapter.update(model: "subscription", where: [{field: "id", value: db_subscription.fetch("id")}], update: {stripeScheduleId: nil})
+      end
     end
 
     def stripe_direct_subscription_update?(old_plan, plan, auto_managed_seats)

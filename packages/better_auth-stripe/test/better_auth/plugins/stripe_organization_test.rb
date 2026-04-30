@@ -41,6 +41,7 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
         BetterAuth::Plugins.organization,
         BetterAuth::Plugins.stripe(
           stripe_client: stripe,
+          stripe_webhook_secret: "whsec_test",
           organization: {enabled: true},
           subscription: {
             enabled: true,
@@ -273,6 +274,7 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
         BetterAuth::Plugins.organization,
         BetterAuth::Plugins.stripe(
           stripe_client: stripe,
+          stripe_webhook_secret: "whsec_test",
           organization: {enabled: true},
           subscription: {
             enabled: true,
@@ -362,6 +364,315 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
     stripe.subscriptions.list_data = [stripe_subscription(id: "sub_org_created", customer: "cus_org_hooks", price_id: "price_team", status: "canceled")]
     assert_equal({status: true}, auth.api.delete_organization(headers: {"cookie" => cookie}, body: {organizationId: organization.fetch("id")}))
     assert_equal [subscription.fetch("id")], deleted_callbacks
+  end
+
+  def test_organization_existing_customer_id_cancel_restore_and_cross_org_guards
+    stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.stripe(
+          stripe_client: stripe,
+          organization: {enabled: true},
+          subscription: {
+            enabled: true,
+            plans: [{name: "team", price_id: "price_team"}],
+            authorize_reference: ->(data, _ctx) { data.fetch(:reference_id) != "blocked-org" }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, "org-existing-flow@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Existing Org", slug: "existing-org"})
+    other_organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Other Org", slug: "other-org"})
+    auth.context.adapter.update(model: "organization", where: [{field: "id", value: organization.fetch("id")}], update: {stripeCustomerId: "cus_existing_org"})
+
+    checkout = auth.api.upgrade_subscription(
+      headers: {"cookie" => cookie},
+      body: {plan: "team", customerType: "organization", referenceId: organization.fetch("id"), successUrl: "/success", cancelUrl: "/cancel"}
+    )
+    assert_equal "https://stripe.test/checkout", checkout.fetch(:url)
+    assert_empty stripe.customers.created
+    assert_equal "cus_existing_org", stripe.checkout.created.fetch(0).fetch(:customer)
+
+    subscription = auth.context.adapter.find_one(model: "subscription", where: [{field: "referenceId", value: organization.fetch("id")}])
+    auth.context.adapter.update(
+      model: "subscription",
+      where: [{field: "id", value: subscription.fetch("id")}],
+      update: {status: "active", stripeSubscriptionId: "sub_org_existing"}
+    )
+    stripe.subscriptions.list_data = [stripe_subscription(id: "sub_org_existing", customer: "cus_existing_org", price_id: "price_team", status: "active")]
+
+    cancel = auth.api.cancel_subscription(headers: {"cookie" => cookie}, body: {customerType: "organization", referenceId: organization.fetch("id"), subscriptionId: "sub_org_existing", returnUrl: "/billing"})
+    assert_equal "https://stripe.test/portal", cancel.fetch(:url)
+
+    auth.context.adapter.update(model: "subscription", where: [{field: "id", value: subscription.fetch("id")}], update: {cancelAtPeriodEnd: true})
+    stripe.subscriptions.update_result = stripe_subscription(id: "sub_org_existing", customer: "cus_existing_org", price_id: "price_team", status: "active")
+    restored = auth.api.restore_subscription(headers: {"cookie" => cookie}, body: {customerType: "organization", referenceId: organization.fetch("id"), subscriptionId: "sub_org_existing"})
+    assert_equal "sub_org_existing", restored.fetch(:id)
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.cancel_subscription(headers: {"cookie" => cookie}, body: {customerType: "organization", referenceId: other_organization.fetch("id"), subscriptionId: "sub_org_existing", returnUrl: "/billing"})
+    end
+    assert_equal "Subscription not found", error.message
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.list_active_subscriptions(headers: {"cookie" => cookie}, query: {customerType: "organization", referenceId: "blocked-org"})
+    end
+    assert_equal "Unauthorized access", error.message
+  end
+
+  def test_organization_authorize_reference_required_and_user_org_subscriptions_are_separate
+    stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
+    auth_without_authorizer = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.stripe(
+          stripe_client: stripe,
+          organization: {enabled: true},
+          subscription: {enabled: true, plans: [{name: "team", price_id: "price_team"}]}
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth_without_authorizer, "org-authorizer-required@example.com")
+    organization = auth_without_authorizer.api.create_organization(headers: {"cookie" => cookie}, body: {name: "No Authorizer", slug: "no-authorizer"})
+    error = assert_raises(BetterAuth::APIError) do
+      auth_without_authorizer.api.upgrade_subscription(headers: {"cookie" => cookie}, body: {plan: "team", customerType: "organization", referenceId: organization.fetch("id"), successUrl: "/success", cancelUrl: "/cancel"})
+    end
+    assert_equal "Organization subscriptions require authorizeReference callback to be configured", error.message
+
+    stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.stripe(
+          stripe_client: stripe,
+          organization: {enabled: true},
+          subscription: {
+            enabled: true,
+            plans: [{name: "pro", price_id: "price_pro"}, {name: "team", price_id: "price_team"}],
+            authorize_reference: ->(_data, _ctx) { true }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, "separate-user-org@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Separate", slug: "separate"})
+
+    auth.api.upgrade_subscription(headers: {"cookie" => cookie}, body: {plan: "pro", successUrl: "/success", cancelUrl: "/cancel"})
+    auth.api.upgrade_subscription(headers: {"cookie" => cookie}, body: {plan: "team", customerType: "organization", referenceId: organization.fetch("id"), successUrl: "/success", cancelUrl: "/cancel"})
+
+    user_subscription = auth.context.adapter.find_one(model: "subscription", where: [{field: "referenceId", value: user.fetch("id")}])
+    organization_subscription = auth.context.adapter.find_one(model: "subscription", where: [{field: "referenceId", value: organization.fetch("id")}])
+    refute_nil user_subscription
+    refute_nil organization_subscription
+    assert_equal "pro", user_subscription.fetch("plan")
+    assert_equal "team", organization_subscription.fetch("plan")
+  end
+
+  def test_organization_webhook_update_cancel_callbacks_and_customer_errors
+    stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
+    callbacks = []
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.stripe(
+          stripe_client: stripe,
+          stripe_webhook_secret: "whsec_test",
+          organization: {
+            enabled: true,
+            get_customer_create_params: ->(org, _ctx) {
+              raise "boom" if org.fetch("slug") == "broken-org"
+
+              {metadata: {organizationId: "attacker"}}
+            }
+          },
+          subscription: {
+            enabled: true,
+            plans: [{name: "team", price_id: "price_team", seat_price_id: "price_team_seat"}],
+            authorize_reference: ->(_data, _ctx) { true },
+            on_subscription_created: ->(data) { callbacks << [:created, data.fetch(:subscription).fetch("referenceId")] },
+            on_subscription_update: ->(data) { callbacks << [:updated, data.fetch(:subscription).fetch("status")] },
+            on_subscription_cancel: ->(data) { callbacks << [:cancel, data.fetch(:subscription).fetch("id")] },
+            on_subscription_deleted: ->(data) { callbacks << [:deleted, data.fetch(:subscription).fetch("id")] }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, "org-webhook-update@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Webhook Org", slug: "webhook-org"})
+    auth.context.adapter.update(model: "organization", where: [{field: "id", value: organization.fetch("id")}], update: {stripeCustomerId: "cus_org_webhook"})
+
+    auth.api.stripe_webhook(headers: {"stripe-signature" => "valid"}, body: {type: "customer.subscription.created", data: {object: stripe_subscription(id: "sub_org_webhook", customer: "cus_org_webhook", price_id: "price_team", status: "active", extra_items: [{id: "si_org_seat", quantity: 3, price: {id: "price_team_seat"}}])}})
+    subscription = auth.context.adapter.find_one(model: "subscription", where: [{field: "stripeSubscriptionId", value: "sub_org_webhook"}])
+    assert_equal organization.fetch("id"), subscription.fetch("referenceId")
+    assert_equal 3, subscription.fetch("seats")
+
+    auth.api.stripe_webhook(headers: {"stripe-signature" => "valid"}, body: {type: "customer.subscription.updated", data: {object: stripe_subscription(id: "sub_org_webhook", customer: "cus_org_webhook", price_id: "price_team", status: "active", cancel_at_period_end: true, canceled_at: 1_700_000_200, extra_items: [{id: "si_org_seat", quantity: 4, price: {id: "price_team_seat"}}])}})
+    updated = auth.context.adapter.find_one(model: "subscription", where: [{field: "id", value: subscription.fetch("id")}])
+    assert_equal true, updated.fetch("cancelAtPeriodEnd")
+    assert_equal 4, updated.fetch("seats")
+
+    auth.api.stripe_webhook(headers: {"stripe-signature" => "valid"}, body: {type: "customer.subscription.deleted", data: {object: stripe_subscription(id: "sub_org_webhook", customer: "cus_org_webhook", price_id: "price_team", status: "canceled", ended_at: 1_700_000_300)}})
+    deleted = auth.context.adapter.find_one(model: "subscription", where: [{field: "id", value: subscription.fetch("id")}])
+    assert_equal "canceled", deleted.fetch("status")
+    assert deleted.fetch("endedAt")
+    assert_includes callbacks, [:created, organization.fetch("id")]
+    assert_includes callbacks, [:updated, "active"]
+    assert_includes callbacks, [:cancel, subscription.fetch("id")]
+    assert_includes callbacks, [:deleted, subscription.fetch("id")]
+
+    broken = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Broken Org", slug: "broken-org"})
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.upgrade_subscription(headers: {"cookie" => cookie}, body: {plan: "team", customerType: "organization", referenceId: broken.fetch("id"), successUrl: "/success", cancelUrl: "/cancel"})
+    end
+    assert_equal "Unable to create customer", error.message
+
+    stripe.customers.create_error = RuntimeError.new("stripe unavailable")
+    failed = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Failed Customer", slug: "failed-customer"})
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.upgrade_subscription(headers: {"cookie" => cookie}, body: {plan: "team", customerType: "organization", referenceId: failed.fetch("id"), successUrl: "/success", cancelUrl: "/cancel"})
+    end
+    assert_equal "Unable to create customer", error.message
+  end
+
+  def test_organization_name_sync_and_deletion_without_active_subscription
+    stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.stripe(
+          stripe_client: stripe,
+          organization: {enabled: true},
+          subscription: {
+            enabled: true,
+            plans: [{name: "team", price_id: "price_team"}],
+            authorize_reference: ->(_data, _ctx) { true }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, "org-name-sync@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Old Name", slug: "old-name"})
+    auth.context.adapter.update(model: "organization", where: [{field: "id", value: organization.fetch("id")}], update: {stripeCustomerId: "cus_org_name"})
+    stripe.customers.retrieve_data["cus_org_name"] = {"id" => "cus_org_name", "name" => "Old Name", "deleted" => false}
+
+    auth.api.update_organization(headers: {"cookie" => cookie}, body: {organizationId: organization.fetch("id"), data: {name: "New Name"}})
+    assert_equal({id: "cus_org_name", params: {name: "New Name"}}, stripe.customers.updated.last)
+
+    stripe.subscriptions.list_data = [stripe_subscription(id: "sub_canceled", customer: "cus_org_name", price_id: "price_team", status: "canceled")]
+    assert_equal({status: true}, auth.api.delete_organization(headers: {"cookie" => cookie}, body: {organizationId: organization.fetch("id")}))
+  end
+
+  def test_seat_billing_checkout_edge_cases_and_webhook_seat_count
+    stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.stripe(
+          stripe_client: stripe,
+          stripe_webhook_secret: "whsec_test",
+          organization: {enabled: true},
+          subscription: {
+            enabled: true,
+            plans: [
+              {name: "team", price_id: "price_team", seat_price_id: "price_team_seat"},
+              {name: "seat-only", price_id: "price_seat_only", seat_price_id: "price_seat_only"},
+              {name: "same-seat", price_id: "price_same_seat", seat_price_id: "price_team_seat"}
+            ],
+            authorize_reference: ->(_data, _ctx) { true }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, "seat-edge@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Seat Edge", slug: "seat-edge"})
+    member_user = auth.context.internal_adapter.create_user(email: "seat-edge-member@example.com", name: "Member", emailVerified: true)
+    auth.api.add_member(headers: {"cookie" => cookie}, body: {organizationId: organization.fetch("id"), userId: member_user.fetch("id"), role: "member"})
+
+    auth.api.upgrade_subscription(headers: {"cookie" => cookie}, body: {plan: "team", customerType: "organization", referenceId: organization.fetch("id"), successUrl: "/success", cancelUrl: "/cancel"})
+    line_items = stripe.checkout.created.last.fetch(:line_items)
+    assert_equal [{price: "price_team", quantity: 1}, {price: "price_team_seat", quantity: 2}], line_items
+    assert_equal 2, auth.context.adapter.find_one(model: "subscription", where: [{field: "referenceId", value: organization.fetch("id")}]).fetch("seats")
+
+    other_org = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Seat Only", slug: "seat-only"})
+    auth.api.upgrade_subscription(headers: {"cookie" => cookie}, body: {plan: "seat-only", customerType: "organization", referenceId: other_org.fetch("id"), successUrl: "/success", cancelUrl: "/cancel"})
+    assert_equal [{price: "price_seat_only", quantity: 1}], stripe.checkout.created.last.fetch(:line_items)
+
+    auth.context.adapter.update(model: "organization", where: [{field: "id", value: organization.fetch("id")}], update: {stripeCustomerId: "cus_seat_edge"})
+    subscription = auth.context.adapter.find_one(model: "subscription", where: [{field: "referenceId", value: organization.fetch("id")}])
+    auth.context.adapter.update(model: "subscription", where: [{field: "id", value: subscription.fetch("id")}], update: {status: "active", stripeCustomerId: "cus_seat_edge", stripeSubscriptionId: "sub_seat_edge", plan: "team", seats: 2})
+    stripe.subscriptions.list_data = [
+      stripe_subscription(
+        id: "sub_seat_edge",
+        customer: "cus_seat_edge",
+        price_id: "price_team",
+        extra_items: [{id: "si_team_seat", quantity: 2, price: {id: "price_team_seat"}}]
+      )
+    ]
+
+    auth.api.upgrade_subscription(headers: {"cookie" => cookie}, body: {plan: "same-seat", customerType: "organization", referenceId: organization.fetch("id"), returnUrl: "/billing", successUrl: "/success", cancelUrl: "/cancel"})
+    items = stripe.billing_portal.created.last.dig(:flow_data, :subscription_update_confirm, :items)
+    assert_equal 1, items.length
+    assert_equal "si_sub_seat_edge", items.fetch(0).fetch(:id)
+    assert_equal "price_same_seat", items.fetch(0).fetch(:price)
+
+    auth.api.stripe_webhook(headers: {"stripe-signature" => "valid"}, body: {type: "customer.subscription.updated", data: {object: stripe_subscription(id: "sub_seat_edge", customer: "cus_seat_edge", price_id: "price_same_seat", status: "active", extra_items: [{id: "si_team_seat", quantity: 5, price: {id: "price_team_seat"}}])}})
+    updated = auth.context.adapter.find_one(model: "subscription", where: [{field: "stripeSubscriptionId", value: "sub_seat_edge"}])
+    assert_equal 5, updated.fetch("seats")
+  end
+
+  def test_organization_reference_requires_reference_id_or_active_organization_id
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.stripe(
+          stripe_client: BetterAuthPluginsStripeTest::FakeStripeClient.new,
+          organization: {enabled: true},
+          subscription: {
+            enabled: true,
+            plans: [{name: "team", price_id: "price_team"}],
+            authorize_reference: ->(_data, _ctx) { true }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, "missing-org-reference@example.com")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.upgrade_subscription(headers: {"cookie" => cookie}, body: {plan: "team", customerType: "organization", successUrl: "/success", cancelUrl: "/cancel"})
+    end
+
+    assert_equal "Reference ID is required. Provide referenceId or set activeOrganizationId in session", error.message
   end
 
   private
