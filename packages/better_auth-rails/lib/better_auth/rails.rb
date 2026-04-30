@@ -2,6 +2,7 @@
 
 require "better_auth"
 require_relative "rails/version"
+require_relative "rails/option_builder"
 require_relative "rails/configuration"
 require_relative "rails/migration"
 require_relative "rails/active_record_adapter"

@@ -20,10 +20,14 @@ module BetterAuth
 
       attr_reader :connection
 
-      def initialize(options, connection: nil)
+      def initialize(options = nil, connection: nil)
         super(options)
-        @connection = connection || ::ActiveRecord::Base
+        @connection = connection || (options ? ::ActiveRecord::Base : nil)
         @models = {}
+      end
+
+      def call(options)
+        self.class.new(options, connection: connection)
       end
 
       def create(model:, data:, force_allow_id: false)

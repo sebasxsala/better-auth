@@ -32,22 +32,21 @@ BetterAuth::Rails.configure do |config|
 
   config.base_url = ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000")
   config.base_path = "/api/auth"
-  config.database = ->(options) {
-    BetterAuth::Rails::ActiveRecordAdapter.new(options)
-  }
-  config.email_and_password = {
-    enabled: true
-  }
-  config.social_providers = {
-    google: BetterAuth::SocialProviders.google(
+
+  config.email_and_password do |auth|
+    auth.enabled = true
+  end
+
+  config.social_providers do |providers|
+    providers.google = BetterAuth::SocialProviders.google(
       client_id: Rails.application.credentials.dig(:google, :client_id),
       client_secret: Rails.application.credentials.dig(:google, :client_secret)
-    ),
-    discord: BetterAuth::SocialProviders.discord(
+    )
+    providers.discord = BetterAuth::SocialProviders.discord(
       client_id: Rails.application.credentials.dig(:discord, :client_id),
       client_secret: Rails.application.credentials.dig(:discord, :client_secret)
     )
-  }
+  end
 end
 ```
 
