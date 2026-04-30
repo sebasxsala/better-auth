@@ -3,21 +3,9 @@ title: oauth_provider_not_found
 description: The OAuth provider was not found.
 ---
 
-<Callout type="warn">
-This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
-</Callout>
-
-{/*
-Hidden upstream content for oauth_provider_not_found.
-
-
-<Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
-</Callout>
-
 ## What is it?
 
-This error occurs when Better Auth cannot identify a provider for the callback path—either because the provider
+This error occurs when Better Auth cannot identify a provider for the callback path-either because the provider
 segment is missing or because no provider with that id is configured.
 
 Better Auth expects the callback route to be shaped like `/api/auth/callback/<provider>`.
@@ -57,4 +45,3 @@ request is rejected.
 
 * Trailing slash normalization may alter routing if your framework treats `/callback/google/` differently
   from `/callback/google`. Configure consistent behavior.
-*/}

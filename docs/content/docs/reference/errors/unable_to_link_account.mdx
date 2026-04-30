@@ -3,30 +3,18 @@ title: unable_to_link_account
 description: The account could not be linked.
 ---
 
-<Callout type="warn">
-This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
-</Callout>
-
-{/*
-Hidden upstream content for unable_to_link_account.
-
-
-<Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
-</Callout>
-
 ## What is it?
 
 This error occurs only during an OAuth flow when attempting to link the provider account to the
 currently authenticated user. Better Auth blocks the operation if either:
 
-1) The database operation to create/update the linked account fails.
-2) The provider is not considered trusted for linking based on your auth configuration
-   (`account.accountLinking.trustedProviders`).
+1. The database operation to create/update the linked account fails.
+2. The provider is not considered trusted for linking based on your auth configuration
+   (`account.account_linking.trusted_providers`).
 
 ## Common Causes
 
-* The provider is not listed in `account.accountLinking.trustedProviders`.
+* The provider is not listed in `account.account_linking.trusted_providers`.
 * Configuration differs across environments (dev/staging/prod), so the provider appears untrusted in one environment.
 * Database write failed due to unique constraint, foreign key violation, or transaction/connection issues.
 * A race condition linking the same provider concurrently caused a conflict.
@@ -36,7 +24,7 @@ currently authenticated user. Better Auth blocks the operation if either:
 
 ### Allow linking for the intended provider
 
-* Add the provider id (e.g., `github`, `google`) to `account.accountLinking.trustedProviders` in your auth config.
+* Add the provider id (e.g., `github`, `google`) to `account.account_linking.trusted_providers` in your auth config.
 * Verify you are using the correct provider id/slug that your integration expects.
 
 ### Fix database reliability and constraints
@@ -47,7 +35,4 @@ currently authenticated user. Better Auth blocks the operation if either:
 ### Verify environment configuration
 
 * Ensure the same auth config is deployed to all environments and that environment variables are loaded as expected.
-* Double-check that the runtime sees the intended `trustedProviders` list.
-
-
-*/}
+* Double-check that the runtime sees the intended `trusted_providers` list.

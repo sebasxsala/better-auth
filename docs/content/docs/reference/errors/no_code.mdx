@@ -3,18 +3,6 @@ title: no_code
 description: The code was not found in the request.
 ---
 
-<Callout type="warn">
-This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
-</Callout>
-
-{/*
-Hidden upstream content for no_code.
-
-
-<Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
-</Callout>
-
 ## What is it?
 
 This error occurs during the OAuth callback when the authorization code is missing from the request.
@@ -29,7 +17,7 @@ so the request is rejected.
 * Query parameters were stripped by a reverse proxy, CDN, or framework rewrite.
 * Callback URL mismatch at the provider caused an intermediate redirect that dropped query parameters.
 * Mobile/WebView or deep-link handoff opened a new context that lost the query string.
-* Using a response mode your handler does not read (e.g., form_post body vs query parameters).
+* Using a response mode your handler does not read (e.g., form\_post body vs query parameters).
 
 ## How to resolve
 
@@ -48,5 +36,3 @@ so the request is rejected.
 * In DevTools → Network, inspect the callback request and verify whether `code` or `error` parameters are present.
 * Log the raw query/body received by the callback handler during development to see exactly what arrived.
 * Compare dev/staging/prod credentials and redirect URIs to ensure they are consistent across environments.
-
-*/}

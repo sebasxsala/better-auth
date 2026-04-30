@@ -3,43 +3,30 @@ title: signup_disabled
 description: Signup disabled error
 ---
 
-<Callout type="warn">
-This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
-</Callout>
-
-{/*
-Hidden upstream content for signup_disabled.
-
-
-<Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
-</Callout>
-
-This error occurs when you disable sign up in your oauth provider config and a user tries to sign up with that provider.
+This error occurs when sign-up is disabled for an auth flow and a user tries to create a new account through that flow.
 
 ## How to fix
 
-If you're using the `disableSignUp` option with stateless mode, you will see this error. Please consider using database hooks instead to handle this case.
+If you want to block sign-up based on application policy, use a database hook so the decision is enforced server-side.
 
-```ts title="auth.ts"
-import { betterAuth } from "better-auth";
-import { APIError } from "better-auth/api";
-
-export const auth = betterAuth({
-  databaseHooks: {
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  database_hooks: {
     user: {
       create: {
-        before: async (user, ctx) => {
-          const isAllowedToSignUp = await isAllowedToSignUp(user, ctx); // [!code highlight] // check if the user is allowed to sign up
-          if (!isAllowedToSignUp) {
-            throw new APIError("BAD_REQUEST", {
-              message: "Signup is disabled",
-			});
-          },
-        },
-      },
-	},
+        before: ->(user, ctx = nil) {
+          unless SignupPolicy.allowed?(user)
+            raise BetterAuth::APIError.new(
+              "BAD_REQUEST",
+              message: "Signup is disabled"
+            )
+          end
+
+          user
+        }
+      }
+    }
   }
-});
+)
 ```
-*/}
