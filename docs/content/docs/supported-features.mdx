@@ -102,12 +102,12 @@ equivalent.
 ## Core Runtime
 
 <div className="grid gap-3 md:grid-cols-2 not-prose my-6">
-  <FeatureCard title="Auth factory and API object" status="Partial" body="BetterAuth.auth, Rack calls, direct server API access, plugin initialization, and error-code merging are implemented." />
-  <FeatureCard title="Endpoint router and middleware" status="Partial" body="Rack routing, route params, hooks, plugin middleware, redirects, cookies, origin checks, and rate-limit hooks are implemented." />
-  <FeatureCard title="Email and password" status="Partial" body="Sign-up, sign-in, password hashing, verification requirements, reset password, set/change password, and user updates are implemented." />
-  <FeatureCard title="Social OAuth" status="Partial" body="Authorization URLs, callbacks, sessions, token storage, account linking, unlinking, refresh, and access-token routes are implemented." />
-  <FeatureCard title="Sessions and cookies" status="Partial" body="Signed cookies, cache cookies, chunking, deletion, revocation routes, secondary storage, and Redis-backed session storage are implemented." />
-  <FeatureCard title="CSRF and trusted origins" status="Partial" body="Origin checks, trusted origins, proxy-aware IP handling, and selected callback validation are implemented." />
+  <FeatureCard title="Auth factory and API object" status="Supported" body="BetterAuth.auth, Rack calls, direct server API access, plugin initialization, runtime context, and error-code merging are implemented." />
+  <FeatureCard title="Endpoint router and middleware" status="Supported" body="Rack routing, route params, hooks, plugin middleware, redirects, cookies, server-scoped endpoints, origin checks, and rate-limit hooks are implemented." />
+  <FeatureCard title="Email and password" status="Supported" body="Sign-up, sign-in, password hashing, verification requirements, reset password, set/change password, password utilities, and user updates are implemented." />
+  <FeatureCard title="Social OAuth" status="Supported" body="Authorization URLs, callbacks, sessions, token storage, account linking, unlinking, refresh, access-token routes, and server-side provider factories are implemented." />
+  <FeatureCard title="Sessions and cookies" status="Supported" body="Signed cookies, cache cookies, stateless defaults, chunking, deletion, revocation routes, secondary storage, dynamic domains, and Redis-backed session storage are implemented." />
+  <FeatureCard title="CSRF and trusted origins" status="Supported" body="Origin checks, trusted origins, dynamic trusted origins, baseURL allowed hosts, proxy-aware IP handling, and callback validation are implemented." />
   <FeatureCard title="Database schema and hooks" status="Supported" body="Base schema, plugin schema merge, SQL and Rails migration generation, adapter hooks, and Better Auth logical field names are implemented." />
   <FeatureCard title="OpenAPI" status="Partial" body="OpenAPI 3.1.1 metadata, route and model inventory, security schemes, servers, selected request bodies, path params, and reference HTML are implemented." />
 </div>

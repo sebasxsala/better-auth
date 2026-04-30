@@ -108,7 +108,7 @@ module BetterAuth
       update_age = if refresh_cache.is_a?(Hash)
         (refresh_cache[:update_age] || refresh_cache["updateAge"] || refresh_cache["update_age"]).to_i
       else
-        (max_age * 0.8).to_i
+        (max_age * 0.2).to_i
       end
       updated_at = payload["updatedAt"].to_i
       updated_at.positive? && updated_at + (update_age * 1000) <= (Time.now.to_f * 1000).to_i

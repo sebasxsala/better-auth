@@ -17,7 +17,7 @@ class BetterAuthConfigurationTest < Minitest::Test
     assert_equal :scrypt, config.password_hasher
     assert_equal "cookie", config.account[:store_state_strategy]
     assert_equal true, config.account[:store_account_cookie]
-    assert_equal({enabled: true, strategy: "jwe", refresh_cache: true}, config.session[:cookie_cache])
+    assert_equal({enabled: true, strategy: "jwe", refresh_cache: true, max_age: 60 * 60 * 24 * 7}, config.session[:cookie_cache])
   end
 
   def test_secondary_storage_selects_secondary_rate_limit_storage_by_default
@@ -72,6 +72,33 @@ class BetterAuthConfigurationTest < Minitest::Test
     assert_equal 12, config.email_and_password[:min_password_length]
     assert_equal 256, config.email_and_password[:max_password_length]
     assert_equal :bcrypt, config.password_hasher
+  end
+
+  def test_base_url_base_path_env_and_protocol_match_upstream_context_cases
+    with_env("BETTER_AUTH_URL" => "http://localhost:5147") do
+      config = BetterAuth::Configuration.new(secret: SECRET)
+
+      assert_equal "http://localhost:5147", config.base_url
+      assert_equal "http://localhost:5147/api/auth", config.context_base_url
+    end
+
+    empty_path = BetterAuth::Configuration.new(base_url: "http://localhost:5147/", base_path: "", secret: SECRET)
+    root_path = BetterAuth::Configuration.new(base_url: "http://localhost:5147/", base_path: "/", secret: SECRET)
+    trailing = BetterAuth::Configuration.new(base_url: "http://localhost:5147////", secret: SECRET)
+    special = BetterAuth::Configuration.new(base_url: "http://localhost:3000", base_path: "/api/v1/auth-service", secret: SECRET)
+    https = BetterAuth::Configuration.new(base_url: "https://example.com/path/to/auth", secret: SECRET)
+
+    assert_equal "http://localhost:5147", empty_path.context_base_url
+    assert_equal "http://localhost:5147", root_path.context_base_url
+    assert_equal "http://localhost:5147/api/auth", trailing.context_base_url
+    assert_equal "http://localhost:3000/api/v1/auth-service", special.context_base_url
+    assert_equal "https://example.com", https.base_url
+    assert_equal "https://example.com/path/to/auth", https.context_base_url
+
+    error = assert_raises(BetterAuth::Error) do
+      BetterAuth::Configuration.new(base_url: "ftp://localhost:3000", secret: SECRET)
+    end
+    assert_includes error.message, "http://"
   end
 
   def test_rejects_unknown_password_hasher
@@ -150,6 +177,23 @@ class BetterAuthConfigurationTest < Minitest::Test
     refute config.trusted_origin?("/")
     assert config.trusted_origin?("/dashboard?email=123@email.com", allow_relative_paths: true)
     refute config.trusted_origin?("//evil.com", allow_relative_paths: true)
+  end
+
+  def test_custom_scheme_wildcard_trusted_origins_match_full_url
+    config = BetterAuth::Configuration.new(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      trusted_origins: [
+        "exp://10.0.0.*:*/*",
+        "exp://192.168.*.*:*/*",
+        "exp://172.*.*.*:*/*"
+      ]
+    )
+
+    assert config.trusted_origin?("exp://10.0.0.29:8081/--/")
+    assert config.trusted_origin?("exp://192.168.1.100:8081/--/")
+    assert config.trusted_origin?("exp://172.16.0.1:8081/--/")
+    refute config.trusted_origin?("exp://203.0.113.0:8081/--/")
   end
 
   def test_plugin_list_normalization_filters_nil_and_preserves_order
