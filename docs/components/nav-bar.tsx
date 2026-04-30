@@ -20,15 +20,13 @@ export const navMenu = [
 
 		path: "/docs",
 	},
-	// Ruby changelogs will be published through a Ruby-specific flow later.
-	// Keep the /changelogs route in the app, but hide it from the primary nav.
 	{
-		name: "blogs",
-		path: "/blog",
+		name: "supported",
+		path: "/docs/supported-features",
 	},
 	{
-		name: "community",
-		path: "/community",
+		name: "changelogs",
+		path: "/changelogs",
 	},
 ];
 

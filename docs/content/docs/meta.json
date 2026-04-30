@@ -3,6 +3,7 @@
   "root": true,
   "pages": [
     "introduction",
+    "supported-features",
     "installation",
     "basic-usage",
     "integrations/rack",

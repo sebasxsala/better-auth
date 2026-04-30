@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { source } from "@/lib/source";
+import { changelogs, source } from "@/lib/source";
 
 const BASE_URL = "https://www.better-auth.com";
 
@@ -23,7 +23,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
 			changeFrequency: "weekly",
 			priority: 0.8,
 		},
-		// /changelogs and /enterprise are preserved in the app, but hidden from public discovery for now.
+		{
+			url: `${BASE_URL}/changelogs`,
+			lastModified: new Date(),
+			changeFrequency: "weekly",
+			priority: 0.8,
+		},
+		// /enterprise is preserved in the app, but hidden from public discovery for now.
 	];
 
 	const docPages: MetadataRoute.Sitemap = source.getPages().map((page) => ({
@@ -37,20 +43,18 @@ export default function sitemap(): MetadataRoute.Sitemap {
 
 	// Blog articles are preserved in docs/content/blogs, but hidden while Ruby-specific content is planned.
 
-	// These pages are not being used
-	//
-	// const changelogPages: MetadataRoute.Sitemap = changelogs
-	// 	.getPages()
-	// 	.map((page) => ({
-	// 		url: `${BASE_URL}${page.url}`,
-	// 		lastModified: page.data.date ? new Date(page.data.date) : new Date(),
-	// 		changeFrequency: "monthly",
-	// 		priority: 0.6,
-	// 	}));
+	const changelogPages: MetadataRoute.Sitemap = changelogs
+		.getPages()
+		.map((page) => ({
+			url: `${BASE_URL}${page.url}`,
+			lastModified: page.data.date ? new Date(page.data.date) : new Date(),
+			changeFrequency: "monthly",
+			priority: 0.6,
+		}));
 
 	return [
 		...basePages,
 		...docPages,
-		//  ...changelogPages
+		...changelogPages,
 	];
 }

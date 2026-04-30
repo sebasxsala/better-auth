@@ -148,6 +148,11 @@ export const contents: Content[] = [
 				),
 			},
 			{
+				title: "Supported Features",
+				href: "/docs/supported-features",
+				icon: () => <Binoculars className="w-4 h-4" />,
+			},
+			{
 				title: "Comparison",
 				href: "/docs/comparison",
 				icon: () => (
@@ -1324,6 +1329,16 @@ C0.7,239.6,62.1,0.5,62.2,0.4c0,0,54,13.8,119.9,30.8S302.1,62,302.2,62c0.2,0,0.2,
 			icon: Icons.rails,
 			href: "/docs/integrations/rails",
 		},
+		{
+			title: "Sinatra",
+			icon: Book,
+			href: "/docs/integrations/sinatra",
+		},
+		{
+			title: "Hanami",
+			icon: Database,
+			href: "/docs/integrations/hanami",
+		},
 	],
 },
 	{
@@ -1824,188 +1839,6 @@ C0.7,239.6,62.1,0.5,62.2,0.4c0,0,54,13.8,119.9,30.8S302.1,62,302.2,62c0.2,0,0.2,
 					</svg>
 				),
 			},
-			{
-				title: "Polar",
-				href: "/docs/plugins/polar",
-				icon: () => (
-					<svg
-						width="1.2em"
-						height="1.2em"
-						viewBox="0 0 280 350"
-						fill="none"
-						xmlns="http://www.w3.org/2000/svg"
-						className="size-4"
-					>
-						<g transform="translate(30, 20)">
-							<path
-								fillRule="evenodd"
-								clipRule="evenodd"
-								d="M64.8636 269.177C130.906 313.882 220.684 296.585 265.388 230.543C310.094 164.501 292.798 74.723 226.756 30.0179C160.714 -14.6872 70.935 2.60972 26.2299 68.6516C-18.4753 134.693 -1.17834 224.472 64.8636 269.177ZM84.0172 270.357C144.43 301.264 221.064 272.251 255.187 205.557C289.309 138.861 267.997 59.7378 207.584 28.8301C147.173 -2.0774 70.5375 26.9345 36.4152 93.63C2.29299 160.325 23.6051 239.448 84.0172 270.357Z"
-								fill="currentColor"
-							/>
-							<path
-								fillRule="evenodd"
-								clipRule="evenodd"
-								d="M101.233 286.13C155.766 303.879 219.918 256.991 244.522 181.401C269.124 105.812 244.86 30.146 190.327 12.3967C135.794 -5.35246 71.6428 41.5362 47.04 117.126C22.4374 192.715 46.7007 268.381 101.233 286.13ZM117.915 280.385C164.066 290.229 213.97 239.649 229.378 167.414C244.784 95.1779 219.862 28.6392 173.71 18.7955C127.559 8.95174 77.6556 59.5307 62.2482 131.767C46.841 204.002 71.7639 270.541 117.915 280.385Z"
-								fill="currentColor"
-							/>
-							<path
-								fillRule="evenodd"
-								clipRule="evenodd"
-								d="M130.567 292.297C167.056 296.192 203.471 235.332 211.903 156.36C220.336 77.3886 197.592 10.2109 161.104 6.3148C124.616 2.41866 88.2006 63.2795 79.7681 142.251C71.3357 221.222 94.0792 288.401 130.567 292.297ZM147.642 268.26C174.048 267.843 194.616 214.386 193.58 148.861C192.546 83.3351 170.299 30.5544 143.893 30.9716C117.486 31.3889 96.9186 84.8459 97.9538 150.372C98.9891 215.897 121.235 268.677 147.642 268.26Z"
-								fill="currentColor"
-							/>
-						</g>
-					</svg>
-				),
-			},
-			{
-				title: "Autumn Billing",
-				href: "/docs/plugins/autumn",
-				icon: () => (
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						viewBox="0 0 24 24"
-						width="1.2em"
-						height="1.2em"
-					>
-						<path
-							d="M3.292,20.708a1,1,0,0,1,0-1.411L6.12,16.469A8.041,8.041,0,0,1,8.03,7.041C13.072,2,20.9,3.1,20.9,3.1S22,10.928,16.959,15.97a8.041,8.041,0,0,1-9.428,1.91L4.7,20.708A1,1,0,0,1,3.292,20.708Z"
-							fill="currentColor"
-						></path>
-					</svg>
-				),
-			},
-			{
-				title: "Dodo Payments",
-				href: "/docs/plugins/dodopayments",
-				icon: () => (
-					<svg
-						width="1.2em"
-						height="1.2em"
-						viewBox="0 0 261 261"
-						fill="none"
-						xmlns="http://www.w3.org/2000/svg"
-					>
-						<path
-							d="M130.208 0C58.2986 0 0 58.2986 0 130.208C0 202.118 58.2986 260.417 130.208 260.417C202.118 260.417 260.417 202.118 260.417 130.208C260.417 58.2986 202.118 0 130.208 0Z"
-							fill="currentColor"
-						/>
-						<mask
-							id="mask0_27_29"
-							maskUnits="userSpaceOnUse"
-							x="39"
-							y="58"
-							width="196"
-							height="164"
-						>
-							<path
-								d="M234.375 58.5941H39.0624V221.355H234.375V58.5941Z"
-								fill="white"
-							/>
-						</mask>
-						<g mask="url(#mask0_27_29)">
-							<path
-								d="M114.67 96.1455H114.584C109.202 94.6003 103.507 97.6906 101.684 102.795C99.6704 108.281 102.865 114.566 108.507 116.302C122.327 120.225 128.264 100.416 114.67 96.1455Z"
-								className="fill-background"
-							/>
-							<path
-								d="M232.448 124.149C214.653 85.1729 157.882 101.301 152.639 91.093C137.275 66.9784 108.594 53.4368 77.5873 60.4159C72.813 58.5062 56.372 57.9854 45.747 64.6694L52.1532 67.4993C52.6393 67.7076 52.5005 67.6555 53.2123 67.9159C56.1116 69.0097 55.6081 68.6972 53.5248 69.843C48.7505 72.6382 42.7956 75.8847 39.0803 80.7631C39.2366 80.9888 47.2574 82.9159 47.2574 82.9159C47.3963 82.9507 48.8893 83.1069 48.5595 83.7666C22.3268 125.19 66.563 187.708 88.0387 221.353H150.209C140.608 204.166 129.636 180.711 133.386 164.791C134.063 161.909 134.931 158.246 138.473 157.76C147.032 156.388 158.49 156.51 166.65 155.59C166.65 155.59 166.69 155.59 166.771 155.59C168.507 155.503 211.007 150.103 221.181 176.596C222.049 179.027 224.046 177.447 224.844 175.85C232.431 160.763 237.327 137.013 232.483 124.166L232.448 124.149ZM163.837 111.353C160.851 116.683 158.82 123.61 158.299 129.652C158.021 133.489 158.421 137.274 158.803 141.11C159.011 143.228 159.028 145.902 157.327 147.291C155.851 148.541 153.403 148.662 150.938 148.836C138.837 148.784 109.323 148.836 97.9518 141.093L97.8824 141.041C81.3373 130.954 72.4831 108.176 82.3095 90.4854C85.4866 84.4784 91.3373 80.5722 98.0039 79.0965C106.58 77.1347 116.025 78.593 123.681 82.6034C126.806 84.1833 130.539 86.2666 133.386 88.6625C139.028 93.593 143.855 98.7145 151.25 100.294C154.653 101.267 158.195 101.128 161.598 101.822C167.969 103.35 166.372 106.978 163.82 111.319L163.837 111.353Z"
-								className="fill-background"
-							/>
-						</g>
-					</svg>
-				),
-			},
-			{
-				title: "Creem",
-				href: "/docs/plugins/creem",
-				icon: () => (
-					<svg
-						width="1.2em"
-						height="1.2em"
-						viewBox="0 0 54 47"
-						xmlns="http://www.w3.org/2000/svg"
-						preserveAspectRatio="xMidYMid meet"
-					>
-						<path
-							d="M7.44678 1H1L26.9696 46L53 1H9.39298L26.9696 31.4858L30.193 26.0202L19.0632 6.7085H43.3298L26.9696 34.8866L7.44678 1Z"
-							fill="currentColor"
-						/>
-					</svg>
-				),
-			},
-			{
-				title: "Commet",
-				href: "/docs/plugins/commet",
-				icon: () => (
-					<svg
-						width="1.2em"
-						height="1.2em"
-						viewBox="0 0 500 500"
-						fill="none"
-						xmlns="http://www.w3.org/2000/svg"
-					>
-						<path
-							d="M250 71L356.521 255.5H143.479L250 71Z"
-							fill="currentColor"
-						/>
-						<path
-							d="M250 440L356.521 255.5H143.479L250 440Z"
-							fill="currentColor"
-						/>
-					</svg>
-				),
-			},
-			{
-				title: "Others",
-				group: true,
-				icon: () => null,
-				href: "",
-			},
-			{
-				title: "Dub",
-				href: "/docs/plugins/dub",
-				icon: () => (
-					<svg
-						width="1.2em"
-						height="1.2em"
-						viewBox="0 0 65 64"
-						fill="none"
-						xmlns="http://www.w3.org/2000/svg"
-					>
-						<path
-							fillRule="evenodd"
-							clipRule="evenodd"
-							d="M32.5 64C50.1731 64 64.5 49.6731 64.5 32C64.5 20.1555 58.0648 9.81393 48.5 4.28099V31.9999V47.9998H40.5V45.8594C38.1466 47.2207 35.4143 47.9999 32.5 47.9999C23.6634 47.9999 16.5 40.8364 16.5 31.9999C16.5 23.1633 23.6634 15.9999 32.5 15.9999C35.4143 15.9999 38.1466 16.779 40.5 18.1404V1.00812C37.943 0.350018 35.2624 0 32.5 0C14.8269 0 0.500038 14.3269 0.500038 32C0.500038 49.6731 14.8269 64 32.5 64Z"
-							fill="currentColor"
-						/>
-					</svg>
-				),
-			},
-			{
-				title: "Community Plugins",
-				href: "/docs/plugins/community-plugins",
-				icon: () => (
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						width="1em"
-						height="1em"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						strokeWidth="2"
-						strokeLinecap="round"
-						strokeLinejoin="round"
-						className="lucide lucide-users"
-					>
-						<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-						<circle cx="9" cy="7" r="4" />
-						<path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-						<path d="M16 3.13a4 4 0 0 1 0 7.75" />
-					</svg>
-				),
-			},
 		],
 	},
 	{
@@ -2049,6 +1882,16 @@ C0.7,239.6,62.1,0.5,62.2,0.4c0,0,54,13.8,119.9,30.8S302.1,62,302.2,62c0.2,0,0.2,
 					{
 						title: "invalid_callback_request",
 						href: "/docs/reference/errors/invalid_callback_request",
+						icon: () => null,
+					},
+					{
+						title: "invalid_code",
+						href: "/docs/reference/errors/invalid_code",
+						icon: () => null,
+					},
+					{
+						title: "internal_server_error",
+						href: "/docs/reference/errors/internal_server_error",
 						icon: () => null,
 					},
 					{
@@ -2097,6 +1940,21 @@ C0.7,239.6,62.1,0.5,62.2,0.4c0,0,54,13.8,119.9,30.8S302.1,62,302.2,62c0.2,0,0.2,
 						icon: () => null,
 					},
 					{
+						title: "unable_to_create_user",
+						href: "/docs/reference/errors/unable_to_create_user",
+						icon: () => null,
+					},
+					{
+						title: "unable_to_create_session",
+						href: "/docs/reference/errors/unable_to_create_session",
+						icon: () => null,
+					},
+					{
+						title: "account_not_linked",
+						href: "/docs/reference/errors/account_not_linked",
+						icon: () => null,
+					},
+					{
 						title: "account_already_linked_to_different_user",
 						href: "/docs/reference/errors/account_already_linked_to_different_user",
 						icon: () => null,
@@ -2104,6 +1962,11 @@ C0.7,239.6,62.1,0.5,62.2,0.4c0,0,54,13.8,119.9,30.8S302.1,62,302.2,62c0.2,0,0.2,
 					{
 						title: "signup_disabled",
 						href: "/docs/reference/errors/signup_disabled",
+						icon: () => null,
+					},
+					{
+						title: "please_restart_the_process",
+						href: "/docs/reference/errors/please_restart_the_process",
 						icon: () => null,
 					},
 				],

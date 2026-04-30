@@ -205,28 +205,6 @@ export const communityPlugins: CommunityPlugin[] = [
 		},
 	},
 	{
-		name: "@alexasomba/better-auth-paystack",
-		url: "https://github.com/alexasomba/better-auth-paystack",
-		description:
-			"Paystack plugin for Better Auth — integrates Paystack transactions, webhooks, and subscription flows.",
-		author: {
-			name: "alexasomba",
-			github: "alexasomba",
-			avatar: "https://github.com/alexasomba.png",
-		},
-	},
-	{
-		name: "better-auth-lark",
-		url: "https://github.com/uselark/better-auth-lark",
-		description:
-			"Lark billing plugin that automatically creates customers and subscribes them to free plans on signup.",
-		author: {
-			name: "Vijit",
-			github: "vijit-lark",
-			avatar: "https://github.com/vijit-lark.png",
-		},
-	},
-	{
 		name: "stargate-better-auth",
 		url: "https://github.com/neiii/stargate-better-auth",
 		description:
