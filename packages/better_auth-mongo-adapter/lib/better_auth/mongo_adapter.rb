@@ -290,7 +290,14 @@ module BetterAuth
           return {from: Schema.storage_key(from), to: Schema.storage_key(to), relation: relation, limit: limit, unique: unique_join_field?(join_model, to)}
         end
 
-        inferred_join_config(model, join_model)
+        inferred = inferred_join_config(model, join_model)
+        if config.is_a?(Hash)
+          limit = config[:limit] || config["limit"]
+          relation = config[:relation] || config["relation"]
+          inferred = inferred.merge(limit: limit) if limit
+          inferred = inferred.merge(relation: relation) if relation
+        end
+        inferred
       end
 
       def inferred_join_config(model, join_model)
