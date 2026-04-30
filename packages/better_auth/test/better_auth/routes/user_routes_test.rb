@@ -79,6 +79,67 @@ class BetterAuthRoutesUserTest < Minitest::Test
     assert_equal "new-email@example.com", auth.context.internal_adapter.find_user_by_email("new-email@example.com")[:user]["email"]
   end
 
+  def test_change_email_secure_flow_returns_success_when_target_email_exists
+    sent = []
+    auth = build_auth(
+      user: {change_email: {enabled: true}},
+      email_verification: {send_verification_email: ->(data, _request = nil) { sent << data }}
+    )
+    cookie = sign_up_cookie(auth, email: "source-existing-target@example.com", password: "password123")
+    sign_up_cookie(auth, email: "target-existing@example.com", password: "password123")
+
+    assert_equal({status: true}, auth.api.change_email(headers: {"cookie" => cookie}, body: {newEmail: "target-existing@example.com"}))
+
+    assert_empty sent
+    assert auth.context.internal_adapter.find_user_by_email("source-existing-target@example.com")
+  end
+
+  def test_change_email_without_sender_returns_same_error_for_existing_and_new_targets
+    auth = build_auth(user: {change_email: {enabled: true}})
+    cookie = sign_up_cookie(auth, email: "source-no-sender@example.com", password: "password123")
+    sign_up_cookie(auth, email: "target-no-sender@example.com", password: "password123")
+
+    existing = assert_raises(BetterAuth::APIError) do
+      auth.api.change_email(headers: {"cookie" => cookie}, body: {newEmail: "target-no-sender@example.com"})
+    end
+    missing = assert_raises(BetterAuth::APIError) do
+      auth.api.change_email(headers: {"cookie" => cookie}, body: {newEmail: "new-no-sender@example.com"})
+    end
+
+    assert_equal 400, existing.status_code
+    assert_equal 400, missing.status_code
+    assert_equal missing.message, existing.message
+  end
+
+  def test_update_user_rejects_input_false_additional_fields
+    auth = build_auth(
+      user: {
+        additional_fields: {
+          role: {type: "string", required: false, input: false}
+        }
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "input-false-update@example.com", password: "password123")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.update_user(headers: {"cookie" => cookie}, body: {role: "admin"})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal "role is not allowed to be set", error.message
+  end
+
+  def test_delete_user_disabled_returns_not_found
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "delete-disabled@example.com", password: "password123")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.delete_user(headers: {"cookie" => cookie}, body: {password: "password123"})
+    end
+
+    assert_equal 404, error.status_code
+  end
+
   def test_delete_user_requires_fresh_session_when_no_password_or_verification_token_is_provided
     auth = build_auth(
       session: {fresh_age: 1, expires_in: 3600, update_age: 3600},
@@ -168,6 +229,59 @@ class BetterAuthRoutesUserTest < Minitest::Test
     assert_equal ["before:delete@example.com", "after:delete@example.com"], calls
     assert_nil auth.context.internal_adapter.find_user_by_id(user_id)
     assert_nil auth.api.get_session(headers: {"cookie" => cookie})
+  end
+
+  def test_delete_user_with_verification_sender_requires_token_before_deleting
+    sent = []
+    auth = build_auth(
+      user: {
+        delete_user: {
+          enabled: true,
+          send_delete_account_verification: ->(data, _request = nil) { sent << data }
+        }
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "delete-token@example.com", password: "password123")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+
+    request = auth.api.delete_user(headers: {"cookie" => cookie}, body: {password: "password123"})
+    assert_equal({success: true, message: "Verification email sent"}, request)
+    assert_equal 1, sent.length
+    assert auth.context.internal_adapter.find_user_by_id(user_id)
+    assert auth.api.get_session(headers: {"cookie" => cookie})
+
+    result = auth.api.delete_user(headers: {"cookie" => cookie}, body: {token: sent.first.fetch(:token)})
+    assert_equal({success: true, message: "User deleted"}, result)
+    assert_nil auth.context.internal_adapter.find_user_by_id(user_id)
+  end
+
+  def test_delete_user_database_hooks_can_abort_delete
+    calls = []
+    auth = build_auth(
+      user: {delete_user: {enabled: true}},
+      database_hooks: {
+        user: {
+          delete: {
+            before: ->(user, _context) {
+              calls << [:before, user["email"]]
+              false
+            },
+            after: ->(user, _context) { calls << [:after, user["email"]] }
+          }
+        }
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "abort-delete@example.com", password: "password123")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.delete_user(headers: {"cookie" => cookie}, body: {password: "password123"})
+    end
+
+    assert_equal "BAD_REQUEST", error.code
+    assert_equal [[:before, "abort-delete@example.com"]], calls
+    assert auth.context.internal_adapter.find_user_by_id(user_id)
+    assert auth.api.get_session(headers: {"cookie" => cookie})
   end
 
   def test_delete_user_deletes_all_secondary_storage_sessions

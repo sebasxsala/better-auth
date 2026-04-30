@@ -27,6 +27,8 @@ module BetterAuth
         callback_url = body["callbackURL"] || body["callbackUrl"] || body["callback_url"]
         remember_me = body.key?("rememberMe") ? body["rememberMe"] : body["remember_me"]
 
+        validate_auth_callback_url!(ctx.context, callback_url, "callbackURL")
+
         unless EMAIL_PATTERN.match?(email)
           raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["INVALID_EMAIL"])
         end

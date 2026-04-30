@@ -14,6 +14,8 @@ module BetterAuth
 
         body = normalize_hash(ctx.body)
         email = body["email"].to_s.downcase
+        redirect_to = body["redirectTo"] || body["redirect_to"]
+        validate_callback_url!(ctx.context, redirect_to)
         found = ctx.context.internal_adapter.find_user_by_email(email, include_accounts: true)
         unless found
           SecureRandom.hex(12)
@@ -29,7 +31,6 @@ module BetterAuth
           expiresAt: Time.now + expires_in.to_i
         )
 
-        redirect_to = body["redirectTo"] || body["redirect_to"]
         callback = redirect_to ? URI.encode_www_form_component(redirect_to) : ""
         url = "#{ctx.context.base_url}/reset-password/#{token}?callbackURL=#{callback}"
         sender.call({user: found[:user], url: url, token: token}, ctx.request)

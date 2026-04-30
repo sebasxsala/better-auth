@@ -29,6 +29,44 @@ class BetterAuthRoutesSignInTest < Minitest::Test
     assert_equal "Minitest", session[:session]["userAgent"]
   end
 
+  def test_sign_in_email_returns_declared_additional_user_fields
+    auth = build_auth(
+      user: {
+        additional_fields: {
+          department: {type: "string", required: false},
+          isAdmin: {type: "boolean", default_value: true, input: false}
+        }
+      }
+    )
+    auth.api.sign_up_email(body: {
+      email: "signin-additional@example.com",
+      password: "password123",
+      name: "Additional",
+      department: "engineering"
+    })
+
+    result = auth.api.sign_in_email(body: {email: "signin-additional@example.com", password: "password123"})
+
+    assert_equal "engineering", result[:user]["department"]
+    assert_equal true, result[:user]["isAdmin"]
+  end
+
+  def test_sign_in_email_rejects_untrusted_callback_url
+    auth = build_auth
+    auth.api.sign_up_email(body: {email: "bad-callback-sign-in@example.com", password: "password123", name: "Bad Callback"})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_in_email(body: {
+        email: "bad-callback-sign-in@example.com",
+        password: "password123",
+        callbackURL: "https://evil.example/dashboard"
+      })
+    end
+
+    assert_equal 403, error.status_code
+    assert_equal "Invalid callbackURL", error.message
+  end
+
   def test_sign_in_email_requires_email_password_to_be_enabled
     auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
 

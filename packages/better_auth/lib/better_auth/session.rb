@@ -51,7 +51,7 @@ module BetterAuth
       return nil if payload["session"]["token"] && payload["session"]["token"] != token
 
       result = {session: payload["session"], user: payload["user"]}
-      Cookies.set_cookie_cache(ctx, result, false) if should_refresh_cookie_cache?(config, payload)
+      result = refresh_cached_session(ctx, result) if should_refresh_cookie_cache?(config, payload)
       result
     end
 
@@ -84,6 +84,17 @@ module BetterAuth
         "updatedAt" => now
       )
       session = stringify_keys(updated || result[:session]).merge("expiresAt" => expires_at, "updatedAt" => now)
+      refreshed = {session: session, user: result[:user]}
+      Cookies.set_session_cookie(ctx, refreshed, Cookies.dont_remember?(ctx))
+      refreshed
+    end
+
+    def refresh_cached_session(ctx, result)
+      now = Time.now
+      session = stringify_keys(result[:session]).merge(
+        "expiresAt" => now + ctx.context.session_config[:expires_in].to_i,
+        "updatedAt" => now
+      )
       refreshed = {session: session, user: result[:user]}
       Cookies.set_session_cookie(ctx, refreshed, Cookies.dont_remember?(ctx))
       refreshed

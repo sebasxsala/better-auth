@@ -7,16 +7,18 @@ module BetterAuth
     attr_reader :path,
       :body_schema,
       :query_schema,
+      :params_schema,
       :headers_schema,
       :metadata,
       :use,
       :handler
 
-    def initialize(path: nil, method: nil, body_schema: nil, query_schema: nil, headers_schema: nil, metadata: {}, use: [], &handler)
+    def initialize(path: nil, method: nil, body_schema: nil, query_schema: nil, params_schema: nil, headers_schema: nil, metadata: {}, use: [], &handler)
       @path = path
       @methods = Array(method || "*").map { |value| value.to_s.upcase }
       @body_schema = body_schema
       @query_schema = query_schema
+      @params_schema = params_schema
       @headers_schema = headers_schema
       @metadata = metadata || {}
       @use = Array(use)
@@ -47,6 +49,7 @@ module BetterAuth
     def apply_schemas!(context)
       context.body = validate_schema(:body, body_schema, context.body)
       context.query = validate_schema(:query, query_schema, context.query)
+      context.params = validate_schema(:params, params_schema, context.params)
       context.headers = context.send(:normalize_headers, validate_schema(:headers, headers_schema, context.headers))
     end
 

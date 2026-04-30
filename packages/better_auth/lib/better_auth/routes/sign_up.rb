@@ -32,6 +32,7 @@ module BetterAuth
         callback_url = body["callbackURL"] || body["callbackUrl"] || body["callback_url"]
         remember_me = body.key?("rememberMe") ? body["rememberMe"] : body["remember_me"]
 
+        validate_auth_callback_url!(ctx.context, callback_url, "callbackURL")
         validate_sign_up_input!(email, password, email_config)
 
         ctx.context.adapter.transaction do
@@ -99,6 +100,13 @@ module BetterAuth
       if password.length > email_config[:max_password_length].to_i
         raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["PASSWORD_TOO_LONG"])
       end
+    end
+
+    def self.validate_auth_callback_url!(context, value, label)
+      return if value.nil? || value.to_s.empty?
+      return if context.trusted_origin?(value.to_s, allow_relative_paths: true)
+
+      raise APIError.new("FORBIDDEN", message: "Invalid #{label}")
     end
 
     def self.create_sign_up_user(ctx, body, email, name, image)

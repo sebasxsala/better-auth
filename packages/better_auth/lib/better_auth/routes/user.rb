@@ -79,10 +79,11 @@ module BetterAuth
           delete_user_by_token!(ctx, session, body["token"])
         elsif sender
           token = SecureRandom.hex(16)
+          expires_in = ctx.context.options.user.dig(:delete_user, :delete_token_expires_in) || 3600
           ctx.context.internal_adapter.create_verification_value(
             identifier: "delete-account-#{token}",
             value: session[:user]["id"],
-            expiresAt: Time.now + ctx.context.options.user.dig(:delete_user, :delete_token_expires_in).to_i
+            expiresAt: Time.now + expires_in.to_i
           )
           sender.call({user: session[:user], token: token}, ctx.request)
           next ctx.json({success: true, message: "Verification email sent"})
@@ -120,9 +121,11 @@ module BetterAuth
         new_email = (body["newEmail"] || body["new_email"]).to_s.downcase
         raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["INVALID_EMAIL"]) unless EMAIL_PATTERN.match?(new_email)
         raise APIError.new("BAD_REQUEST", message: "Email is the same") if new_email == session[:user]["email"]
-        raise APIError.new("UNPROCESSABLE_ENTITY", message: BASE_ERROR_CODES["USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL"]) if ctx.context.internal_adapter.find_user_by_email(new_email)
+        existing_target = ctx.context.internal_adapter.find_user_by_email(new_email)
 
         if !session[:user]["emailVerified"] && ctx.context.options.user.dig(:change_email, :update_email_without_verification)
+          next ctx.json({status: true}) if existing_target
+
           updated = ctx.context.internal_adapter.update_user_by_email(session[:user]["email"], email: new_email)
           Cookies.set_session_cookie(ctx, {session: session[:session], user: updated})
           next ctx.json({status: true})
@@ -130,6 +133,7 @@ module BetterAuth
 
         sender = ctx.context.options.email_verification[:send_verification_email]
         raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["VERIFICATION_EMAIL_NOT_ENABLED"]) unless sender.respond_to?(:call)
+        next ctx.json({status: true}) if existing_target
 
         token = create_email_verification_token(ctx, session[:user]["email"], update_to: new_email, extra: {"requestType" => "change-email-verification"})
         sender.call({user: session[:user].merge("email" => new_email), token: token}, ctx.request)
@@ -148,7 +152,9 @@ module BetterAuth
     def self.delete_current_user!(ctx, session)
       config = ctx.context.options.user[:delete_user] || {}
       call_option(config[:before_delete], session[:user], ctx.request)
-      ctx.context.internal_adapter.delete_user(session[:user]["id"])
+      deleted = ctx.context.internal_adapter.delete_user(session[:user]["id"])
+      raise APIError.new("BAD_REQUEST", message: "User delete aborted") if deleted == false
+
       ctx.context.internal_adapter.delete_sessions(session[:user]["id"])
       Cookies.delete_session_cookie(ctx)
       call_option(config[:after_delete], session[:user], ctx.request)

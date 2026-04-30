@@ -54,6 +54,68 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
     assert BetterAuth::Password.verify(password: "password123", hash: account["password"])
   end
 
+  def test_sign_up_email_returns_declared_additional_user_fields
+    auth = build_auth(
+      user: {
+        additional_fields: {
+          plan: {type: "string", required: false},
+          isAdmin: {type: "boolean", default_value: true, input: false}
+        }
+      }
+    )
+
+    result = auth.api.sign_up_email(body: {
+      email: "additional-sign-up@example.com",
+      password: "password123",
+      name: "Additional",
+      plan: "pro"
+    })
+
+    assert_equal "pro", result[:user]["plan"]
+    assert_equal true, result[:user]["isAdmin"]
+  end
+
+  def test_sign_up_email_rejects_input_false_additional_user_fields
+    auth = build_auth(
+      user: {
+        additional_fields: {
+          role: {type: "string", required: false, input: false}
+        }
+      }
+    )
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_up_email(body: {
+        email: "input-false-sign-up@example.com",
+        password: "password123",
+        name: "Input False",
+        role: "admin"
+      })
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal "role is not allowed to be set", error.message
+  end
+
+  def test_sign_up_email_rolls_back_user_and_account_when_session_creation_fails
+    auth = build_auth
+    auth.context.internal_adapter.define_singleton_method(:create_session) do |*_args|
+      nil
+    end
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_up_email(body: {
+        email: "rollback@example.com",
+        password: "password123",
+        name: "Rollback"
+      })
+    end
+
+    assert_equal 400, error.status_code
+    assert_nil auth.context.adapter.find_one(model: "user", where: [{field: "email", value: "rollback@example.com"}])
+    assert_empty auth.context.adapter.find_many(model: "account")
+  end
+
   def test_sign_up_and_sign_in_email_use_custom_password_callbacks
     auth = build_auth(
       email_and_password: {
@@ -213,6 +275,34 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
     assert_equal "existing-verify@example.com", callbacks.first[:user]["email"]
   end
 
+  def test_sign_up_existing_email_with_auto_sign_in_false_still_raises_without_verification
+    auth = build_auth(email_and_password: {auto_sign_in: false})
+
+    first = auth.api.sign_up_email(body: {email: "auto-disabled-existing@example.com", password: "password123", name: "First"})
+    assert_nil first[:token]
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_up_email(body: {email: "auto-disabled-existing@example.com", password: "password123", name: "Second"})
+    end
+
+    assert_equal 422, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL"], error.message
+  end
+
+  def test_sign_up_new_user_with_auto_sign_in_false_returns_null_token
+    auth = build_auth(email_and_password: {auto_sign_in: false})
+
+    result = auth.api.sign_up_email(body: {
+      email: "auto-disabled-new@example.com",
+      password: "password123",
+      name: "No Session"
+    })
+
+    assert_nil result[:token]
+    assert_equal "auto-disabled-new@example.com", result[:user]["email"]
+    assert_nil auth.context.adapter.find_one(model: "session", where: [{field: "userId", value: result[:user]["id"]}])
+  end
+
   def test_sign_up_email_can_be_disabled
     auth = BetterAuth.auth(
       base_url: "http://localhost:3000",
@@ -274,6 +364,22 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
 
     assert_nil result[:token]
     assert_empty sent
+  end
+
+  def test_sign_up_email_rejects_untrusted_callback_url
+    auth = build_auth(email_and_password: {require_email_verification: true})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_up_email(body: {
+        email: "bad-callback-sign-up@example.com",
+        password: "password123",
+        name: "Bad Callback",
+        callbackURL: "https://evil.example/callback"
+      })
+    end
+
+    assert_equal 403, error.status_code
+    assert_equal "Invalid callbackURL", error.message
   end
 
   private

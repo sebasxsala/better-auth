@@ -33,6 +33,24 @@ class BetterAuthRoutesAccountTest < Minitest::Test
     assert_equal BetterAuth::BASE_ERROR_CODES["FAILED_TO_UNLINK_LAST_ACCOUNT"], error.message
   end
 
+  def test_unlink_account_cannot_remove_account_owned_by_another_user
+    auth = build_auth
+    current_cookie = sign_up_cookie(auth, email: "unlink-owner@example.com")
+    current_user_id = auth.api.get_session(headers: {"cookie" => current_cookie})[:user]["id"]
+    other_cookie = sign_up_cookie(auth, email: "unlink-other@example.com")
+    other_user_id = auth.api.get_session(headers: {"cookie" => other_cookie})[:user]["id"]
+    auth.context.internal_adapter.create_account(userId: current_user_id, providerId: "github", accountId: "current-gh")
+    auth.context.internal_adapter.create_account(userId: other_user_id, providerId: "github", accountId: "other-gh")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.unlink_account(headers: {"cookie" => current_cookie}, body: {providerId: "github", accountId: "other-gh"})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["ACCOUNT_NOT_FOUND"], error.message
+    assert auth.context.internal_adapter.find_account_by_provider_id("other-gh", "github")
+  end
+
   def test_get_access_token_and_refresh_token_use_configured_provider
     refreshed_at = Time.now + 3600
     refresh_calls = 0
@@ -242,6 +260,34 @@ class BetterAuthRoutesAccountTest < Minitest::Test
 
     assert_equal "provider@example.com", info[:user][:email]
     assert_equal "access-token", info[:data][:accessToken]
+  end
+
+  def test_account_info_accepts_provider_account_id_from_list_accounts
+    provider = {
+      id: "github",
+      get_user_info: ->(_tokens) {
+        {
+          user: {id: "provider-account-id", email: "provider-id@example.com"},
+          data: {ok: true}
+        }
+      }
+    }
+    auth = build_auth(social_providers: {github: provider})
+    cookie = sign_up_cookie(auth, email: "provider-id-info@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    account = auth.context.internal_adapter.create_account(
+      userId: user_id,
+      providerId: "github",
+      accountId: "provider-account-id",
+      accessToken: "access-token"
+    )
+    refute_equal account["id"], account["accountId"]
+
+    listed = auth.api.list_accounts(headers: {"cookie" => cookie}).find { |entry| entry["providerId"] == "github" }
+    info = auth.api.account_info(headers: {"cookie" => cookie}, query: {accountId: listed["accountId"]})
+
+    assert_equal "provider-id@example.com", info[:user][:email]
+    assert_equal({ok: true}, info[:data])
   end
 
   private

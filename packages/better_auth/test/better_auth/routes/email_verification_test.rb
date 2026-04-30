@@ -57,6 +57,33 @@ class BetterAuthRoutesEmailVerificationTest < Minitest::Test
     assert_equal true, user["emailVerified"]
   end
 
+  def test_verify_email_redirects_to_callback_url_with_existing_query
+    auth = build_auth
+    auth.api.sign_up_email(body: {email: "redirect-verified@example.com", password: "password123", name: "Verified"})
+    token = BetterAuth::Crypto.sign_jwt({"email" => "redirect-verified@example.com"}, SECRET, expires_in: 3600)
+
+    status, headers, _body = auth.api.verify_email(
+      query: {token: token, callbackURL: "/dashboard?from=email"},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_equal "/dashboard?from=email", headers.fetch("location")
+  end
+
+  def test_verify_email_rejects_expired_token
+    auth = build_auth
+    auth.api.sign_up_email(body: {email: "expired-token@example.com", password: "password123", name: "Expired"})
+    token = BetterAuth::Crypto.sign_jwt({"email" => "expired-token@example.com"}, SECRET, expires_in: -1)
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_email(query: {token: token})
+    end
+
+    assert_equal 401, error.status_code
+    assert_equal "invalid_token", error.message
+  end
+
   def test_verify_email_rejects_untrusted_callback_url
     auth = build_auth
     auth.api.sign_up_email(body: {email: "unsafe-callback@example.com", password: "password123", name: "Unsafe"})
