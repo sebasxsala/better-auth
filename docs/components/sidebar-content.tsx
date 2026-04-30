@@ -3,6 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import {
 	Binoculars,
 	Book,
+	Bot,
 	CircleHelp,
 	Database,
 	FlaskConical,
@@ -14,7 +15,9 @@ import {
 	Mailbox,
 	Phone,
 	ScanFace,
+	ScrollText,
 	ShieldCheck,
+	Sparkles,
 	TriangleAlertIcon,
 	UserCircle,
 	UserSquare2,
@@ -1869,6 +1872,22 @@ C0.7,239.6,62.1,0.5,62.2,0.4c0,0,54,13.8,119.9,30.8S302.1,62,302.2,62c0.2,0,0.2,
 		],
 	},
 	{
+		title: "AI Resources",
+		Icon: () => <Sparkles className="w-4 h-4 text-current" />,
+		list: [
+			{
+				title: "Skills",
+				href: "/docs/ai-resources/skills",
+				icon: () => <Bot className="w-4 h-4 text-current" />,
+			},
+			{
+				title: "LLMs.txt",
+				href: "/llms.txt",
+				icon: () => <ScrollText className="w-4 h-4 text-current" />,
+			},
+		],
+	},
+	{
 		title: "Reference",
 		Icon: () => (
 			<svg
@@ -2035,6 +2054,53 @@ C0.7,239.6,62.1,0.5,62.2,0.4c0,0,54,13.8,119.9,30.8S302.1,62,302.2,62c0.2,0,0.2,
 				title: "FAQ",
 				href: "/docs/reference/faq",
 				icon: () => <CircleHelp className="w-4 h-4 text-current" />,
+			},
+		],
+	},
+	{
+		title: "Guides",
+		Icon: () => (
+			<svg
+				xmlns="http://www.w3.org/2000/svg"
+				width="1.4em"
+				height="1.4em"
+				viewBox="0 0 24 24"
+			>
+				<path
+					fill="currentColor"
+					fillRule="evenodd"
+					d="M4.172 3.172C3 4.343 3 6.229 3 10v4c0 3.771 0 5.657 1.172 6.828C5.343 22 7.229 22 11 22h2c3.771 0 5.657 0 6.828-1.172C21 19.657 21 17.771 21 14v-4c0-3.771 0-5.657-1.172-6.828C18.657 2 16.771 2 13 2h-2C7.229 2 5.343 2 4.172 3.172M8 9a1 1 0 0 1 1-1h6a1 1 0 1 1 0 2H9a1 1 0 0 1-1-1m0 4a1 1 0 0 1 1-1h6a1 1 0 1 1 0 2H9a1 1 0 0 1-1-1"
+					clipRule="evenodd"
+				/>
+			</svg>
+		),
+		list: [
+			{
+				title: "Optimizing for Performance",
+				href: "/docs/guides/optimizing-for-performance",
+				icon: () => <Gauge className="w-4 h-4" />,
+			},
+			{
+				title: "Dynamic Base URL",
+				href: "/docs/guides/dynamic-base-url",
+				icon: () => (
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						width="1.2em"
+						height="1.2em"
+						viewBox="0 0 24 24"
+					>
+						<path
+							fill="currentColor"
+							d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1M8 13h8v-2H8zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5"
+						/>
+					</svg>
+				),
+			},
+			{
+				title: "SAML SSO with Okta",
+				href: "/docs/guides/saml-sso-with-okta",
+				icon: () => <ShieldCheck className="w-4 h-4" />,
 			},
 		],
 	},
