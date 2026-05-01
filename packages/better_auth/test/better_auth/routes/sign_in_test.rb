@@ -75,6 +75,7 @@ class BetterAuthRoutesSignInTest < Minitest::Test
     end
 
     assert_equal 400, error.status_code
+    assert_equal "EMAIL_PASSWORD_DISABLED", error.code
     assert_equal "Email and password is not enabled", error.message
   end
 

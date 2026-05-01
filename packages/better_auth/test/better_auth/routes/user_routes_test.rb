@@ -21,6 +21,19 @@ class BetterAuthRoutesUserTest < Minitest::Test
     assert_equal BetterAuth::BASE_ERROR_CODES["EMAIL_CAN_NOT_BE_UPDATED"], error.message
   end
 
+  def test_update_user_requires_body_object_like_upstream
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "body-object@example.com", password: "password123")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.update_user(headers: {"cookie" => cookie}, body: "not-object")
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal "BODY_MUST_BE_AN_OBJECT", error.code
+    assert_equal BetterAuth::BASE_ERROR_CODES["BODY_MUST_BE_AN_OBJECT"], error.message
+  end
+
   def test_change_password_updates_password_and_can_revoke_other_sessions
     auth = build_auth
     first_cookie = sign_up_cookie(auth, email: "change-password@example.com", password: "password123")

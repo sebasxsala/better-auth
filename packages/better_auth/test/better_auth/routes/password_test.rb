@@ -75,6 +75,18 @@ class BetterAuthRoutesPasswordTest < Minitest::Test
     assert_empty sent
   end
 
+  def test_request_password_reset_uses_upstream_disabled_error_code
+    auth = build_auth
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.request_password_reset(body: {email: "reset-disabled@example.com"})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal "RESET_PASSWORD_DISABLED", error.code
+    assert_equal "Reset password isn't enabled", error.message
+  end
+
   def test_request_password_reset_hides_sender_errors
     auth = build_auth(
       email_and_password: {

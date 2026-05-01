@@ -49,7 +49,11 @@ module BetterAuth
     "ASYNC_VALIDATION_NOT_SUPPORTED" => "Async validation is not supported",
     "VALIDATION_ERROR" => "Validation Error",
     "MISSING_FIELD" => "Field is required",
+    "BODY_MUST_BE_AN_OBJECT" => "Body must be an object",
     "METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED" => "POST method requires deferSessionRefresh to be enabled in session config",
-    "PASSWORD_ALREADY_SET" => "User already has a password set"
+    "PASSWORD_ALREADY_SET" => "User already has a password set",
+    "RESET_PASSWORD_DISABLED" => "Reset password isn't enabled",
+    "EMAIL_PASSWORD_DISABLED" => "Email and password is not enabled",
+    "EMAIL_PASSWORD_SIGN_UP_DISABLED" => "Email and password sign up is not enabled"
   }.freeze
 end

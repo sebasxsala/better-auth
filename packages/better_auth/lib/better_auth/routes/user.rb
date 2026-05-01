@@ -28,8 +28,9 @@ module BetterAuth
         }
       ) do |ctx|
         session = current_session(ctx)
+        raise APIError.new("BAD_REQUEST", code: "BODY_MUST_BE_AN_OBJECT", message: BASE_ERROR_CODES["BODY_MUST_BE_AN_OBJECT"]) unless ctx.body.is_a?(Hash)
+
         body = normalize_hash(ctx.body)
-        raise APIError.new("BAD_REQUEST", message: "Body must be an object") unless body.is_a?(Hash)
         raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["EMAIL_CAN_NOT_BE_UPDATED"]) if body.key?("email")
         update = parse_declared_input(ctx, "user", body, allowed_base: ["name", "image"])
         raise APIError.new("BAD_REQUEST", message: "No fields to update") if update.empty?

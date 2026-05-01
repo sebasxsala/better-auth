@@ -205,6 +205,7 @@ module BetterAuth
 
     def organization_check_slug_endpoint
       Endpoint.new(path: "/organization/check-slug", method: "POST", metadata: organization_openapi("checkOrganizationSlug", "Check if an organization slug is available", response: OpenAPI.status_response_schema)) do |ctx|
+        Routes.request_only_session(ctx)
         slug = normalize_hash(ctx.body)[:slug].to_s
         if slug.empty? || organization_by_slug(ctx, slug)
           raise APIError.new("BAD_REQUEST", message: ORGANIZATION_ERROR_CODES.fetch("ORGANIZATION_SLUG_ALREADY_TAKEN"))

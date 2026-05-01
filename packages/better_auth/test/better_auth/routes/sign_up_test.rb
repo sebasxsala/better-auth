@@ -37,6 +37,7 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
     end
 
     assert_equal 400, error.status_code
+    assert_equal "EMAIL_PASSWORD_SIGN_UP_DISABLED", error.code
     assert_equal "Email and password sign up is not enabled", error.message
   end
 

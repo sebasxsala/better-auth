@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "rack/mock"
 require_relative "../../test_helper"
 
 class BetterAuthPluginsOrganizationTest < Minitest::Test
@@ -47,6 +48,22 @@ class BetterAuthPluginsOrganizationTest < Minitest::Test
     deleted = auth.api.delete_organization(headers: {"cookie" => cookie}, body: {organizationId: created.fetch("id")})
     assert_equal({status: true}, deleted)
     assert_empty auth.api.list_organizations(headers: {"cookie" => cookie})
+  end
+
+  def test_check_slug_requires_session_for_http_requests_like_request_only_session_middleware
+    auth = build_auth
+
+    direct = auth.api.check_organization_slug(body: {slug: "server-side-check"})
+    assert_equal true, direct.fetch(:status)
+
+    response = Rack::MockRequest.new(auth).post(
+      "/api/auth/organization/check-slug",
+      "CONTENT_TYPE" => "application/json",
+      :input => JSON.generate(slug: "http-check")
+    )
+
+    assert_equal 401, response.status
+    assert_equal "Unauthorized", JSON.parse(response.body).fetch("message")
   end
 
   def test_invites_accepts_lists_and_updates_members

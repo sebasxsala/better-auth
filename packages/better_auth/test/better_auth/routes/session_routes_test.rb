@@ -31,6 +31,25 @@ class BetterAuthRoutesSessionTest < Minitest::Test
     assert_equal BetterAuth::BASE_ERROR_CODES["METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED"], error.message
   end
 
+  def test_update_session_requires_body_object_like_upstream
+    auth = build_auth(
+      session: {
+        additional_fields: {
+          activeOrganizationId: {type: "string", required: false}
+        }
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "session-body-object@example.com")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.update_session(headers: {"cookie" => cookie}, body: ["not-object"])
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal "BODY_MUST_BE_AN_OBJECT", error.code
+    assert_equal BetterAuth::BASE_ERROR_CODES["BODY_MUST_BE_AN_OBJECT"], error.message
+  end
+
   def test_get_session_deferred_get_reports_needs_refresh_without_updating_session
     auth = build_auth(session: {defer_session_refresh: true, update_age: 60, expires_in: 120, cookie_cache: {enabled: false}})
     cookie = sign_up_cookie(auth, email: "deferred-session@example.com")

@@ -81,6 +81,8 @@ module BetterAuth
         }
       ) do |ctx|
         session = current_session(ctx)
+        raise APIError.new("BAD_REQUEST", code: "BODY_MUST_BE_AN_OBJECT", message: BASE_ERROR_CODES["BODY_MUST_BE_AN_OBJECT"]) unless ctx.body.is_a?(Hash)
+
         body = Routes.parse_declared_input(ctx, "session", ctx.body, allowed_base: [])
         raise APIError.new("BAD_REQUEST", message: "No fields to update") if body.empty?
 
@@ -193,6 +195,15 @@ module BetterAuth
         session: session,
         user: stringify_keys(data[:user] || data["user"])
       }
+    end
+
+    def self.request_only_session(ctx)
+      session = current_session(ctx, allow_nil: true)
+      if !session && (ctx.request || !ctx.headers.empty?)
+        raise APIError.new("UNAUTHORIZED", code: "UNAUTHORIZED", message: "Unauthorized")
+      end
+
+      session
     end
 
     def self.ensure_fresh_session!(ctx, session)

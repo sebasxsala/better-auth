@@ -40,7 +40,9 @@ module BetterAuth
         }
       ) do |ctx|
         sender = ctx.context.options.email_and_password[:send_reset_password]
-        raise APIError.new("BAD_REQUEST", message: "Reset password isn't enabled") unless sender.respond_to?(:call)
+        unless sender.respond_to?(:call)
+          raise APIError.new("BAD_REQUEST", code: "RESET_PASSWORD_DISABLED", message: BASE_ERROR_CODES["RESET_PASSWORD_DISABLED"])
+        end
 
         body = normalize_hash(ctx.body)
         email = body["email"].to_s.downcase

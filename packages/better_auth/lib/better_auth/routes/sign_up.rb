@@ -56,7 +56,7 @@ module BetterAuth
         options = ctx.context.options
         email_config = options.email_and_password
         if email_config[:enabled] != true || email_config[:disable_sign_up]
-          raise APIError.new("BAD_REQUEST", message: "Email and password sign up is not enabled")
+          raise APIError.new("BAD_REQUEST", code: "EMAIL_PASSWORD_SIGN_UP_DISABLED", message: BASE_ERROR_CODES["EMAIL_PASSWORD_SIGN_UP_DISABLED"])
         end
 
         body = normalize_hash(ctx.body)
