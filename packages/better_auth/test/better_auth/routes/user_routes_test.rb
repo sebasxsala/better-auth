@@ -79,6 +79,26 @@ class BetterAuthRoutesUserTest < Minitest::Test
     assert_equal "new-email@example.com", auth.context.internal_adapter.find_user_by_email("new-email@example.com")[:user]["email"]
   end
 
+  def test_change_email_update_without_verification_sends_verification_for_new_email
+    sent = []
+    auth = build_auth(
+      user: {change_email: {enabled: true, update_email_without_verification: true}},
+      email_verification: {send_verification_email: ->(data, _request = nil) { sent << data }}
+    )
+    cookie = sign_up_cookie(auth, email: "old-unverified-sender@example.com", password: "password123")
+
+    assert_equal(
+      {status: true},
+      auth.api.change_email(headers: {"cookie" => cookie}, body: {newEmail: "new-unverified-sender@example.com"})
+    )
+
+    assert_equal 1, sent.length
+    assert_equal "new-unverified-sender@example.com", sent.first.fetch(:user).fetch("email")
+    auth.api.verify_email(query: {token: sent.first.fetch(:token)})
+    user = auth.context.internal_adapter.find_user_by_email("new-unverified-sender@example.com")[:user]
+    assert_equal true, user["emailVerified"]
+  end
+
   def test_change_email_secure_flow_returns_success_when_target_email_exists
     sent = []
     auth = build_auth(

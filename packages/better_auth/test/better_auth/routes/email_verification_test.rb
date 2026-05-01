@@ -97,7 +97,7 @@ class BetterAuthRoutesEmailVerificationTest < Minitest::Test
     assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_CALLBACK_URL"], error.message
   end
 
-  def test_change_email_verification_updates_email_as_unverified_and_sends_new_verification
+  def test_change_email_verification_updates_email_as_verified
     sent = []
     auth = build_auth(
       user: {change_email: {enabled: true}},
@@ -114,9 +114,9 @@ class BetterAuthRoutesEmailVerificationTest < Minitest::Test
     old_user = auth.context.internal_adapter.find_user_by_email("old-verified@example.com")
     new_user = auth.context.internal_adapter.find_user_by_email("new-verified@example.com")[:user]
     assert_nil old_user
-    assert_equal false, new_user["emailVerified"]
-    assert_equal 2, sent.length
-    assert_equal "new-verified@example.com", sent.last.fetch(:user).fetch("email")
+    assert_equal true, new_user["emailVerified"]
+    assert_equal 1, sent.length
+    assert_equal "new-verified@example.com", sent.first.fetch(:user).fetch("email")
   end
 
   def test_verify_email_auto_sign_in_stores_session_in_secondary_storage
@@ -163,22 +163,68 @@ class BetterAuthRoutesEmailVerificationTest < Minitest::Test
 
     assert_equal 200, status
     assert_equal "new-secondary-email@example.com", session[:user]["email"]
-    assert_equal false, session[:user]["emailVerified"]
-    assert_equal 2, sent.length
+    assert_equal true, session[:user]["emailVerified"]
+    assert_equal 1, sent.length
     assert_equal "new-secondary-email@example.com", stored_session.fetch("user").fetch("email")
-    assert_equal false, stored_session.fetch("user").fetch("emailVerified")
+    assert_equal true, stored_session.fetch("user").fetch("emailVerified")
+  end
 
-    status, _headers, _body = auth.api.verify_email(
-      headers: {"cookie" => refreshed_cookie},
-      query: {token: sent.last.fetch(:token)},
+  def test_change_email_confirmation_sends_old_email_confirmation_before_new_email_verification
+    confirmations = []
+    verifications = []
+    after_calls = []
+    auth = build_auth(
+      user: {
+        change_email: {
+          enabled: true,
+          send_change_email_confirmation: ->(data, _request = nil) { confirmations << data }
+        }
+      },
+      email_verification: {
+        send_verification_email: ->(data, _request = nil) { verifications << data },
+        after_email_verification: ->(user, _request = nil) { after_calls << user["email"] }
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "confirmed-old@example.com")
+    auth.context.internal_adapter.update_user_by_email("confirmed-old@example.com", emailVerified: true)
+
+    result = auth.api.change_email(
+      headers: {"cookie" => cookie},
+      body: {newEmail: "confirmed-new@example.com", callbackURL: "/settings"}
+    )
+
+    assert_equal({status: true}, result)
+    assert_equal 1, confirmations.length
+    assert_empty verifications
+    assert_equal "confirmed-old@example.com", confirmations.first.fetch(:user).fetch("email")
+    assert_equal "confirmed-new@example.com", confirmations.first.fetch(:new_email)
+    assert_includes confirmations.first.fetch(:url), "/verify-email?token="
+    assert_includes confirmations.first.fetch(:url), "callbackURL=%2Fsettings"
+
+    auth.api.verify_email(headers: {"cookie" => cookie}, query: {token: confirmations.first.fetch(:token)})
+    assert_equal 1, verifications.length
+    assert_equal "confirmed-new@example.com", verifications.first.fetch(:user).fetch("email")
+    assert_includes verifications.first.fetch(:url), "/verify-email?token="
+    assert auth.context.internal_adapter.find_user_by_email("confirmed-old@example.com")
+    assert_nil auth.context.internal_adapter.find_user_by_email("confirmed-new@example.com")
+
+    status, headers, body = auth.api.verify_email(
+      headers: {"cookie" => cookie},
+      query: {token: verifications.first.fetch(:token)},
       as_response: true
     )
-    verified_session = auth.api.get_session(headers: {"cookie" => refreshed_cookie})
-    verified_stored_session = JSON.parse(storage.get(verified_session[:session]["token"]))
+    refreshed_cookie = cookie_header(headers.fetch("set-cookie"))
+    session = auth.api.get_session(headers: {"cookie" => refreshed_cookie})
+    payload = JSON.parse(body.join)
 
     assert_equal 200, status
-    assert_equal true, verified_session[:user]["emailVerified"]
-    assert_equal true, verified_stored_session.fetch("user").fetch("emailVerified")
+    assert_equal true, payload.fetch("status")
+    assert_equal "confirmed-new@example.com", payload.fetch("user").fetch("email")
+    assert_equal true, payload.fetch("user").fetch("emailVerified")
+    assert_equal "confirmed-new@example.com", session[:user]["email"]
+    assert_equal true, session[:user]["emailVerified"]
+    assert_nil auth.context.internal_adapter.find_user_by_email("confirmed-old@example.com")
+    assert_equal ["confirmed-new@example.com"], after_calls
   end
 
   private

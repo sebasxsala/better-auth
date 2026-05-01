@@ -631,6 +631,29 @@ class BetterAuthRouterTest < Minitest::Test
     assert_equal 60, storage.ttls["127.0.0.1|/limited"]
   end
 
+  def test_rate_limit_can_use_database_storage
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      rate_limit: {enabled: true, window: 60, max: 1, storage: "database"},
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            limited: BetterAuth::Endpoint.new(path: "/limited", method: "GET") { {ok: true} }
+          }
+        }
+      ]
+    )
+
+    assert_equal 200, auth.call(rack_env("GET", "/api/auth/limited")).first
+    stored = auth.context.adapter.find_one(model: "rateLimit", where: [{field: "key", value: "127.0.0.1|/limited"}])
+    assert_equal 1, stored.fetch("count")
+    assert_kind_of Integer, stored.fetch("lastRequest")
+    assert_equal 429, auth.call(rack_env("GET", "/api/auth/limited")).first
+  end
+
   def test_rate_limit_reads_upstream_secondary_storage_last_request_milliseconds
     storage = SecondaryStorage.new
     storage.set(

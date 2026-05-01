@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "securerandom"
+require "uri"
+
 module BetterAuth
   module Routes
     def self.update_user
@@ -292,24 +295,46 @@ module BetterAuth
         new_email = (body["newEmail"] || body["new_email"]).to_s.downcase
         raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["INVALID_EMAIL"]) unless EMAIL_PATTERN.match?(new_email)
         raise APIError.new("BAD_REQUEST", message: "Email is the same") if new_email == session[:user]["email"]
+        sender = ctx.context.options.email_verification[:send_verification_email]
+        confirmation_sender = ctx.context.options.user.dig(:change_email, :send_change_email_confirmation)
+        can_update_without_verification = !session[:user]["emailVerified"] && ctx.context.options.user.dig(:change_email, :update_email_without_verification)
+        can_send_confirmation = session[:user]["emailVerified"] && confirmation_sender.respond_to?(:call)
+        can_send_verification = sender.respond_to?(:call)
+        unless can_update_without_verification || can_send_confirmation || can_send_verification
+          raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["VERIFICATION_EMAIL_NOT_ENABLED"])
+        end
+
         existing_target = ctx.context.internal_adapter.find_user_by_email(new_email)
+        next ctx.json({status: true}) if existing_target
 
-        if !session[:user]["emailVerified"] && ctx.context.options.user.dig(:change_email, :update_email_without_verification)
-          next ctx.json({status: true}) if existing_target
-
+        if can_update_without_verification
           updated = ctx.context.internal_adapter.update_user_by_email(session[:user]["email"], email: new_email)
           Cookies.set_session_cookie(ctx, {session: session[:session], user: updated})
+          send_verification_email_payload(ctx, updated, body["callbackURL"] || body["callbackUrl"] || body["callback_url"]) if can_send_verification
           next ctx.json({status: true})
         end
 
-        sender = ctx.context.options.email_verification[:send_verification_email]
-        raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["VERIFICATION_EMAIL_NOT_ENABLED"]) unless sender.respond_to?(:call)
-        next ctx.json({status: true}) if existing_target
+        if can_send_confirmation
+          callback_url = body["callbackURL"] || body["callbackUrl"] || body["callback_url"]
+          token = create_email_verification_token(ctx, session[:user]["email"], update_to: new_email, extra: {"requestType" => "change-email-confirmation"})
+          url = email_verification_url(ctx, token, callback_url)
+          confirmation_sender.call({user: session[:user], new_email: new_email, url: url, token: token}, ctx.request)
+          next ctx.json({status: true})
+        end
 
-        token = create_email_verification_token(ctx, session[:user]["email"], update_to: new_email, extra: {"requestType" => "change-email-verification"})
-        sender.call({user: session[:user].merge("email" => new_email), token: token}, ctx.request)
+        send_change_email_verification(ctx, sender, session[:user], session[:user]["email"], new_email, body["callbackURL"] || body["callbackUrl"] || body["callback_url"])
         ctx.json({status: true})
       end
+    end
+
+    def self.send_change_email_verification(ctx, sender, user, current_email, new_email, callback_url)
+      token = create_email_verification_token(ctx, current_email, update_to: new_email, extra: {"requestType" => "change-email-verification"})
+      sender.call({user: user.merge("email" => new_email), url: email_verification_url(ctx, token, callback_url), token: token}, ctx.request)
+    end
+
+    def self.email_verification_url(ctx, token, callback_url)
+      callback = URI.encode_www_form_component(callback_url || "/")
+      "#{ctx.context.base_url}/verify-email?token=#{URI.encode_www_form_component(token)}&callbackURL=#{callback}"
     end
 
     def self.delete_user_by_token!(ctx, session, token)

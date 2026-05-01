@@ -100,11 +100,27 @@ module BetterAuth
 
         user = user_data[:user]
         if update_to
-          updated = ctx.context.internal_adapter.update_user_by_email(email, email: update_to, emailVerified: false)
-          updated_user = updated || user.merge("email" => update_to, "emailVerified" => false)
-          send_verification_email_payload(ctx, updated_user, callback_url) if ctx.context.options.email_verification[:send_verification_email].respond_to?(:call)
-          set_verified_session_cookie(ctx, updated_user)
-          next redirect_or_json(ctx, callback_url, {status: true, user: Schema.parse_output(ctx.context.options, "user", updated)})
+          session = current_session(ctx, allow_nil: true)
+          return redirect_or_error(ctx, callback_url, "invalid_user") if session && session[:user]["email"] != email
+
+          request_type = payload["requestType"] || payload["request_type"]
+          case request_type
+          when "change-email-confirmation"
+            send_change_email_verification_payload(ctx, user, update_to, callback_url)
+            next redirect_or_json(ctx, callback_url, {status: true})
+          when "change-email-verification"
+            updated = ctx.context.internal_adapter.update_user_by_email(email, email: update_to, emailVerified: true)
+            updated_user = updated || user.merge("email" => update_to, "emailVerified" => true)
+            call_option(ctx.context.options.email_verification[:after_email_verification], updated_user, ctx.request)
+            set_verified_session_cookie(ctx, updated_user)
+            next redirect_or_json(ctx, callback_url, {status: true, user: Schema.parse_output(ctx.context.options, "user", updated_user)})
+          else
+            updated = ctx.context.internal_adapter.update_user_by_email(email, email: update_to, emailVerified: false)
+            updated_user = updated || user.merge("email" => update_to, "emailVerified" => false)
+            send_verification_email_payload(ctx, updated_user, callback_url) if ctx.context.options.email_verification[:send_verification_email].respond_to?(:call)
+            set_verified_session_cookie(ctx, updated_user)
+            next redirect_or_json(ctx, callback_url, {status: true, user: Schema.parse_output(ctx.context.options, "user", updated)})
+          end
         end
 
         if user["emailVerified"]
@@ -125,6 +141,16 @@ module BetterAuth
       callback = URI.encode_www_form_component(callback_url || "/")
       url = "#{ctx.context.base_url}/verify-email?token=#{URI.encode_www_form_component(token)}&callbackURL=#{callback}"
       ctx.context.options.email_verification[:send_verification_email].call({user: user, url: url, token: token}, ctx.request)
+    end
+
+    def self.send_change_email_verification_payload(ctx, user, update_to, callback_url)
+      sender = ctx.context.options.email_verification[:send_verification_email]
+      return unless sender.respond_to?(:call)
+
+      token = create_email_verification_token(ctx, user["email"], update_to: update_to, extra: {"requestType" => "change-email-verification"})
+      callback = URI.encode_www_form_component(callback_url || "/")
+      url = "#{ctx.context.base_url}/verify-email?token=#{URI.encode_www_form_component(token)}&callbackURL=#{callback}"
+      sender.call({user: user.merge("email" => update_to), url: url, token: token}, ctx.request)
     end
 
     def self.create_email_verification_token(ctx, email, update_to: nil, extra: {})
