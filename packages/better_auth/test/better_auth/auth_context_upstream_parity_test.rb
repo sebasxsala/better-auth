@@ -391,6 +391,95 @@ class BetterAuthAuthContextUpstreamParityTest < Minitest::Test
     assert_equal "", auth.options.base_url
   end
 
+  def test_direct_api_resolves_dynamic_base_url_from_headers
+    captured = []
+    auth = BetterAuth.auth(
+      secret: SECRET,
+      base_url: {allowed_hosts: ["example.com"], protocol: "https"},
+      plugins: [capture_context_plugin(captured)]
+    )
+
+    response = auth.api.capture_context(headers: {"host" => "example.com"})
+
+    assert_equal({ok: true}, response)
+    assert_equal "https://example.com/api/auth", captured.first.fetch(:base_url)
+    assert_equal "https://example.com", captured.first.fetch(:options_base_url)
+  end
+
+  def test_direct_api_dynamic_base_url_honors_forwarded_host_by_default
+    captured = []
+    auth = BetterAuth.auth(
+      secret: SECRET,
+      base_url: {allowed_hosts: ["example.com", "proxy.example.com"], protocol: "https"},
+      plugins: [capture_context_plugin(captured)]
+    )
+
+    auth.api.capture_context(headers: {"host" => "example.com", "x-forwarded-host" => "proxy.example.com"})
+
+    assert_equal "https://proxy.example.com/api/auth", captured.first.fetch(:base_url)
+  end
+
+  def test_direct_api_dynamic_base_url_ignores_forwarded_host_when_disabled
+    captured = []
+    auth = BetterAuth.auth(
+      secret: SECRET,
+      base_url: {allowed_hosts: ["example.com", "proxy.example.com"], protocol: "https"},
+      advanced: {trusted_proxy_headers: false},
+      plugins: [capture_context_plugin(captured)]
+    )
+
+    auth.api.capture_context(headers: {"host" => "example.com", "x-forwarded-host" => "proxy.example.com"})
+
+    assert_equal "https://example.com/api/auth", captured.first.fetch(:base_url)
+  end
+
+  def test_direct_api_resolves_dynamic_base_url_from_rack_request
+    captured = []
+    auth = BetterAuth.auth(
+      secret: SECRET,
+      base_url: {allowed_hosts: ["example.com"], protocol: "https"},
+      plugins: [capture_context_plugin(captured)]
+    )
+    request = Rack::Request.new(rack_env("GET", "/api/auth/capture-context", headers: {"HTTP_HOST" => "example.com"}))
+
+    status, _headers, body = auth.api.capture_context(request: request)
+
+    assert_equal 200, status
+    assert_equal({"ok" => true}, JSON.parse(body.join))
+    assert_equal "https://example.com/api/auth", captured.first.fetch(:base_url)
+  end
+
+  def test_direct_api_dynamic_base_url_runtime_is_isolated_per_call
+    captured = []
+    auth = BetterAuth.auth(
+      secret: SECRET,
+      base_url: {allowed_hosts: ["tenant-a.example.com", "tenant-b.example.com"], protocol: "https"},
+      plugins: [capture_context_plugin(captured)]
+    )
+
+    auth.api.capture_context(headers: {"host" => "tenant-a.example.com"})
+    auth.api.capture_context(headers: {"host" => "tenant-b.example.com"})
+
+    assert_equal ["https://tenant-a.example.com/api/auth", "https://tenant-b.example.com/api/auth"], captured.map { |entry| entry.fetch(:base_url) }
+    assert_equal "", auth.context.base_url
+    assert_equal "", auth.options.base_url
+  end
+
+  def test_direct_api_dynamic_base_url_raises_api_error_without_source_or_fallback
+    auth = BetterAuth.auth(
+      secret: SECRET,
+      base_url: {allowed_hosts: ["example.com"], protocol: "https"},
+      plugins: [capture_context_plugin([])]
+    )
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.capture_context
+    end
+
+    assert_equal "INTERNAL_SERVER_ERROR", error.status
+    assert_includes error.message, "Dynamic baseURL could not be resolved"
+  end
+
   def test_direct_api_redirect_errors_include_headers_set_before_redirect
     auth = BetterAuth.auth(
       base_url: "http://localhost:3000",

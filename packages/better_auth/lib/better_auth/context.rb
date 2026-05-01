@@ -159,6 +159,17 @@ module BetterAuth
       runtime[:trusted_origins] = current_trusted_origins(request)
     end
 
+    def prepare_for_api_call!(source)
+      runtime = request_runtime
+      runtime[:current_session] = nil
+      runtime[:new_session] = nil
+      if options.dynamic_base_url?
+        runtime[:base_url] = resolved_dynamic_base_url(source)
+        refresh_cookies!
+      end
+      runtime[:trusted_origins] = current_trusted_origins(request_for_callbacks(source))
+    end
+
     def reset_runtime!
       Thread.current[runtime_key] = nil if request_runtime?
       options.clear_runtime_base_url! if options.respond_to?(:clear_runtime_base_url!)
@@ -196,11 +207,23 @@ module BetterAuth
         options.base_path,
         request,
         load_env: true,
-        trusted_proxy_headers: options.advanced[:trusted_proxy_headers]
+        trusted_proxy_headers: dynamic_trusted_proxy_headers?
       )
       origin = Configuration.origin_for(URI.parse(resolved))
       options.set_runtime_base_url(origin) if options.respond_to?(:set_runtime_base_url)
       resolved
+    end
+
+    def dynamic_trusted_proxy_headers?
+      return true unless options.advanced.key?(:trusted_proxy_headers)
+
+      !!options.advanced[:trusted_proxy_headers]
+    end
+
+    def request_for_callbacks(source)
+      return source if source.respond_to?(:get_header)
+
+      DirectAPIRequest.new(source, base_url) if source.is_a?(Hash)
     end
 
     def request_runtime
@@ -319,6 +342,23 @@ module BetterAuth
 
     def plugin_context_attribute?(key)
       ![:options, :adapter, :internal_adapter].include?(key)
+    end
+
+    class DirectAPIRequest
+      attr_reader :headers, :url
+
+      def initialize(headers, url)
+        @headers = headers.transform_keys { |key| key.to_s.downcase }
+        @url = url
+      end
+
+      def get_header(key)
+        normalized = key.to_s
+          .sub(/\AHTTP_/, "")
+          .downcase
+          .tr("_", "-")
+        headers[normalized] || headers[key.to_s] || headers[key.to_s.downcase]
+      end
     end
   end
 end

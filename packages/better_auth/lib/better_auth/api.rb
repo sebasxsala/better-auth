@@ -14,18 +14,34 @@ module BetterAuth
       context.reset_runtime! if context.respond_to?(:reset_runtime!)
       endpoint = endpoints.fetch(key.to_sym)
       input = symbolize_keys(input || {})
+      request = input[:request]
+      headers = request_headers(request).merge(normalize_headers_hash(input[:headers] || {}))
+      begin
+        prepare_context_for_call!(request, headers)
+      rescue APIError => error
+        result = Endpoint::Result.new(response: error, status: error.status_code, headers: error.headers)
+        return format_result(result, input)
+      rescue Error => error
+        api_error = APIError.new("INTERNAL_SERVER_ERROR", message: error.message)
+        result = Endpoint::Result.new(response: api_error, status: api_error.status_code, headers: api_error.headers)
+        return format_result(result, input)
+      end
+      input[:as_response] = true if request_like?(request) && !input.key?(:as_response)
       endpoint_context = Endpoint::Context.new(
         path: endpoint.path,
-        method: input[:method] || Array(endpoint.methods).first,
+        method: input[:method] || request_method(request) || Array(endpoint.methods).first,
         query: input[:query] || {},
         body: input[:body] || {},
         params: input[:params] || {},
-        headers: input[:headers] || {},
-        context: context
+        headers: headers,
+        context: context,
+        request: request_like?(request) ? request : nil
       )
 
       result = run_endpoint_with_hooks(endpoint, endpoint_context)
       format_result(result, input)
+    ensure
+      context.clear_runtime! if context.respond_to?(:clear_runtime!)
     end
 
     def execute(endpoint, endpoint_context)
@@ -49,6 +65,34 @@ module BetterAuth
         .tr("-", "_")
         .downcase
         .to_sym
+    end
+
+    def prepare_context_for_call!(request, headers)
+      return unless context.respond_to?(:prepare_for_api_call!)
+
+      source = direct_call_source(request, headers)
+      if context.options.dynamic_base_url? && source.nil? && !dynamic_base_url_fallback?
+        raise APIError.new(
+          "INTERNAL_SERVER_ERROR",
+          message: "Dynamic baseURL could not be resolved for this direct auth.api call. Pass `headers: request.headers` (or `request`) to the call, or add `fallback` to your baseURL config."
+        )
+      end
+
+      context.prepare_for_api_call!(source)
+    end
+
+    def direct_call_source(request, headers)
+      return request if request_like?(request)
+      return headers if headers.key?("host") || headers.key?("x-forwarded-host")
+
+      nil
+    end
+
+    def dynamic_base_url_fallback?
+      config = context.options.base_url_config
+      return false unless config.is_a?(Hash)
+
+      !!(config[:fallback] || config["fallback"])
     end
 
     def run_endpoint_with_hooks(endpoint, endpoint_context)
@@ -137,14 +181,15 @@ module BetterAuth
 
     def format_result(result, input)
       return result.to_rack_response if result.raw_response?
+      as_response = input[:as_response] || request_like?(input[:request])
 
       if result.response.is_a?(APIError)
-        return error_response(result.response, headers: result.headers) if input[:as_response]
+        return error_response(result.response, headers: result.headers) if as_response
 
         raise error_with_headers(result.response, result.headers)
       end
 
-      return result.to_rack_response if input[:as_response]
+      return result.to_rack_response if as_response
 
       if input[:return_headers]
         output = {
@@ -215,6 +260,55 @@ module BetterAuth
       return unless hash.is_a?(Hash)
 
       hash[key] || hash[key.to_s]
+    end
+
+    def request_like?(value)
+      return false unless value
+
+      value.respond_to?(:request_method) || request_method(value) || !request_headers(value).empty?
+    end
+
+    def request_method(request)
+      return unless request
+      return request.request_method if request.respond_to?(:request_method)
+
+      request.public_send(:method)
+    rescue ArgumentError, NoMethodError
+      nil
+    end
+
+    def request_headers(request)
+      return {} unless request
+
+      if request.respond_to?(:env)
+        return headers_from_env(request.env)
+      end
+
+      return normalize_headers_hash(request.headers) if request.respond_to?(:headers)
+
+      {}
+    end
+
+    def headers_from_env(env)
+      env.each_with_object({}) do |(key, value), headers|
+        case key
+        when "CONTENT_TYPE"
+          headers["content-type"] = value if value
+        when "CONTENT_LENGTH"
+          headers["content-length"] = value if value
+        else
+          next unless key.start_with?("HTTP_")
+
+          header = key.delete_prefix("HTTP_").downcase.tr("_", "-")
+          headers[header] = value
+        end
+      end
+    end
+
+    def normalize_headers_hash(headers)
+      headers.each_with_object({}) do |(key, value), result|
+        result[key.to_s.downcase.tr("_", "-")] = value
+      end
     end
 
     def symbolize_keys(value)
