@@ -1,195 +1,248 @@
 ---
-title: User & Accounts
-description: User and account management.
+title: Users And Accounts
+description: Learn how to update users, change email, manage passwords, delete users, list accounts, link accounts, unlink accounts, and handle OAuth tokens.
 ---
 
-Better Auth Ruby stores user profile data in the `user` table and authentication
-provider data in the `account` table.
+## Update User
 
-## Users
+### Update User Information
 
-The user record includes `id`, `name`, `email`, `emailVerified`, `image`,
-`createdAt`, and `updatedAt`.
-
-```ruby title="config/auth.rb"
-auth = BetterAuth.auth(
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  user: {
-    additional_fields: {
-      role: {
-        type: "string",
-        required: false,
-        default_value: "user"
-      }
-    }
-  }
-)
-```
-
-```ruby title="app/services/update_user.rb"
+```ruby
 auth.api.update_user(
-  headers: {
-    "cookie" => request.get_header("HTTP_COOKIE").to_s
-  },
+  headers: {"cookie" => cookie},
   body: {
     name: "Jane Doe",
-    image: "https://example.com/avatar.png",
-    role: "admin"
+    image: "https://example.com/avatar.png"
   }
 )
 ```
 
 Email cannot be changed with `update_user`; use `change_email`.
 
-## Change Email
+### Change Email
 
-```ruby title="config/auth.rb"
+Enable email changes:
+
+```ruby
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  user: {
+    change_email: {
+      enabled: true
+    }
+  },
+  email_verification: {
+    send_verification_email: ->(data, _request) { AuthMailer.verify_email(data).deliver_later }
+  }
+)
+```
+
+Request the change:
+
+```ruby
+auth.api.change_email(
+  headers: {"cookie" => cookie},
+  body: {
+    newEmail: "new@example.com",
+    callbackURL: "/settings"
+  }
+)
+```
+
+The new email becomes active after the verification link is used.
+
+#### Confirming With Current Email
+
+Require the current email to confirm first:
+
+```ruby
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   user: {
     change_email: {
       enabled: true,
-      update_email_without_verification: false
+      send_change_email_confirmation: lambda do |data, _request|
+        AuthMailer.with(
+          user: data.fetch(:user),
+          new_email: data.fetch(:new_email),
+          url: data.fetch(:url),
+          token: data.fetch(:token)
+        ).confirm_email_change.deliver_later
+      end
     }
   },
   email_verification: {
-    send_verification_email: ->(data, _request) {
-      UserMailer.verify_email(data).deliver_later
-    }
+    send_verification_email: ->(data, _request) { AuthMailer.verify_email(data).deliver_later }
   }
 )
 ```
 
-```ruby title="app/services/change_email.rb"
-auth.api.change_email(
-  headers: {
-    "cookie" => request.get_header("HTTP_COOKIE").to_s
-  },
+The flow is:
+
+1. `change_email` sends a confirmation link to the current email.
+2. The current email confirmation sends a verification link to the new email.
+3. The new email verification updates the user email and marks it verified.
+
+#### Updating Without Verification
+
+Allow unverified users to update email immediately:
+
+```ruby
+user: {
+  change_email: {
+    enabled: true,
+    update_email_without_verification: true
+  }
+}
+```
+
+If a verification sender is configured, Better Auth sends a normal verification link for the new email after the update.
+
+#### Client Usage
+
+HTTP clients call:
+
+```bash
+curl -i http://localhost:3000/api/auth/change-email \
+  -H 'content-type: application/json' \
+  -H "cookie: $COOKIE" \
+  -d '{"newEmail":"new@example.com","callbackURL":"/settings"}'
+```
+
+### Change Password
+
+```ruby
+auth.api.change_password(
+  headers: {"cookie" => cookie},
   body: {
-    new_email: "new-email@example.com"
+    currentPassword: "old-password",
+    newPassword: "new-password",
+    revokeOtherSessions: true
   }
 )
 ```
 
-## Passwords
+### Set Password
 
-```ruby title="app/services/passwords.rb"
+Use `set_password` for users who signed in with OAuth and do not have a credential password.
+
+```ruby
 auth.api.set_password(
-  headers: {
-    "cookie" => request.get_header("HTTP_COOKIE").to_s
-  },
+  headers: {"cookie" => cookie},
   body: {
-    new_password: "new-password123"
+    newPassword: "password123"
   }
 )
+```
 
+### Verify Password
+
+```ruby
 auth.api.verify_password(
-  headers: {
-    "cookie" => request.get_header("HTTP_COOKIE").to_s
-  },
+  headers: {"cookie" => cookie},
   body: {
     password: "password123"
-  }
-)
-
-auth.api.change_password(
-  headers: {
-    "cookie" => request.get_header("HTTP_COOKIE").to_s
-  },
-  body: {
-    current_password: "password123",
-    new_password: "new-password123",
-    revoke_other_sessions: true
   }
 )
 ```
 
 ## Delete User
 
-Deletion must be explicitly enabled.
+Enable user deletion:
 
-```ruby title="config/auth.rb"
-auth = BetterAuth.auth(
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  user: {
-    delete_user: {
-      enabled: true,
-      before_delete: ->(user, _request) {
-        AuditLog.create!(event: "user_delete_requested", user_id: user.fetch("id"))
-      },
-      after_delete: ->(user, _request) {
-        AuditLog.create!(event: "user_deleted", user_id: user.fetch("id"))
-      }
-    }
+```ruby
+user: {
+  delete_user: {
+    enabled: true
   }
-)
+}
 ```
 
-```ruby title="app/services/delete_user.rb"
+Delete with password:
+
+```ruby
 auth.api.delete_user(
-  headers: {
-    "cookie" => request.get_header("HTTP_COOKIE").to_s
-  },
+  headers: {"cookie" => cookie},
   body: {
     password: "password123"
   }
 )
 ```
 
+### Adding Verification Before Deletion
+
+```ruby
+user: {
+  delete_user: {
+    enabled: true,
+    send_delete_account_verification: lambda do |data, _request|
+      AuthMailer.with(
+        user: data.fetch(:user),
+        token: data.fetch(:token)
+      ).delete_account.deliver_later
+    end
+  }
+}
+```
+
+Then complete deletion with the token:
+
+```ruby
+auth.api.delete_user(
+  headers: {"cookie" => cookie},
+  body: {
+    token: params[:token]
+  }
+)
+```
+
+### Authentication Requirements
+
+Deletion requires one of:
+
+- The correct password.
+- A valid delete-account verification token.
+- A fresh session when no password or token is supplied.
+
+### Callbacks
+
+```ruby
+user: {
+  delete_user: {
+    enabled: true,
+    before_delete: ->(user, _request) { AuditLog.create!(user_id: user["id"], action: "before_delete") },
+    after_delete: ->(user, _request) { AuditLog.create!(user_id: user["id"], action: "after_delete") }
+  }
+}
+```
+
 ## Accounts
 
-An account stores provider-specific authentication data: `accountId`,
-`providerId`, `userId`, OAuth tokens, expiration dates, and credential password
-hashes.
+Accounts represent credentials and linked OAuth providers.
 
-```ruby title="app/services/accounts.rb"
-accounts = auth.api.list_accounts(
-  headers: {
-    "cookie" => request.get_header("HTTP_COOKIE").to_s
-  }
-)
+### List User Accounts
+
+```ruby
+auth.api.list_accounts(headers: {"cookie" => cookie})
 ```
 
-## OAuth Token Encryption
+### Token Encryption
 
-```ruby title="config/auth.rb"
-auth = BetterAuth.auth(
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  account: {
-    encrypt_oauth_tokens: true
-  }
-)
+Encrypt stored OAuth tokens:
+
+```ruby
+account: {
+  encrypt_oauth_tokens: true
+}
 ```
 
-You can also use database hooks if you need custom encryption.
+`get_access_token` returns decrypted access tokens when the current user has access.
 
-```ruby title="config/auth.rb"
-auth = BetterAuth.auth(
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  database_hooks: {
-    account: {
-      create: {
-        before: lambda do |account, _context|
-          encrypted = account.dup
-          encrypted["accessToken"] = encrypt(encrypted["accessToken"]) if encrypted["accessToken"]
-          encrypted["refreshToken"] = encrypt(encrypted["refreshToken"]) if encrypted["refreshToken"]
+### Account Linking
 
-          {
-            data: encrypted
-          }
-        end
-      }
-    }
-  }
-)
-```
+Configure account linking rules:
 
-## Account Linking
-
-Account linking is enabled by default when the provider confirms the email as
-verified.
-
-```ruby title="config/auth.rb"
+```ruby
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   account: {
@@ -203,45 +256,42 @@ auth = BetterAuth.auth(
 )
 ```
 
-```ruby title="app/services/link_account.rb"
-result = auth.api.link_social(
-  headers: {
-    "cookie" => request.get_header("HTTP_COOKIE").to_s
-  },
+#### Forced Linking
+
+Trusted providers can link accounts automatically when provider identity is verified and linking rules allow it.
+
+```ruby
+account: {
+  account_linking: {
+    trusted_providers: ["google"]
+  }
+}
+```
+
+#### Manually Linking Accounts
+
+```ruby
+auth.api.link_social(
+  headers: {"cookie" => cookie},
   body: {
-    provider: "google",
-    callback_url: "/settings/accounts"
+    provider: "github",
+    callbackURL: "/settings/accounts"
   }
 )
 ```
 
-```ruby title="app/services/unlink_account.rb"
+Native ID-token linking is available for providers with ID token verification.
+
+### Account Unlinking
+
+```ruby
 auth.api.unlink_account(
-  headers: {
-    "cookie" => request.get_header("HTTP_COOKIE").to_s
-  },
+  headers: {"cookie" => cookie},
   body: {
-    provider_id: "google",
-    account_id: "provider-account-id"
+    providerId: "github",
+    accountId: "github-user-id"
   }
 )
 ```
 
-By default, Better Auth prevents unlinking the user's last account.
-
-```ruby title="config/auth.rb"
-auth = BetterAuth.auth(
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  account: {
-    account_linking: {
-      allow_unlinking_all: true
-    }
-  }
-)
-```
-
-## Not Supported
-
-- Browser client account helpers in these examples. Use HTTP routes or
-  `auth.api` from Ruby.
-- TypeScript account and user inference examples.
+By default, Better Auth prevents unlinking the user's last account. Set `account.account_linking.allow_unlinking_all` only when your app has another recovery path.

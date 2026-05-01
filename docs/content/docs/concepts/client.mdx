@@ -1,143 +1,201 @@
 ---
 title: Client
-description: Better Auth Ruby client integration.
+description: Learn how applications call Better Auth Ruby from browsers, Rails controllers, Rack apps, and server-side Ruby.
 ---
 
-Better Auth Ruby exposes the Better Auth HTTP route surface from a Rack app.
-Frontend and non-Ruby clients should call those HTTP routes.
+Better Auth Ruby is an HTTP auth server plus a server-side Ruby API. Browser and native clients call the mounted Rack endpoint with normal HTTP requests.
 
-There is no Ruby browser client package. Server-side Ruby code should use
-`auth.api`; browser code should call the mounted auth routes.
+## Installation
 
-## Mount The Auth Server
+Install the core gem for Rack apps:
 
-Rack:
+```ruby title="Gemfile"
+gem "better_auth"
+```
 
-```ruby title="config.ru"
-require "better_auth"
+For Rails apps, install the Rails adapter:
 
+```ruby title="Gemfile"
+gem "better_auth-rails"
+```
+
+## Create Client Instance
+
+Server-side Ruby code uses `auth.api`.
+
+```ruby
 auth = BetterAuth.auth(
-  base_url: "http://localhost:9292/api/auth",
+  base_url: "http://localhost:3000/api/auth",
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  email_and_password: {
-    enabled: true
-  }
+  email_and_password: {enabled: true}
 )
-
-map "/api/auth" do
-  run auth
-end
 ```
 
-Rails:
+Browsers call the mounted auth route:
 
-```ruby title="config/routes.rb"
-Rails.application.routes.draw do
-  better_auth
-end
+```js
+await fetch("/api/auth/sign-in/email", {
+  method: "POST",
+  credentials: "include",
+  headers: {"content-type": "application/json"},
+  body: JSON.stringify({
+    email: "john@example.com",
+    password: "password123"
+  })
+});
 ```
 
-## Sign Up
+## Usage
 
-```bash title="Terminal"
+Sign up:
+
+```bash
 curl -i http://localhost:3000/api/auth/sign-up/email \
-  -H "content-type: application/json" \
-  -d '{"email":"jane@example.com","password":"password123","name":"Jane"}'
+  -H 'content-type: application/json' \
+  -d '{"email":"john@example.com","password":"password123","name":"John"}'
 ```
 
-The response includes a session cookie when auto sign-in is enabled.
+Sign in:
 
-## Sign In
-
-```bash title="Terminal"
-curl -i http://localhost:3000/api/auth/sign-in/email \
-  -H "content-type: application/json" \
-  -d '{"email":"jane@example.com","password":"password123"}'
-```
-
-Store the returned `set-cookie` value and send it on authenticated requests.
-
-## Get Session
-
-```bash title="Terminal"
-curl http://localhost:3000/api/auth/get-session \
-  -H "Cookie: better-auth.session_token=..."
-```
-
-## Sign Out
-
-```bash title="Terminal"
-curl -i http://localhost:3000/api/auth/sign-out \
-  -X POST \
-  -H "Cookie: better-auth.session_token=..."
-```
-
-## Server-Side Ruby Client
-
-Use `auth.api` when Ruby code is calling Better Auth internally.
-
-```ruby title="app/services/auth_client.rb"
-result = auth.api.sign_in_email(
-  return_headers: true,
+```ruby
+response = auth.api.sign_in_email(
   body: {
-    email: "jane@example.com",
+    email: "john@example.com",
     password: "password123"
   },
-  headers: {
-    "user-agent" => "Ruby service"
-  }
+  return_headers: true
 )
 
-cookie = result[:headers]["set-cookie"]
+cookie = response[:headers].fetch("set-cookie")
 ```
 
-## Rails Controller Helpers
+Get the current session:
 
-Rails apps can use controller helpers instead of manually calling
-`get_session`.
+```ruby
+auth.api.get_session(headers: {"cookie" => cookie})
+```
 
-```ruby title="app/controllers/application_controller.rb"
-class ApplicationController < ActionController::Base
+Sign out:
+
+```ruby
+auth.api.sign_out(headers: {"cookie" => cookie})
+```
+
+### Hooks
+
+Ruby apps do not use reactive browser hooks. In Rails, use controller helpers for request-time session access.
+
+```ruby
+class DashboardController < ApplicationController
   include BetterAuth::Rails::ControllerHelpers
-end
-```
 
-```ruby title="app/controllers/posts_controller.rb"
-class PostsController < ApplicationController
-  before_action :require_authentication
+  before_action :require_better_auth_session!
 
-  def index
-    @user = current_user
+  def show
+    @user = better_auth_user
   end
 end
 ```
 
-Available helpers:
+### Fetch Options
 
-- `current_session`
-- `current_user`
-- `authenticated?`
-- `require_authentication`
+Browser requests that should keep the auth session must include credentials:
 
-## Cross-Origin Requests
+```js
+fetch("/api/auth/get-session", {
+  credentials: "include"
+});
+```
 
-If your browser client runs on another origin, configure `trusted_origins`.
+Cross-origin apps must configure cookies and trusted origins on the server:
 
-```ruby title="config/auth.rb"
+```ruby
 auth = BetterAuth.auth(
-  base_url: "https://auth.example.com/api/auth",
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  trusted_origins: [
-    "https://app.example.com"
-  ]
+  base_url: "https://api.example.com/api/auth",
+  trusted_origins: ["https://app.example.com"],
+  advanced: {
+    cross_subdomain_cookies: {
+      enabled: true,
+      domain: ".example.com"
+    }
+  }
 )
 ```
 
-For cookie-based browser sessions, make sure requests include credentials and
-that your framework or proxy allows credentials for the trusted origin.
+### Disabling Default Fetch Plugins
 
-## Not Supported
+The Ruby server has no built-in browser fetch plugin layer. Configure browser fetch behavior in your frontend HTTP client.
 
-- A Ruby equivalent of the upstream browser client package.
-- Framework-specific client hooks such as React, Vue, Svelte, or Solid helpers.
-- TypeScript plugin client inference.
+```js
+fetch("/api/auth/sign-in/email", {
+  method: "POST",
+  credentials: "include"
+});
+```
+
+### Session Options
+
+Use `get_session` when you need the current session and `list_sessions` when you need every active session for the user.
+
+```ruby
+session = auth.api.get_session(headers: {"cookie" => cookie})
+sessions = auth.api.list_sessions(headers: {"cookie" => cookie})
+```
+
+Session expiration, refresh, freshness, cookie cache, secondary storage, and stateless sessions are configured on the server. See [Session Management](/docs/concepts/session-management).
+
+### Disable Default Fetch Plugins
+
+If your frontend client has redirect or retry middleware, disable it in that client. Better Auth Ruby only returns HTTP responses from the mounted Rack endpoint.
+
+### Disabling Hook Rerenders
+
+Ruby does not provide reactive browser hooks. In Rails, controller helpers read the current session per request, and browser apps can refetch `/get-session` when needed.
+
+### Handling Errors
+
+Server-side Ruby calls raise `BetterAuth::APIError`.
+
+```ruby
+begin
+  auth.api.sign_in_email(body: {email: "john@example.com", password: "bad"})
+rescue BetterAuth::APIError => error
+  error.status_code
+  error.message
+end
+```
+
+HTTP clients should branch on the response status.
+
+```js
+const response = await fetch("/api/auth/sign-in/email", options);
+
+if (!response.ok) {
+  const error = await response.json();
+}
+```
+
+#### Error Codes
+
+`BetterAuth::APIError` exposes `status_code`, `code`, `message`, and `headers`.
+
+```ruby
+rescue BetterAuth::APIError => error
+  error.code
+end
+```
+
+### Plugins
+
+Server plugins are configured in Ruby and may add routes that clients call over HTTP.
+
+```ruby
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  plugins: [
+    BetterAuth::Plugins.magic_link(
+      send_magic_link: ->(data, _request) { AuthMailer.magic_link(data).deliver_later }
+    )
+  ]
+)
+```

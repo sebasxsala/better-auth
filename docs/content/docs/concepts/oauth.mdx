@@ -1,207 +1,344 @@
 ---
 title: OAuth
-description: How Better Auth Ruby handles OAuth.
+description: Learn how to configure social OAuth providers, sign in, link accounts, request scopes, refresh tokens, map profiles, and customize provider options.
 ---
 
-Better Auth Ruby includes OAuth 2.0 and OpenID Connect flows for supported
-social providers. Configure providers under `social_providers`.
+Better Auth Ruby supports built-in social providers and generic OAuth through plugins.
 
-## Configure Social Providers
+If a provider is not built in, use `BetterAuth::Plugins.generic_oauth`.
 
-```ruby title="config/auth.rb"
-require "better_auth"
+## Configuring Social Providers
 
+```ruby
 auth = BetterAuth.auth(
   base_url: "https://app.example.com/api/auth",
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   social_providers: {
-    google: BetterAuth::SocialProviders.google(
-      client_id: ENV.fetch("GOOGLE_CLIENT_ID"),
-      client_secret: ENV.fetch("GOOGLE_CLIENT_SECRET")
-    ),
     github: BetterAuth::SocialProviders.github(
       client_id: ENV.fetch("GITHUB_CLIENT_ID"),
       client_secret: ENV.fetch("GITHUB_CLIENT_SECRET")
+    ),
+    google: BetterAuth::SocialProviders.google(
+      client_id: ENV.fetch("GOOGLE_CLIENT_ID"),
+      client_secret: ENV.fetch("GOOGLE_CLIENT_SECRET")
     )
   }
 )
 ```
 
-The OAuth callback path is derived from `base_url`:
+## Usage
 
-```txt
-https://app.example.com/api/auth/callback/google
-```
+### Sign In
 
-## Sign In
+Start an OAuth flow:
 
-Start a redirect-based sign-in.
-
-```ruby title="app/controllers/oauth_controller.rb"
+```ruby
 result = auth.api.sign_in_social(
   body: {
-    provider: "google",
-    callback_url: "/dashboard"
+    provider: "github",
+    callbackURL: "/dashboard",
+    errorCallbackURL: "/login",
+    disableRedirect: true
   }
 )
 
-redirect_to result.fetch(:url), allow_other_host: true
+redirect_to result[:url]
 ```
 
-To get the URL without an automatic redirect flag:
+Browsers can call `/sign-in/social` and follow the returned provider URL.
 
-```ruby title="app/services/oauth.rb"
-result = auth.api.sign_in_social(
-  body: {
-    provider: "google",
-    callback_url: "/dashboard",
-    disable_redirect: true
-  }
-)
+### Link Account
 
-authorization_url = result.fetch(:url)
-```
+Link a social account to the current user:
 
-## ID Token Sign In
-
-Providers that implement ID token verification can sign in without a redirect.
-
-```ruby title="app/services/native_google_sign_in.rb"
-result = auth.api.sign_in_social(
-  body: {
-    provider: "google",
-    id_token: {
-      token: "id-token-from-provider",
-      nonce: "nonce-used-for-token",
-      access_token: "access-token",
-      refresh_token: "refresh-token"
-    }
-  }
-)
-```
-
-## Link Social Accounts
-
-```ruby title="app/controllers/account_links_controller.rb"
+```ruby
 result = auth.api.link_social(
-  headers: {
-    "cookie" => request.get_header("HTTP_COOKIE").to_s
-  },
+  headers: {"cookie" => cookie},
   body: {
-    provider: "google",
-    callback_url: "/settings/accounts",
-    scopes: ["https://www.googleapis.com/auth/drive.readonly"]
+    provider: "github",
+    callbackURL: "/settings/accounts",
+    scopes: ["repo"]
   }
 )
 
-redirect_to result.fetch(:url), allow_other_host: true
+redirect_to result[:url]
 ```
 
-Linking with an ID token is also supported when the provider supports ID token
-verification.
+Ruby also supports native or ID-token linking for providers that expose `verify_id_token`.
 
-```ruby title="app/services/link_native_account.rb"
-auth.api.link_social(
-  headers: {
-    "cookie" => request.get_header("HTTP_COOKIE").to_s
-  },
-  body: {
-    provider: "google",
-    id_token: {
-      token: "id-token-from-provider",
-      access_token: "access-token"
-    }
-  }
-)
-```
+### Get Access Token
 
-## Access Tokens
-
-Get an access token for a linked account. If the stored token is expired and the
-provider can refresh it, Better Auth refreshes and stores the new token.
-
-```ruby title="app/services/google_drive_token.rb"
+```ruby
 token = auth.api.get_access_token(
-  headers: {
-    "cookie" => request.get_header("HTTP_COOKIE").to_s
-  },
+  headers: {"cookie" => cookie},
   body: {
-    provider_id: "google"
-  }
-)
-
-access_token = token.fetch(:accessToken)
-```
-
-Server-side jobs can pass `user_id` when no session cookie is available.
-
-```ruby title="app/jobs/sync_google_drive_job.rb"
-token = auth.api.get_access_token(
-  body: {
-    user_id: user.id,
-    provider_id: "google"
+    providerId: "github"
   }
 )
 ```
 
-Refresh a token explicitly:
+If the stored token is expired and the provider has a refresh callback, Better Auth refreshes and persists it.
 
-```ruby title="app/services/oauth_refresh.rb"
-auth.api.refresh_token(
-  body: {
-    user_id: user.id,
-    provider_id: "google"
-  }
-)
-```
+### Get Account Info Provided By The Provider
 
-## Provider Account Info
-
-```ruby title="app/services/oauth_account_info.rb"
+```ruby
 info = auth.api.account_info(
-  headers: {
-    "cookie" => request.get_header("HTTP_COOKIE").to_s
-  },
+  headers: {"cookie" => cookie},
   query: {
-    account_id: params.fetch(:account_id)
+    accountId: "provider-account-id"
   }
 )
 ```
 
-## Account Linking Rules
+### Requesting Additional Scopes
 
-Account linking is enabled by default when the provider confirms the email as
-verified.
+Use `link_social` with the same provider and additional scopes:
 
-```ruby title="config/auth.rb"
-auth = BetterAuth.auth(
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  account: {
-    account_linking: {
-      enabled: true,
-      trusted_providers: ["google", "github"],
-      allow_different_emails: false,
-      update_user_info_on_link: true
+```ruby
+auth.api.link_social(
+  headers: {"cookie" => cookie},
+  body: {
+    provider: "google",
+    scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+    callbackURL: "/settings/integrations"
+  }
+)
+```
+
+Provider defaults can also include extra scopes:
+
+```ruby
+BetterAuth::SocialProviders.github(
+  client_id: ENV.fetch("GITHUB_CLIENT_ID"),
+  client_secret: ENV.fetch("GITHUB_CLIENT_SECRET"),
+  scopes: ["user:email", "read:user", "repo"]
+)
+```
+
+### Passing Additional Data Through OAuth Flow
+
+Pass a hash in `additionalData`. Reserved OAuth state keys are filtered out.
+
+```ruby
+auth.api.sign_in_social(
+  body: {
+    provider: "github",
+    callbackURL: "/dashboard",
+    additionalData: {
+      source: "pricing-page",
+      plan: "pro"
     }
   }
 )
 ```
 
-## Token Encryption
+#### Accessing Additional Data In Hooks
 
-```ruby title="config/auth.rb"
-auth = BetterAuth.auth(
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  account: {
-    encrypt_oauth_tokens: true
-  }
+Hooks can inspect request body and callback state depending on which route they run around. Validate any additional data before using it.
+
+```ruby
+hooks: {
+  after: [
+    {
+      matcher: ->(ctx) { ctx.path == "/callback/github" },
+      handler: ->(ctx) { Rails.logger.info(ctx.query["state"]) }
+    }
+  ]
+}
+```
+
+## Handling Providers Without Email
+
+OAuth providers that do not return email cannot create or link a user directly. Use provider mapping to synthesize a placeholder email only when your app can safely treat it as non-contact identity.
+
+### Synthesize A Placeholder Email With `map_profile_to_user`
+
+```ruby
+BetterAuth::SocialProviders.discord(
+  client_id: ENV.fetch("DISCORD_CLIENT_ID"),
+  client_secret: ENV.fetch("DISCORD_CLIENT_SECRET"),
+  map_profile_to_user: lambda do |profile|
+    id = profile["id"]
+    {
+      "email" => "discord-#{id}@users.example.invalid",
+      "emailVerified" => false
+    }
+  end
 )
 ```
 
-## Not Supported
+Use a domain you control or a reserved suffix such as `.invalid`.
 
-- JavaScript client OAuth helpers in these concept examples. Use HTTP routes
-  from the frontend or call `auth.api` from Ruby.
-- OAuth provider behavior that depends on a provider method not implemented by
-  the configured Ruby provider, such as ID token verification for providers that
-  do not expose `verify_id_token`.
+### Provider-Specific Notes
+
+Some providers return email only on first consent, only with specific scopes, or only for verified accounts. Check the provider class and scopes for your provider before relying on email.
+
+## Provider Options
+
+### clientId
+
+Use Ruby `client_id`; camelCase provider options are normalized where applicable.
+
+```ruby
+BetterAuth::SocialProviders.github(client_id: "...", client_secret: "...")
+```
+
+### scope
+
+Use `scope` or `scopes`.
+
+```ruby
+BetterAuth::SocialProviders.github(
+  client_id: "...",
+  client_secret: "...",
+  scope: ["read:user"]
+)
+```
+
+### redirectURI
+
+Override the redirect URI when required by the provider:
+
+```ruby
+BetterAuth::SocialProviders.github(
+  client_id: "...",
+  client_secret: "...",
+  redirect_uri: "https://app.example.com/api/auth/callback/github"
+)
+```
+
+### disableSignUp
+
+```ruby
+BetterAuth::SocialProviders.github(
+  client_id: "...",
+  client_secret: "...",
+  disable_sign_up: true
+)
+```
+
+### disableIdTokenSignIn
+
+```ruby
+BetterAuth::SocialProviders.google(
+  client_id: "...",
+  client_secret: "...",
+  disable_id_token_sign_in: true
+)
+```
+
+### verifyIdToken
+
+Provide custom ID token verification:
+
+```ruby
+BetterAuth::SocialProviders.google(
+  client_id: "...",
+  client_secret: "...",
+  verify_id_token: ->(token, nonce = nil) { MyVerifier.valid?(token, nonce) }
+)
+```
+
+### overrideUserInfoOnSignIn
+
+Update profile fields from provider data when an existing user signs in:
+
+```ruby
+BetterAuth::SocialProviders.github(
+  client_id: "...",
+  client_secret: "...",
+  override_user_info_on_sign_in: true
+)
+```
+
+### mapProfileToUser
+
+```ruby
+BetterAuth::SocialProviders.github(
+  client_id: "...",
+  client_secret: "...",
+  map_profile_to_user: ->(profile) { {"name" => profile["login"]} }
+)
+```
+
+### refreshAccessToken
+
+Provide a custom refresh callback:
+
+```ruby
+BetterAuth::SocialProviders.github(
+  client_id: "...",
+  client_secret: "...",
+  refresh_access_token: lambda do |refresh_token|
+    MyOAuth.refresh_github_token(refresh_token)
+  end
+)
+```
+
+### clientKey
+
+Some providers require a client key in addition to client ID and secret. Pass `client_key` when the provider supports it.
+
+### getUserInfo
+
+Override user-info fetching:
+
+```ruby
+BetterAuth::SocialProviders.github(
+  client_id: "...",
+  client_secret: "...",
+  get_user_info: lambda do |tokens|
+    profile = GitHubClient.new(tokens["accessToken"]).user
+    {
+      user: {
+        "id" => profile.id,
+        "email" => profile.email,
+        "name" => profile.name,
+        "emailVerified" => true
+      },
+      data: profile
+    }
+  end
+)
+```
+
+### disableImplicitSignUp
+
+```ruby
+BetterAuth::SocialProviders.github(
+  client_id: "...",
+  client_secret: "...",
+  disable_implicit_sign_up: true
+)
+```
+
+Users must explicitly request sign-up for that provider.
+
+### prompt
+
+```ruby
+BetterAuth::SocialProviders.google(
+  client_id: "...",
+  client_secret: "...",
+  prompt: "select_account"
+)
+```
+
+### responseMode
+
+Use provider-specific options when a provider class accepts response mode settings.
+
+### disableDefaultScope
+
+```ruby
+BetterAuth::SocialProviders.github(
+  client_id: "...",
+  client_secret: "...",
+  disable_default_scope: true,
+  scopes: ["read:user"]
+)
+```
+
+### Other Provider Configurations
+
+Provider classes normalize common upstream option names to Ruby snake_case. Inspect the specific provider class for provider-specific settings such as tenant IDs, app bundle identifiers, profile photo settings, and endpoint overrides.

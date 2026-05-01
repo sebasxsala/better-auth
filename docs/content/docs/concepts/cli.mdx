@@ -1,76 +1,133 @@
 ---
 title: CLI
-description: Command-line tooling for Better Auth Ruby.
+description: Learn the Ruby and Rails commands used to install, migrate, inspect, and configure Better Auth.
 ---
 
-Better Auth Ruby does not use the upstream Node CLI. Ruby projects use Ruby and
-framework-native commands.
+Better Auth Ruby uses Rails generators and Ruby tasks instead of the upstream Node CLI.
 
-## Rails Install Generator
+## Generate
 
-Create the initializer and base migration:
+Generate Rails installation files:
 
-```bash title="Terminal"
+```bash
 bin/rails generate better_auth:install
 ```
 
-The same setup is available as a Rails task:
+Generate database migrations:
 
-```bash title="Terminal"
-bin/rails better_auth:init
-```
-
-## Rails Migration Generator
-
-Generate only Better Auth migration files:
-
-```bash title="Terminal"
+```bash
 bin/rails generate better_auth:migration
 ```
 
-or:
+The migration generator reads your Better Auth configuration and includes core tables, plugin tables, custom table names, custom fields, and optional rate limit schema.
 
-```bash title="Terminal"
-bin/rails better_auth:generate:migration
+### Options
+
+Rails generators accept standard Rails generator options, such as `--skip` options provided by Rails itself. Better Auth-specific schema is read from the configured initializer.
+
+## Migrate
+
+Run migrations with Rails:
+
+```bash
+bin/rails db:migrate
 ```
 
-The generators skip an existing initializer or existing
-`*_create_better_auth_tables.rb` migration instead of overwriting it.
+For a non-Rails Rack app, use the SQL schema helpers from the core gem and apply the SQL with your own migration tool.
 
-## Core Gem Development Commands
-
-Inside `packages/better_auth`:
-
-```bash title="Terminal"
-bundle install
-bundle exec rake test
-bundle exec standardrb
-bundle exec rake ci
+```ruby
+sql = BetterAuth::Schema::SQL.generate(auth.options, adapter: :postgres)
+File.write("db/auth_schema.sql", sql)
 ```
 
-The package also exposes Make targets:
+### Options
 
-```bash title="Terminal"
-make help
-make test
-make lint
-make ci
+Use your database adapter or migration tool options when applying generated SQL outside Rails.
+
+## Init
+
+The Rails install generator creates an initializer and route mounting code for a typical app.
+
+```ruby title="config/routes.rb"
+mount BetterAuth::Rails.app => "/api/auth"
 ```
 
-## Rails Adapter Development Commands
-
-Inside `packages/better_auth-rails`:
-
-```bash title="Terminal"
-bundle install
-bundle exec rspec
-bundle exec standardrb
+```ruby title="config/initializers/better_auth.rb"
+Rails.application.config.better_auth = BetterAuth.auth(
+  base_url: "http://localhost:3000/api/auth",
+  secret: Rails.application.credentials.fetch(:better_auth_secret),
+  database: :active_record,
+  email_and_password: {enabled: true}
+)
 ```
 
-## Not Supported
+### Options
 
-- `npx @better-auth/cli` commands.
-- Upstream CLI commands for generating TypeScript config, client files, or Node
-  migrations.
-- A standalone Ruby CLI for non-Rails migrations. Rack apps should use their own
-  migration tooling and the schema APIs from the core gem.
+Configure `base_url`, `secret`, `database`, providers, plugins, and storage in the generated initializer.
+
+## Info
+
+Inspect the active configuration from Ruby:
+
+```ruby
+auth.options.base_path
+auth.options.session
+auth.api.endpoints.keys
+BetterAuth::Schema.auth_tables(auth.options).keys
+```
+
+For route-level inspection, Rails can list the mounted auth routes:
+
+```bash
+bin/rails routes | grep auth
+```
+
+### Output
+
+The useful inspection output is the resolved Ruby configuration, registered endpoint names, and generated auth tables.
+
+### Options
+
+Use the same Ruby object inspection patterns in console, tests, or diagnostics.
+
+### Examples
+
+Basic usage:
+
+```ruby
+auth.api.endpoints.keys
+```
+
+Custom config path:
+
+```ruby
+require_relative "../config/auth"
+```
+
+JSON output:
+
+```ruby
+puts JSON.pretty_generate(BetterAuth::Schema.auth_tables(auth.options))
+```
+
+## Secret
+
+Use a strong secret for token signing and encrypted cookies.
+
+```bash
+ruby -rsecurerandom -e 'puts SecureRandom.hex(32)'
+```
+
+Store the value in your framework's credential or environment system:
+
+```ruby
+secret: ENV.fetch("BETTER_AUTH_SECRET")
+```
+
+## Common Issues
+
+If generated migrations miss plugin tables, make sure the initializer includes the plugin before running the migration generator.
+
+If callbacks generate untrusted callback URL errors, configure `base_url` and `trusted_origins` to match the public origin used by your app.
+
+If requests do not keep sessions, forward `Set-Cookie` from auth responses and include the cookie header on later server-side calls.

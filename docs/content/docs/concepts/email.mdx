@@ -1,27 +1,26 @@
 ---
 title: Email
-description: Learn how to use email with Better Auth Ruby.
+description: Learn how to set up email verification, sign-in verification, callbacks, duplicate sign-up callbacks, and password reset emails.
 ---
 
-Better Auth Ruby does not send email by itself. You provide Ruby callables for
-verification, password reset, and account deletion emails.
+Better Auth Ruby does not send email directly. Configure Ruby callables that receive email payloads and the Rack request.
 
 ## Email Verification
+
+To use one-time-password based verification, use the email OTP plugin. This page covers link-based verification.
+
+### Adding Email Verification To Your App
 
 ```ruby title="config/auth.rb"
 auth = BetterAuth.auth(
   base_url: "https://app.example.com/api/auth",
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   email_and_password: {
-    enabled: true,
-    require_email_verification: true
+    enabled: true
   },
   email_verification: {
-    send_on_sign_up: true,
-    send_on_sign_in: true,
-    expires_in: 60 * 60,
     send_verification_email: lambda do |data, request|
-      UserMailer.with(
+      AuthMailer.with(
         user: data.fetch(:user),
         url: data.fetch(:url),
         token: data.fetch(:token),
@@ -32,148 +31,173 @@ auth = BetterAuth.auth(
 )
 ```
 
-The verification payload includes `:user`, `:url`, and `:token`.
+The payload includes `:user`, `:url`, and `:token`.
 
-Send a verification email manually:
+### Triggering Email Verification
 
-```ruby title="app/services/email_verification.rb"
-auth.api.send_verification_email(
-  body: {
-    email: "jane@example.com",
-    callback_url: "/dashboard"
-  },
-  headers: {
-    "cookie" => request.get_header("HTTP_COOKIE").to_s
-  }
-)
-```
+#### 1. During Sign-Up
 
-Verify an email token:
+Send a verification email when a user signs up:
 
-```ruby title="app/controllers/email_verifications_controller.rb"
-auth.api.verify_email(
-  query: {
-    token: params.fetch(:token),
-    callback_url: "/dashboard"
-  },
-  as_response: true
-)
-```
-
-## Verification Hooks
-
-```ruby title="config/auth.rb"
+```ruby
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  email_and_password: {enabled: true},
   email_verification: {
-    send_verification_email: ->(data, _request) {
-      UserMailer.verify_email(data).deliver_later
-    },
-    before_email_verification: ->(user, _request) {
-      Rails.logger.info("Verifying #{user.fetch('email')}")
-    },
-    on_email_verification: ->(user, _request) {
-      Analytics.track("email_verification_started", user_id: user.fetch("id"))
-    },
-    after_email_verification: ->(user, _request) {
-      Analytics.track("email_verified", user_id: user.fetch("id"))
-    },
-    auto_sign_in_after_verification: true
+    send_on_sign_up: true,
+    send_verification_email: ->(data, _request) { AuthMailer.verify_email(data).deliver_later }
   }
 )
 ```
 
-## Password Reset
+When `email_and_password.require_email_verification` is true, sign-up also sends the verification email.
 
-```ruby title="config/auth.rb"
+#### 2. Require Email Verification
+
+Require users to verify before email/password sign-in succeeds:
+
+```ruby
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  email_and_password: {
+    enabled: true,
+    require_email_verification: true
+  },
+  email_verification: {
+    send_on_sign_in: true,
+    send_verification_email: ->(data, _request) { AuthMailer.verify_email(data).deliver_later }
+  }
+)
+```
+
+With `send_on_sign_in`, Better Auth sends a fresh verification link when an unverified user attempts to sign in.
+
+#### 3. Manually
+
+```ruby
+auth.api.send_verification_email(
+  body: {
+    email: "john@example.com",
+    callbackURL: "/dashboard"
+  }
+)
+```
+
+If the user exists and is unverified, the configured email callback is called. Missing users return the same success response to avoid account enumeration.
+
+### Verifying The Email
+
+Verification links point to `/verify-email`.
+
+```ruby
+auth.api.verify_email(
+  query: {
+    token: params[:token],
+    callbackURL: "/dashboard"
+  }
+)
+```
+
+The endpoint marks the user email as verified and redirects to `callbackURL` when provided.
+
+### Auto Sign In After Verification
+
+Set `auto_sign_in_after_verification` to create a session cookie after verification.
+
+```ruby
+email_verification: {
+  auto_sign_in_after_verification: true,
+  send_verification_email: ->(data, _request) { AuthMailer.verify_email(data).deliver_later }
+}
+```
+
+When calling server-side, use `as_response: true` or `return_headers: true` to forward the `Set-Cookie` header.
+
+### Callback Before Email Verification
+
+Run custom logic before a user is marked as verified.
+
+```ruby
+email_verification: {
+  before_email_verification: lambda do |user, request|
+    raise BetterAuth::APIError.new("BAD_REQUEST", message: "domain blocked") if user["email"].end_with?("@blocked.test")
+  end
+}
+```
+
+### Callback After Successful Email Verification
+
+Run side effects after verification succeeds.
+
+```ruby
+email_verification: {
+  after_email_verification: lambda do |user, request|
+    Analytics.track("email_verified", user_id: user["id"])
+  end
+}
+```
+
+Ruby also supports `on_email_verification` during the verification flow.
+
+### Callback On Duplicate Sign-Up Attempt
+
+Use `on_existing_user_sign_up` to react when someone attempts to sign up with an existing email.
+
+```ruby
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  email_and_password: {
+    enabled: true,
+    on_existing_user_sign_up: lambda do |data, request|
+      SecurityMailer.existing_signup(data.fetch(:user)).deliver_later
+    end
+  }
+)
+```
+
+## Password Reset Email
+
+Configure `send_reset_password` for password reset links.
+
+```ruby
 auth = BetterAuth.auth(
   base_url: "https://app.example.com/api/auth",
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   email_and_password: {
     enabled: true,
     send_reset_password: lambda do |data, request|
-      UserMailer.with(
+      AuthMailer.with(
         user: data.fetch(:user),
         url: data.fetch(:url),
-        token: data.fetch(:token),
-        ip: request&.ip
+        token: data.fetch(:token)
       ).reset_password.deliver_later
     end,
-    reset_password_token_expires_in: 60 * 60,
-    revoke_sessions_on_password_reset: true,
-    on_password_reset: ->(data, _request) {
-      SecurityLog.password_reset(data.fetch(:user).fetch("id"))
-    }
+    on_password_reset: lambda do |user, request|
+      AuditLog.create!(user_id: user["id"], action: "password_reset")
+    end,
+    revoke_sessions_on_password_reset: true
   }
 )
 ```
 
-```ruby title="app/services/password_reset.rb"
-auth.api.request_password_reset(
+Request a reset email:
+
+```ruby
+auth.api.forget_password(
   body: {
-    email: "jane@example.com",
-    redirect_to: "/reset-password"
+    email: "john@example.com",
+    redirectTo: "/reset-password"
   }
 )
+```
 
+Reset the password:
+
+```ruby
 auth.api.reset_password(
   body: {
-    token: params.fetch(:token),
-    new_password: "new-password123"
+    token: params[:token],
+    newPassword: "new-password123"
   }
 )
 ```
-
-## Change Email
-
-```ruby title="config/auth.rb"
-auth = BetterAuth.auth(
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  user: {
-    change_email: {
-      enabled: true,
-      update_email_without_verification: false
-    }
-  },
-  email_verification: {
-    send_verification_email: ->(data, _request) {
-      UserMailer.verify_email(data).deliver_later
-    }
-  }
-)
-```
-
-```ruby title="app/services/change_email.rb"
-auth.api.change_email(
-  headers: {
-    "cookie" => request.get_header("HTTP_COOKIE").to_s
-  },
-  body: {
-    new_email: "new-email@example.com"
-  }
-)
-```
-
-## Delete Account Email
-
-```ruby title="config/auth.rb"
-auth = BetterAuth.auth(
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  user: {
-    delete_user: {
-      enabled: true,
-      delete_token_expires_in: 60 * 60,
-      send_delete_account_verification: ->(data, _request) {
-        UserMailer.delete_account(data).deliver_later
-      }
-    }
-  }
-)
-```
-
-## Not Supported
-
-- Built-in email delivery adapters. Use Action Mailer, Mail, or your delivery
-  layer.
-- Upstream browser client helpers in this page. Call HTTP endpoints or
-  server-side `auth.api` methods from Ruby.
