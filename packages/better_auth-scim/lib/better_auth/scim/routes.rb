@@ -302,9 +302,28 @@ module BetterAuth
 
     def scim_validate_patch_body!(body)
       schemas = Array(body[:schemas])
-      return if schemas.include?("urn:ietf:params:scim:api:messages:2.0:PatchOp")
+      raise scim_error("BAD_REQUEST", "Invalid schemas for PatchOp") unless schemas.include?("urn:ietf:params:scim:api:messages:2.0:PatchOp")
 
-      raise scim_error("BAD_REQUEST", "Invalid schemas for PatchOp")
+      Array(body[:operations]).each_with_index do |operation, index|
+        op = normalize_hash(operation)[:op]
+        next if op.nil? || op.to_s.empty?
+
+        unless op.is_a?(String)
+          raise scim_patch_validation_error("[body.Operations.#{index}.op] Invalid input: expected string")
+        end
+
+        next if %w[replace add remove].include?(op.downcase)
+
+        raise scim_patch_validation_error("[body.Operations.#{index}.op] Invalid option: expected one of \"replace\"|\"add\"|\"remove\"")
+      end
+    end
+
+    def scim_patch_validation_error(message)
+      APIError.new(
+        "BAD_REQUEST",
+        message: BASE_ERROR_CODES["VALIDATION_ERROR"],
+        body: {code: "VALIDATION_ERROR", message: message}
+      )
     end
 
     def scim_has_organization_plugin?(ctx)

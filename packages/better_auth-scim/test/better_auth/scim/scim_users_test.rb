@@ -55,6 +55,23 @@ class BetterAuthPluginsScimUsersTest < Minitest::Test
     assert_equal 204, deleted.fetch(:status)
   end
 
+  def test_scim_list_users_returns_upstream_list_response_shape_and_order
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "okta"}).fetch(:scimToken)
+    headers = bearer(token)
+
+    user_a = auth.api.create_scim_user(headers: headers, body: {userName: "user-a@example.com"})
+    user_b = auth.api.create_scim_user(headers: headers, body: {userName: "user-b@example.com"})
+    users = auth.api.list_scim_users(headers: headers)
+
+    assert_equal ["urn:ietf:params:scim:api:messages:2.0:ListResponse"], users.fetch(:schemas)
+    assert_equal 2, users.fetch(:itemsPerPage)
+    assert_equal 1, users.fetch(:startIndex)
+    assert_equal 2, users.fetch(:totalResults)
+    assert_equal [user_a, user_b], users.fetch(:Resources)
+  end
+
   def test_scim_filters_only_user_name_and_rejects_unsupported_filters
     auth = build_auth
     cookie = sign_up_cookie(auth)
@@ -169,5 +186,32 @@ class BetterAuthPluginsScimUsersTest < Minitest::Test
       auth.api.delete_scim_user(headers: bearer(token_a), params: {userId: "missing"})
     end
     assert_equal 404, missing_delete.status_code
+  end
+
+  def test_scim_org_scoped_get_only_allows_same_provider_and_organization
+    auth = build_auth(plugins: [BetterAuth::Plugins.organization, BetterAuth::Plugins.scim])
+    owner_cookie = sign_up_cookie(auth, "owner@example.com")
+    org_a = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Org A", slug: "org-a"})
+    org_b = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Org B", slug: "org-b"})
+    token_a = auth.api.generate_scim_token(headers: {"cookie" => owner_cookie}, body: {providerId: "provider-a", organizationId: org_a.fetch("id")}).fetch(:scimToken)
+    token_b = auth.api.generate_scim_token(headers: {"cookie" => owner_cookie}, body: {providerId: "provider-b", organizationId: org_b.fetch("id")}).fetch(:scimToken)
+
+    user_a = auth.api.create_scim_user(headers: bearer(token_a), body: {userName: "org-a-user@example.com"})
+    user_b = auth.api.create_scim_user(headers: bearer(token_b), body: {userName: "org-b-user@example.com"})
+
+    assert_equal user_a, auth.api.get_scim_user(headers: bearer(token_a), params: {userId: user_a.fetch(:id)})
+    assert_equal user_b, auth.api.get_scim_user(headers: bearer(token_b), params: {userId: user_b.fetch(:id)})
+
+    org_b_error = assert_raises(BetterAuth::APIError) do
+      auth.api.get_scim_user(headers: bearer(token_b), params: {userId: user_a.fetch(:id)})
+    end
+    assert_equal 404, org_b_error.status_code
+    assert_equal "User not found", org_b_error.message
+
+    org_a_error = assert_raises(BetterAuth::APIError) do
+      auth.api.get_scim_user(headers: bearer(token_a), params: {userId: user_b.fetch(:id)})
+    end
+    assert_equal 404, org_a_error.status_code
+    assert_equal "User not found", org_a_error.message
   end
 end

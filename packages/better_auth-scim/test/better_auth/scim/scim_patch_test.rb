@@ -73,6 +73,117 @@ class BetterAuthPluginsScimPatchTest < Minitest::Test
     assert_equal "No valid fields to update", duplicate_add.message
   end
 
+  def test_scim_patch_supports_upstream_replace_and_add_variants
+    %w[replace add].each do |operation|
+      auth = build_auth
+      cookie = sign_up_cookie(auth)
+      token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "okta"}).fetch(:scimToken)
+      headers = bearer(token)
+      created = auth.api.create_scim_user(
+        headers: headers,
+        body: {
+          userName: "#{operation}-variant@example.com",
+          name: {formatted: "Juan Perez"},
+          emails: [{value: "#{operation}-primary@example.com", primary: true}]
+        }
+      )
+
+      auth.api.patch_scim_user(
+        headers: headers,
+        params: {userId: created.fetch(:id)},
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [
+            {op: operation, path: "/externalId", value: "#{operation}-external"},
+            {op: operation, path: "/userName", value: "#{operation}-updated@example.com"},
+            {op: operation, path: "/name/givenName", value: operation.capitalize}
+          ]
+        },
+        return_status: true
+      )
+      patched = auth.api.get_scim_user(headers: headers, params: {userId: created.fetch(:id)})
+
+      assert_equal "#{operation}-updated@example.com", patched.fetch(:userName)
+      assert_equal "#{operation}-external", patched.fetch(:externalId)
+      assert_equal "#{operation.capitalize} Perez", patched.fetch(:displayName)
+      assert_equal({formatted: "#{operation.capitalize} Perez"}, patched.fetch(:name))
+    end
+  end
+
+  def test_scim_patch_supports_upstream_name_subattributes_and_nested_path_variants
+    %w[replace add].each do |operation|
+      auth = build_auth
+      cookie = sign_up_cookie(auth)
+      token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "okta"}).fetch(:scimToken)
+      headers = bearer(token)
+      created = auth.api.create_scim_user(headers: headers, body: {userName: "#{operation}-nested@example.com", name: {formatted: "Original Name"}})
+
+      auth.api.patch_scim_user(
+        headers: headers,
+        params: {userId: created.fetch(:id)},
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [
+            {op: operation, path: "/name/givenName", value: "Updated"},
+            {op: operation, path: "/name/familyName", value: "Value"}
+          ]
+        },
+        return_status: true
+      )
+      patched_subattributes = auth.api.get_scim_user(headers: headers, params: {userId: created.fetch(:id)})
+      assert_equal "Updated Value", patched_subattributes.fetch(:displayName)
+
+      auth.api.patch_scim_user(
+        headers: headers,
+        params: {userId: created.fetch(:id)},
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [
+            {op: operation, path: "name", value: {givenName: "Nested"}},
+            {op: operation, path: "name", value: {familyName: "User"}},
+            {op: operation, path: "userName", value: "#{operation}-nested-updated@example.com"}
+          ]
+        },
+        return_status: true
+      )
+      patched_nested = auth.api.get_scim_user(headers: headers, params: {userId: created.fetch(:id)})
+      assert_equal "Nested User", patched_nested.fetch(:displayName)
+      assert_equal "#{operation}-nested-updated@example.com", patched_nested.fetch(:userName)
+    end
+  end
+
+  def test_scim_patch_supports_upstream_operations_without_explicit_path
+    %w[replace add].each do |operation|
+      auth = build_auth
+      cookie = sign_up_cookie(auth)
+      token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "okta"}).fetch(:scimToken)
+      headers = bearer(token)
+      created = auth.api.create_scim_user(headers: headers, body: {userName: "#{operation}-no-path@example.com"})
+
+      auth.api.patch_scim_user(
+        headers: headers,
+        params: {userId: created.fetch(:id)},
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [
+            {
+              op: operation,
+              value: {
+                name: {formatted: "No Path Name"},
+                userName: "#{operation}-no-path-updated@example.com"
+              }
+            }
+          ]
+        },
+        return_status: true
+      )
+      patched = auth.api.get_scim_user(headers: headers, params: {userId: created.fetch(:id)})
+
+      assert_equal "No Path Name", patched.fetch(:displayName)
+      assert_equal "#{operation}-no-path-updated@example.com", patched.fetch(:userName)
+    end
+  end
+
   def test_scim_patch_supports_dot_name_paths_and_rejects_noop_patch
     auth = build_auth
     cookie = sign_up_cookie(auth)
@@ -113,7 +224,9 @@ class BetterAuthPluginsScimPatchTest < Minitest::Test
       )
     end
     assert_equal 400, invalid_op.status_code
-    assert_equal "Invalid SCIM patch operation", invalid_op.message
+    assert_equal "Validation Error", invalid_op.message
+    assert_equal "VALIDATION_ERROR", invalid_op.body.fetch(:code)
+    assert_match(/body\.Operations\.0\.op/, invalid_op.body.fetch(:message))
 
     non_string_op = assert_raises(BetterAuth::APIError) do
       auth.api.patch_scim_user(
@@ -123,6 +236,28 @@ class BetterAuthPluginsScimPatchTest < Minitest::Test
       )
     end
     assert_equal 400, non_string_op.status_code
-    assert_equal "Invalid SCIM patch operation", non_string_op.message
+    assert_equal "Validation Error", non_string_op.message
+    assert_equal "VALIDATION_ERROR", non_string_op.body.fetch(:code)
+  end
+
+  def test_scim_patch_rejects_add_on_non_existing_path
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "okta"}).fetch(:scimToken)
+    headers = bearer(token)
+    created = auth.api.create_scim_user(headers: headers, body: {userName: "add-non-existing-path@example.com", name: {formatted: "Original Name"}})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.patch_scim_user(
+        headers: headers,
+        params: {userId: created.fetch(:id)},
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [{op: "add", path: "/nonExistentField", value: "Some Value"}]
+        }
+      )
+    end
+    assert_equal 400, error.status_code
+    assert_equal "No valid fields to update", error.message
   end
 end

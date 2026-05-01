@@ -42,6 +42,27 @@ class BetterAuthPluginsScimManagementTest < Minitest::Test
     assert custom.api.create_scim_user(headers: bearer(custom_token.fetch(:scimToken)), body: {userName: "custom-encrypted@example.com"})
   end
 
+  def test_scim_after_token_generation_hook_receives_stored_provider_and_usable_token
+    hook_payloads = []
+    auth = build_auth(
+      store_scim_token: "plain",
+      after_scim_token_generated: ->(payload) { hook_payloads << payload }
+    )
+    cookie = sign_up_cookie(auth)
+
+    response = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "hook-provider"})
+    assert_kind_of String, response.fetch(:scimToken)
+    assert_equal 1, hook_payloads.length
+
+    payload = hook_payloads.first
+    provider = payload.fetch(:scim_provider)
+    assert_equal "hook-provider", provider.fetch("providerId")
+    assert_kind_of String, provider.fetch("scimToken")
+    refute_empty provider.fetch("scimToken")
+    assert_equal response.fetch(:scimToken), payload.fetch(:scim_token)
+    assert auth.api.create_scim_user(headers: bearer(response.fetch(:scimToken)), body: {userName: "hook-user@example.com"})
+  end
+
   def test_scim_requires_org_plugin_and_membership_for_org_tokens
     no_org = build_auth
     no_org_cookie = sign_up_cookie(no_org)
@@ -230,6 +251,27 @@ class BetterAuthPluginsScimManagementTest < Minitest::Test
     cookie = sign_up_cookie(auth, "lonely@example.com")
 
     assert_equal [], auth.api.list_scim_provider_connections(headers: {"cookie" => cookie}).fetch(:providers)
+  end
+
+  def test_scim_provider_management_lists_only_accessible_org_scoped_providers
+    auth = build_auth(plugins: [BetterAuth::Plugins.organization, BetterAuth::Plugins.scim])
+    owner_cookie = sign_up_cookie(auth, "owner@example.com")
+    other_cookie = sign_up_cookie(auth, "other@example.com")
+    org_a = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Org A", slug: "org-a"})
+    org_b = auth.api.create_organization(headers: {"cookie" => other_cookie}, body: {name: "Org B", slug: "org-b"})
+
+    auth.api.generate_scim_token(headers: {"cookie" => owner_cookie}, body: {providerId: "provider-1", organizationId: org_a.fetch("id")})
+    auth.api.generate_scim_token(headers: {"cookie" => owner_cookie}, body: {providerId: "provider-2", organizationId: org_a.fetch("id")})
+    auth.api.generate_scim_token(headers: {"cookie" => other_cookie}, body: {providerId: "provider-3", organizationId: org_b.fetch("id")})
+
+    providers = auth.api.list_scim_provider_connections(headers: {"cookie" => owner_cookie}).fetch(:providers)
+    assert_equal ["provider-1", "provider-2"], providers.map { |provider| provider.fetch(:providerId) }.sort
+
+    provider_by_id = providers.to_h { |provider| [provider.fetch(:providerId), provider] }
+    assert_kind_of String, provider_by_id.fetch("provider-1").fetch(:id)
+    assert_equal org_a.fetch("id"), provider_by_id.fetch("provider-1").fetch(:organizationId)
+    assert_kind_of String, provider_by_id.fetch("provider-2").fetch(:id)
+    assert_equal org_a.fetch("id"), provider_by_id.fetch("provider-2").fetch(:organizationId)
   end
 
   def test_scim_provider_management_denies_get_and_delete_for_other_org
