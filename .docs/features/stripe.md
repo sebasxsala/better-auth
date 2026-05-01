@@ -6,11 +6,12 @@ Status: Complete for Ruby server parity.
 
 ## Summary
 
-Adds `BetterAuth::Plugins.stripe` with injected Stripe client support, customer creation/de-duplication, subscription checkout, list/cancel/restore, billing portal, webhook handling, state synchronization, and organization mode.
+Adds `BetterAuth::Plugins.stripe` through the `better_auth-stripe` gem, with injected Stripe client support, customer creation/de-duplication, subscription checkout, list/cancel/restore, billing portal, webhook handling, state synchronization, and organization mode.
 
 ## Ruby Adaptation
 
-- Implemented inside the core gem as a plugin with no required Stripe gem dependency.
+- Extracted to `better_auth-stripe` to match upstream `@better-auth/stripe`; core keeps only a compatibility shim at `packages/better_auth/lib/better_auth/plugins/stripe.rb`.
+- The gem has no required Stripe SDK dependency.
 - Uses an injected `stripe_client` object so apps can provide the official Stripe SDK, a wrapper, or a fake in tests.
 - Adds `user.stripeCustomerId`; adds `subscription` when subscription mode is enabled, including `stripeScheduleId`; adds `organization.stripeCustomerId` when organization mode is configured.
 - Adds `/subscription/upgrade`, `/subscription/cancel`, `/subscription/cancel/callback`, `/subscription/restore`, `/subscription/list`, `/subscription/success`, `/subscription/billing-portal`, and `/stripe/webhook`.
