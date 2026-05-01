@@ -33,6 +33,10 @@ module BetterAuth
       Endpoint.new(
         path: "/unlink-account",
         method: "POST",
+        body_schema: request_body_schema(
+          required_strings: %w[providerId],
+          optional_strings: %w[accountId]
+        ),
         metadata: {
           openapi: {
             operationId: "unlinkAccount",
@@ -77,6 +81,10 @@ module BetterAuth
       Endpoint.new(
         path: "/get-access-token",
         method: "POST",
+        body_schema: request_body_schema(
+          required_strings: %w[providerId],
+          optional_strings: %w[accountId userId]
+        ),
         metadata: {
           openapi: {
             operationId: "getAccessToken",
@@ -143,6 +151,10 @@ module BetterAuth
       Endpoint.new(
         path: "/refresh-token",
         method: "POST",
+        body_schema: request_body_schema(
+          required_strings: %w[providerId],
+          optional_strings: %w[accountId userId]
+        ),
         metadata: {
           openapi: {
             operationId: "refreshToken",

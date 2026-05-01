@@ -11,6 +11,7 @@ module BetterAuth
       Endpoint.new(
         path: "/request-password-reset",
         method: "POST",
+        body_schema: request_body_schema(email_strings: %w[email]),
         metadata: {
           openapi: {
             operationId: "requestPasswordReset",
@@ -112,6 +113,11 @@ module BetterAuth
       Endpoint.new(
         path: "/reset-password",
         method: "POST",
+        body_schema: request_body_schema(
+          required_strings: %w[newPassword],
+          optional_strings: %w[token]
+        ),
+        query_schema: request_query_schema(optional_strings: %w[token]),
         metadata: {
           openapi: {
             operationId: "resetPassword",

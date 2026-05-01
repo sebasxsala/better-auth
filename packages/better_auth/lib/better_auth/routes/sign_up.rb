@@ -11,6 +11,10 @@ module BetterAuth
       Endpoint.new(
         path: "/sign-up/email",
         method: "POST",
+        body_schema: request_body_schema(
+          required_strings: %w[name email],
+          required_nonempty_strings: %w[password]
+        ),
         metadata: {
           allowed_media_types: [
             "application/x-www-form-urlencoded",

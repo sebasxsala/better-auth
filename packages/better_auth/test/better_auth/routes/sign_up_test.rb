@@ -240,6 +240,18 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
     assert_equal BetterAuth::BASE_ERROR_CODES["PASSWORD_TOO_SHORT"], short_password.message
   end
 
+  def test_sign_up_email_rejects_missing_required_body_fields_before_creating_user
+    auth = build_auth
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_up_email(body: {email: "missing-name@example.com", password: "password123"})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["VALIDATION_ERROR"], error.message
+    assert_nil auth.context.internal_adapter.find_user_by_email("missing-name@example.com")
+  end
+
   def test_sign_up_email_rejects_duplicate_email
     auth = build_auth
 

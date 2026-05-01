@@ -64,6 +64,18 @@ class BetterAuthRoutesAccountTest < Minitest::Test
     assert auth.context.internal_adapter.find_account_by_provider_id("other-gh", "github")
   end
 
+  def test_unlink_account_rejects_missing_provider_id_before_account_lookup
+    auth = build_auth(account: {account_linking: {allow_unlinking_all: true}})
+    cookie = sign_up_cookie(auth, email: "unlink-validation@example.com")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.unlink_account(headers: {"cookie" => cookie}, body: {})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["VALIDATION_ERROR"], error.message
+  end
+
   def test_get_access_token_and_refresh_token_use_configured_provider
     refreshed_at = Time.now + 3600
     refresh_calls = 0
@@ -106,6 +118,30 @@ class BetterAuthRoutesAccountTest < Minitest::Test
     refresh_data = auth.api.refresh_token(headers: {"cookie" => cookie}, body: {providerId: "github", accountId: account["id"]})
     assert_equal "new-refresh", refresh_data[:refreshToken]
     assert_equal "github", refresh_data[:providerId]
+  end
+
+  def test_get_access_token_rejects_missing_provider_id_before_provider_lookup
+    auth = build_auth(social_providers: {github: {id: "github"}})
+    cookie = sign_up_cookie(auth, email: "access-validation@example.com")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.get_access_token(headers: {"cookie" => cookie}, body: {})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["VALIDATION_ERROR"], error.message
+  end
+
+  def test_refresh_token_rejects_missing_provider_id_before_provider_lookup
+    auth = build_auth(social_providers: {github: {id: "github"}})
+    cookie = sign_up_cookie(auth, email: "refresh-validation@example.com")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.refresh_token(headers: {"cookie" => cookie}, body: {})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["VALIDATION_ERROR"], error.message
   end
 
   def test_get_access_token_selects_requested_same_provider_account

@@ -23,6 +23,7 @@ module BetterAuth
       @headers_schema = headers_schema
       @metadata = metadata || {}
       apply_default_open_api_metadata!
+      apply_open_api_schemas!
       @options = endpoint_options
       @use = Array(use)
       @handler = handler || ->(_ctx) {}
@@ -68,6 +69,15 @@ module BetterAuth
       metadata[:openapi] = BetterAuth::OpenAPI.default_metadata(path, methods)
     end
 
+    def apply_open_api_schemas!
+      openapi = fetch_key(metadata, :openapi)
+      return unless openapi.is_a?(Hash)
+
+      @body_schema ||= schema_for_open_api_request_body(openapi)
+      @query_schema ||= schema_for_open_api_parameters(openapi, "query")
+      @headers_schema ||= schema_for_open_api_parameters(openapi, "header")
+    end
+
     def apply_schemas!(context)
       context.body = validate_schema(:body, body_schema, context.body)
       context.query = validate_schema(:query, query_schema, context.query)
@@ -106,6 +116,54 @@ module BetterAuth
       end
 
       result
+    end
+
+    def schema_for_open_api_request_body(openapi)
+      schema = fetch_key(fetch_key(fetch_key(fetch_key(openapi, :requestBody), :content), "application/json"), :schema)
+      required = Array(fetch_key(schema, :required)).map(&:to_s)
+      return nil if required.empty?
+
+      ->(value) { validate_required_open_api_fields(value, required) }
+    end
+
+    def schema_for_open_api_parameters(openapi, location)
+      required = Array(fetch_key(openapi, :parameters))
+        .select { |parameter| parameter.is_a?(Hash) && fetch_key(parameter, :in).to_s == location && fetch_key(parameter, :required) == true }
+        .filter_map { |parameter| fetch_key(parameter, :name) }
+        .map(&:to_s)
+      return nil if required.empty?
+
+      ->(value) { validate_required_open_api_fields(value, required) }
+    end
+
+    def validate_required_open_api_fields(value, required)
+      data = normalize_open_api_input(value)
+      return false unless required.all? { |key| data.key?(open_api_storage_key(key)) && !data[open_api_storage_key(key)].nil? }
+
+      value
+    end
+
+    def normalize_open_api_input(value)
+      return {} unless value.is_a?(Hash)
+
+      value.each_with_object({}) do |(key, object_value), result|
+        result[open_api_storage_key(key)] = object_value
+      end
+    end
+
+    def open_api_storage_key(key)
+      key.to_s
+        .gsub(/([a-z\d])([A-Z])/, "\\1_\\2")
+        .tr("-", "_")
+        .downcase
+        .split("_")
+        .then { |parts| ([parts.first] + parts.drop(1).map(&:capitalize)).join }
+    end
+
+    def fetch_key(hash, key)
+      return nil unless hash.respond_to?(:[])
+
+      hash[key] || hash[key.to_s]
     end
 
     class Result

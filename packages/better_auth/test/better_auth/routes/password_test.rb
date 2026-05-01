@@ -59,6 +59,24 @@ class BetterAuthRoutesPasswordTest < Minitest::Test
     assert_empty sent
   end
 
+  def test_request_password_reset_rejects_missing_or_invalid_email
+    sent = []
+    auth = build_auth(email_and_password: {send_reset_password: ->(data, _request = nil) { sent << data }})
+
+    missing = assert_raises(BetterAuth::APIError) do
+      auth.api.request_password_reset(body: {})
+    end
+    assert_equal 400, missing.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["VALIDATION_ERROR"], missing.message
+
+    invalid = assert_raises(BetterAuth::APIError) do
+      auth.api.request_password_reset(body: {email: "not-an-email"})
+    end
+    assert_equal 400, invalid.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["VALIDATION_ERROR"], invalid.message
+    assert_empty sent
+  end
+
   def test_reset_password_callback_redirects_with_token_or_invalid_token_error
     auth = build_auth(email_and_password: {send_reset_password: ->(_data, _request = nil) {}})
     auth.api.sign_up_email(body: {email: "callback-reset@example.com", password: "old-password", name: "Reset"})
@@ -122,6 +140,20 @@ class BetterAuthRoutesPasswordTest < Minitest::Test
     end
     assert_equal 400, reused.status_code
     assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_TOKEN"], reused.message
+  end
+
+  def test_reset_password_rejects_missing_new_password_before_token_lookup
+    sent = []
+    auth = build_auth(email_and_password: {send_reset_password: ->(data, _request = nil) { sent << data }})
+    auth.api.sign_up_email(body: {email: "missing-new-password@example.com", password: "old-password", name: "Reset"})
+    auth.api.request_password_reset(body: {email: "missing-new-password@example.com"})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.reset_password(body: {token: sent.first.fetch(:token)})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["VALIDATION_ERROR"], error.message
   end
 
   def test_reset_password_does_not_revoke_sessions_by_default

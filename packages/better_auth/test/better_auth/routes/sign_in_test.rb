@@ -109,6 +109,18 @@ class BetterAuthRoutesSignInTest < Minitest::Test
     assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_EMAIL_OR_PASSWORD"], missing_user.message
   end
 
+  def test_sign_in_email_rejects_missing_required_body_fields_before_credentials_check
+    auth = build_auth
+    auth.api.sign_up_email(body: {email: "missing-password@example.com", password: "password123", name: "Missing Password"})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_in_email(body: {email: "missing-password@example.com"})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["VALIDATION_ERROR"], error.message
+  end
+
   def test_sign_in_email_requires_verified_email_when_configured
     sent = []
     auth = BetterAuth.auth(

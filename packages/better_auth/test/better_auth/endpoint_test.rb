@@ -136,7 +136,121 @@ class BetterAuthEndpointTest < Minitest::Test
     assert_equal "Validation Error", error.message
   end
 
+  def test_endpoint_derives_body_schema_from_open_api_required_fields
+    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    endpoint = BetterAuth::Endpoint.new(
+      path: "/profile",
+      method: "POST",
+      metadata: {
+        openapi: {
+          requestBody: BetterAuth::OpenAPI.json_request_body(
+            BetterAuth::OpenAPI.object_schema(
+              {name: {type: "string"}, image: {type: "string"}},
+              required: ["name"]
+            )
+          )
+        }
+      }
+    ) do |ctx|
+      ctx.body
+    end
+
+    error = assert_raises(BetterAuth::APIError) { endpoint.call(context_for(auth, endpoint, body: {})) }
+    assert_equal "BAD_REQUEST", error.status
+    assert_equal "Validation Error", error.message
+
+    result = endpoint.call(context_for(auth, endpoint, body: {name: "Ada"}))
+    assert_equal({name: "Ada"}, result.response)
+  end
+
+  def test_endpoint_derives_query_schema_from_open_api_required_parameters
+    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    endpoint = BetterAuth::Endpoint.new(
+      path: "/profile/:id",
+      method: "GET",
+      metadata: {
+        openapi: {
+          parameters: [
+            {name: "id", in: "path", required: true, schema: {type: "string"}},
+            {name: "token", in: "query", required: true, schema: {type: "string"}},
+            {name: "optional", in: "query", required: false, schema: {type: "string"}}
+          ]
+        }
+      }
+    ) do |ctx|
+      {params: ctx.params, query: ctx.query}
+    end
+
+    missing_query = assert_raises(BetterAuth::APIError) do
+      endpoint.call(context_for(auth, endpoint, params: {id: "user-1"}, query: {}))
+    end
+    assert_equal "Validation Error", missing_query.message
+
+    result = endpoint.call(context_for(auth, endpoint, params: {id: "user-1"}, query: {token: "reset-token"}))
+    assert_equal({id: "user-1"}, result.response[:params])
+    assert_equal({token: "reset-token"}, result.response[:query])
+  end
+
+  def test_base_endpoints_with_open_api_body_or_query_required_fields_validate_at_runtime
+    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET, email_and_password: {enabled: true})
+    checked = []
+
+    BetterAuth::Core.base_endpoints.each do |name, endpoint|
+      body_required = open_api_request_body_required_fields(endpoint)
+      if body_required.any?
+        checked << [name, :body]
+        assert endpoint.body_schema, "#{name} should have a runtime body schema"
+
+        error = assert_raises(BetterAuth::APIError) do
+          endpoint.call(context_for(auth, endpoint, body: {}, query: required_query_values(endpoint)))
+        end
+        assert_equal "Validation Error", error.message, "#{name} should reject missing required body fields"
+      end
+
+      if open_api_required_parameter_names(endpoint, "query").any?
+        checked << [name, :query]
+        assert endpoint.query_schema, "#{name} should have a runtime query schema"
+
+        error = assert_raises(BetterAuth::APIError) do
+          endpoint.call(context_for(auth, endpoint, body: required_body_values(endpoint), query: {}))
+        end
+        assert_equal "Validation Error", error.message, "#{name} should reject missing required query fields"
+      end
+    end
+
+    refute_empty checked
+  end
+
   private
+
+  def open_api_request_body_required_fields(endpoint)
+    schema = dig_keys(endpoint.metadata, :openapi, :requestBody, :content, "application/json", :schema)
+    Array(fetch_key(schema, :required))
+  end
+
+  def open_api_required_parameter_names(endpoint, location)
+    Array(dig_keys(endpoint.metadata, :openapi, :parameters))
+      .select { |parameter| fetch_key(parameter, :in).to_s == location && fetch_key(parameter, :required) == true }
+      .filter_map { |parameter| fetch_key(parameter, :name) }
+  end
+
+  def required_body_values(endpoint)
+    open_api_request_body_required_fields(endpoint).to_h { |field| [field, "value"] }
+  end
+
+  def required_query_values(endpoint)
+    open_api_required_parameter_names(endpoint, "query").to_h { |field| [field, "value"] }
+  end
+
+  def dig_keys(hash, *keys)
+    keys.reduce(hash) { |value, key| fetch_key(value, key) }
+  end
+
+  def fetch_key(hash, key)
+    return nil unless hash.respond_to?(:[])
+
+    hash[key] || hash[key.to_s]
+  end
 
   def context_for(auth, endpoint, body: {}, query: {}, params: {}, headers: {})
     BetterAuth::Endpoint::Context.new(
