@@ -589,6 +589,8 @@ GET    /api/auth/delete-user/callback
 - `freshSessionMiddleware` rechaza con 403 si sesión es más vieja que `freshAge`
 - Session se actualiza en DB solo cuando `updateAge` ha pasado (throttling)
 - `deferSessionRefresh`: GET retorna sesión sin writes, POST permite refresh
+- Ruby ya cubre `defer_session_refresh`; se confirmó contra upstream y se agregó `BODY_MUST_BE_AN_OBJECT` para `/update-session`.
+- `requestOnlySessionMiddleware` existe en upstream y se portó como `Routes.request_only_session`; en Ruby se aplicó a `/organization/check-slug`, manteniendo llamadas server-side directas sin sesión.
 - Cookie cache (`session_data`) permite lectura sin DB hit
 
 #### Sign Up
@@ -603,6 +605,11 @@ GET    /api/auth/delete-user/callback
 - `resetPassword` valida token y actualiza password
 - `revokeSessionsOnPasswordReset` elimina todas las sesiones
 - Rechaza `redirectTo` no trusted con 403
+- Ruby ya cubre `reset_password_token_expires_in`, `on_password_reset` y `revoke_sessions_on_password_reset`; se alinearon los códigos `RESET_PASSWORD_DISABLED`, `EMAIL_PASSWORD_DISABLED`, `EMAIL_PASSWORD_SIGN_UP_DISABLED`, `PASSWORD_ALREADY_SET`, y `BODY_MUST_BE_AN_OBJECT` con upstream.
+
+#### OIDC Provider
+- Upstream Better Auth `v1.6.9` depreca `oidc-provider` en favor de `@better-auth/oauth-provider`; Ruby mantiene la implementación por compatibilidad, emite warning one-time y remueve la página pública de docs/sidebar para dirigir uso nuevo a `better_auth-oauth-provider`.
+- Ruby `oidc_provider` tiene endpoints adicionales de introspección/revocación/client CRUD que vienen del comportamiento OAuth provider ya portado; la recomendación para usuarios nuevos es `better_auth-oauth-provider`.
 
 #### Hooks
 - Before hooks pueden interceptar retornando JSON directamente

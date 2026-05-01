@@ -302,7 +302,7 @@ class BetterAuthPluginsOpenAPITest < Minitest::Test
       BetterAuth::Plugins.oauth_proxy => {
         o_auth_proxy: "oauthProxyCallback"
       },
-      BetterAuth::Plugins.oidc_provider => {
+      BetterAuth::Plugins.oidc_provider(__skip_deprecation_warning: true) => {
         register_o_auth_application: "registerOAuthApplication",
         get_o_auth_client: "getOAuthClient",
         list_o_auth_applications: "listOAuthApplications",

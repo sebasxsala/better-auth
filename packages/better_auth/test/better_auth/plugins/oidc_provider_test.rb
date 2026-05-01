@@ -7,6 +7,20 @@ require_relative "../../test_helper"
 class BetterAuthPluginsOIDCProviderTest < Minitest::Test
   SECRET = "phase-eleven-secret-with-enough-entropy-123"
 
+  def test_oidc_provider_emits_upstream_deprecation_warning_once
+    warnings = []
+    BetterAuth::Plugins::OIDCProvider.reset_deprecation_warning!
+
+    BetterAuth::Plugins.oidc_provider(logger: ->(message) { warnings << message })
+    BetterAuth::Plugins.oidc_provider(logger: ->(message) { warnings << message })
+
+    assert_equal 1, warnings.length
+    assert_includes warnings.first, '"oidc-provider" plugin is deprecated'
+    assert_includes warnings.first, "better_auth-oauth-provider"
+  ensure
+    BetterAuth::Plugins::OIDCProvider.reset_deprecation_warning!
+  end
+
   def test_parse_prompt_matches_upstream_rules
     assert_equal ["login"], BetterAuth::Plugins::OIDCProvider.parse_prompt("login").to_a
     assert_equal ["login", "consent"], BetterAuth::Plugins::OIDCProvider.parse_prompt(" login   consent ").to_a
@@ -627,7 +641,7 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
       secret: SECRET,
       database: :memory,
       email_and_password: {enabled: true},
-      plugins: [BetterAuth::Plugins.oidc_provider(options), *extra_plugins]
+      plugins: [BetterAuth::Plugins.oidc_provider({__skip_deprecation_warning: true}.merge(options)), *extra_plugins]
     )
   end
 

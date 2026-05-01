@@ -6,8 +6,20 @@ module BetterAuth
   module Plugins
     module OIDCProvider
       VALID_PROMPTS = %w[none login consent create select_account].freeze
+      DEPRECATION_MESSAGE = 'The "oidc-provider" plugin is deprecated and will be removed in the next major version. Migrate to better_auth-oauth-provider. See: https://www.better-auth.com/docs/plugins/oauth-provider'
 
       module_function
+
+      def warn_deprecation!(logger = nil)
+        return if @deprecation_warned
+
+        Deprecate.warn_once("[Deprecation] #{DEPRECATION_MESSAGE}", logger)
+        @deprecation_warned = true
+      end
+
+      def reset_deprecation_warning!
+        @deprecation_warned = false
+      end
 
       def normalize_issuer(value)
         uri = URI.parse(value.to_s)
@@ -34,6 +46,9 @@ module BetterAuth
     module_function
 
     def oidc_provider(options = {})
+      raw_options = normalize_hash(options)
+      OIDCProvider.warn_deprecation!(raw_options[:logger]) unless raw_options[:__skip_deprecation_warning]
+
       config = {
         code_expires_in: 600,
         consent_page: "/oauth2/authorize",
@@ -45,7 +60,7 @@ module BetterAuth
         store_client_secret: "plain",
         scopes: %w[openid profile email offline_access],
         store: OAuthProtocol.stores
-      }.merge(normalize_hash(options))
+      }.merge(raw_options.except(:logger, :__skip_deprecation_warning))
 
       Plugin.new(
         id: "oidc-provider",
