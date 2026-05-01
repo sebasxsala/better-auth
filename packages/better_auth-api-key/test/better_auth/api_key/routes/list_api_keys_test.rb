@@ -1,0 +1,68 @@
+# frozen_string_literal: true
+
+require_relative "../test_support"
+
+class BetterAuthAPIKeyListRouteTest < Minitest::Test
+  include APIKeyTestSupport
+
+  def test_list_route_returns_upstream_pagination_shape
+    auth = build_api_key_auth(default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "list-route-key@example.com")
+    auth.api.create_api_key(headers: {"cookie" => cookie}, body: {name: "alpha"})
+    auth.api.create_api_key(headers: {"cookie" => cookie}, body: {name: "beta"})
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {limit: "1", offset: "1", sortBy: "name", sortDirection: "asc"})
+
+    assert_equal ["beta"], listed[:apiKeys].map { |key| key[:name] }
+    assert_equal 2, listed[:total]
+    assert_equal 1, listed[:limit]
+    assert_equal 1, listed[:offset]
+  end
+
+  def test_list_route_requires_session_and_rejects_invalid_query
+    auth = build_api_key_auth(default_key_length: 12)
+
+    unauthorized = assert_raises(BetterAuth::APIError) { auth.api.list_api_keys }
+    invalid_query = assert_raises(BetterAuth::APIError) do
+      cookie = sign_up_cookie(auth, email: "list-route-invalid-key@example.com")
+      auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {limit: -1})
+    end
+
+    assert_equal "UNAUTHORIZED", unauthorized.status
+    assert_equal "BAD_REQUEST", invalid_query.status
+  end
+
+  def test_list_route_filters_config_and_never_returns_secret_key
+    auth = build_api_key_auth([
+      {config_id: "public-api", default_prefix: "pub_", default_key_length: 12},
+      {config_id: "internal-api", default_prefix: "int_", default_key_length: 12},
+      {config_id: "default", default_prefix: "def_", default_key_length: 12}
+    ])
+    cookie = sign_up_cookie(auth, email: "list-route-config-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    public_key = auth.api.create_api_key(body: {userId: user_id, configId: "public-api", name: "public"})
+    auth.api.create_api_key(body: {userId: user_id, configId: "internal-api", name: "internal"})
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {configId: "public-api"})
+
+    assert_equal [public_key[:id]], listed[:apiKeys].map { |key| key[:id] }
+    assert_equal 1, listed[:total]
+    assert_equal "public-api", listed[:apiKeys].first[:configId]
+    refute listed[:apiKeys].first.key?(:key)
+  end
+
+  def test_list_route_sorts_created_at_descending_and_handles_offset_overflow
+    auth = build_api_key_auth(default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "list-route-created-key@example.com")
+    auth.api.create_api_key(headers: {"cookie" => cookie}, body: {name: "oldest"})
+    sleep 0.01
+    auth.api.create_api_key(headers: {"cookie" => cookie}, body: {name: "newest"})
+
+    sorted = auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {sortBy: "createdAt", sortDirection: "desc"})
+    overflow = auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {offset: sorted[:total] + 100})
+
+    assert_equal "newest", sorted[:apiKeys].first[:name]
+    assert_empty overflow[:apiKeys]
+    assert_equal sorted[:total], overflow[:total]
+  end
+end
