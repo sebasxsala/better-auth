@@ -4,6 +4,7 @@
 
 Before making changes in this repository, read the relevant agent instructions:
 
+- Read `AGENTS.md`.
 - When editing a package, check for a package-level `AGENTS.md` and follow it if present.
 - Read how upstream related implementations are written
 
