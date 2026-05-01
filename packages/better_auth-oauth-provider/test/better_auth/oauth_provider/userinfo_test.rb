@@ -84,4 +84,25 @@ class OAuthProviderUserinfoTest < Minitest::Test
     refute userinfo.key?(:given_name)
     refute userinfo.key?(:family_name)
   end
+
+  def test_userinfo_file_parity_filters_profile_and_email_claims_by_scope
+    auth = build_auth(scopes: ["openid", "profile", "email"])
+    cookie = sign_up_cookie(auth)
+    client = create_client(auth, cookie, scope: "openid profile email", skip_consent: true)
+
+    openid = issue_authorization_code_tokens(auth, cookie, client, scope: "openid")
+    profile = issue_authorization_code_tokens(auth, cookie, client, scope: "openid profile")
+    email = issue_authorization_code_tokens(auth, cookie, client, scope: "openid email")
+
+    openid_info = auth.api.o_auth2_user_info(headers: {"authorization" => "Bearer #{openid[:access_token]}"})
+    profile_info = auth.api.o_auth2_user_info(headers: {"authorization" => "Bearer #{profile[:access_token]}"})
+    email_info = auth.api.o_auth2_user_info(headers: {"authorization" => "Bearer #{email[:access_token]}"})
+
+    assert openid_info[:sub]
+    refute openid_info.key?(:name)
+    assert_equal "OAuth Owner", profile_info[:name]
+    refute profile_info.key?(:email)
+    assert_equal "oauth-provider@example.com", email_info[:email]
+    refute email_info.key?(:name)
+  end
 end
