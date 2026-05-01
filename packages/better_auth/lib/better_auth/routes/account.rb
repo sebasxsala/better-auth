@@ -8,7 +8,7 @@ module BetterAuth
         method: "GET",
         metadata: {
           openapi: {
-            operationId: "listAccounts",
+            operationId: "listUserAccounts",
             description: "List linked accounts for the current user",
             responses: {
               "200" => OpenAPI.json_response(
@@ -60,6 +60,8 @@ module BetterAuth
         end
 
         provider_id = body["providerId"] || body["provider_id"]
+        raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["VALIDATION_ERROR"]) if provider_id.to_s.empty?
+
         account_id = body["accountId"] || body["account_id"]
         account = accounts.find do |entry|
           entry["providerId"] == provider_id && (account_id.to_s.empty? || entry["accountId"] == account_id)
@@ -112,6 +114,8 @@ module BetterAuth
         raise APIError.new("UNAUTHORIZED") if user_id.to_s.empty?
 
         provider_id = body["providerId"] || body["provider_id"]
+        raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["VALIDATION_ERROR"]) if provider_id.to_s.empty?
+
         provider = social_provider(ctx.context, provider_id)
         raise APIError.new("BAD_REQUEST", message: "Provider #{provider_id} is not supported.") unless provider
 
@@ -180,6 +184,8 @@ module BetterAuth
         raise APIError.new("BAD_REQUEST", message: "Either userId or session is required") if user_id.to_s.empty?
 
         provider_id = body["providerId"] || body["provider_id"]
+        raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["VALIDATION_ERROR"]) if provider_id.to_s.empty?
+
         provider = social_provider(ctx.context, provider_id)
         raise APIError.new("BAD_REQUEST", message: "Provider #{provider_id} not found.") unless provider
         raise APIError.new("BAD_REQUEST", message: "Provider #{provider_id} does not support token refreshing.") unless provider_callable(provider, :refresh_access_token)
@@ -219,7 +225,7 @@ module BetterAuth
               {
                 name: "accountId",
                 in: "query",
-                required: true,
+                required: false,
                 schema: {type: "string"}
               }
             ],
@@ -235,6 +241,8 @@ module BetterAuth
           ctx.context.internal_adapter.find_accounts(session[:user]["id"]).find do |entry|
             entry["id"] == account_id || entry["accountId"] == account_id
           end
+        else
+          account_cookie(ctx, nil, nil, session[:user]["id"])
         end
         raise APIError.new("BAD_REQUEST", message: "Account not found") unless account && account["userId"] == session[:user]["id"]
 
@@ -253,6 +261,8 @@ module BetterAuth
     end
 
     def self.social_provider(context, provider_id)
+      return nil if provider_id.to_s.empty?
+
       provider = context.social_providers[provider_id.to_sym] || context.social_providers[provider_id.to_s]
       return provider.merge(id: provider_id.to_s) if provider.is_a?(Hash) && !provider.key?(:id) && !provider.key?("id")
 
@@ -269,7 +279,8 @@ module BetterAuth
       return nil unless ctx.context.options.account[:store_account_cookie]
 
       account = Cookies.get_account_cookie(ctx)
-      return nil unless account && account["providerId"] == provider_id
+      return nil unless account
+      return nil if provider_id && account["providerId"] != provider_id
       return nil unless account_id.to_s.empty? || account["id"] == account_id || account["accountId"] == account_id
       return nil unless user_id.to_s.empty? || account["userId"].to_s.empty? || account["userId"] == user_id
 

@@ -300,6 +300,30 @@ class BetterAuthRoutesSocialTest < Minitest::Test
     assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_CALLBACK_URL"], error.message
   end
 
+  def test_link_social_account_alias_matches_upstream_api_name
+    auth = build_auth(
+      social_providers: {
+        github: {
+          id: "github",
+          create_authorization_url: ->(_data) { "https://github.example/oauth" }
+        }
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "link-upstream@example.com")
+
+    result = auth.api.link_social_account(
+      headers: {"cookie" => cookie},
+      body: {
+        provider: "github",
+        callbackURL: "/dashboard",
+        disableRedirect: true
+      }
+    )
+
+    assert_equal "https://github.example/oauth", result[:url]
+    assert_equal false, result[:redirect]
+  end
+
   def test_sign_in_social_preserves_safe_additional_state_and_reserved_fields
     auth = build_auth(
       social_providers: {

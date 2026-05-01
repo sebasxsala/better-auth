@@ -95,8 +95,10 @@ class BetterAuthPluginsOpenAPITest < Minitest::Test
       delete_user_callback: "deleteUserCallback",
       get_access_token: "getAccessToken",
       get_session: "getSession",
-      link_social: "linkSocial",
-      list_accounts: "listAccounts",
+      link_social: "linkSocialAccount",
+      link_social_account: "linkSocialAccount",
+      list_accounts: "listUserAccounts",
+      list_user_accounts: "listUserAccounts",
       list_sessions: "listSessions",
       refresh_token: "refreshToken",
       request_password_reset: "requestPasswordReset",
@@ -122,6 +124,17 @@ class BetterAuthPluginsOpenAPITest < Minitest::Test
       assert_equal operation_id, metadata.fetch(:operationId)
       assert metadata[:requestBody] || metadata[:responses]
     end
+  end
+
+  def test_account_info_open_api_account_id_query_parameter_is_optional
+    parameters = BetterAuth::Core.base_endpoints
+      .fetch(:account_info)
+      .metadata
+      .fetch(:openapi)
+      .fetch(:parameters)
+    account_id = parameters.find { |parameter| parameter.fetch(:name) == "accountId" }
+
+    assert_equal false, account_id.fetch(:required)
   end
 
   def test_auth_plugin_route_open_api_metadata_lives_on_endpoints

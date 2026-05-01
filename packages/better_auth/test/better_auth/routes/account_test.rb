@@ -18,6 +18,19 @@ class BetterAuthRoutesAccountTest < Minitest::Test
     refute github.key?("accessToken")
   end
 
+  def test_list_user_accounts_alias_matches_upstream_api_name
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "upstream-accounts@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    auth.context.internal_adapter.create_account(userId: user_id, providerId: "github", accountId: "gh-upstream", scope: "repo")
+
+    accounts = auth.api.list_user_accounts(headers: {"cookie" => cookie})
+
+    github = accounts.find { |account| account["providerId"] == "github" }
+    assert_equal "gh-upstream", github["accountId"]
+    assert_equal ["repo"], github["scopes"]
+  end
+
   def test_unlink_account_removes_matching_account_but_not_last_account
     auth = build_auth(account: {account_linking: {allow_unlinking_all: false}})
     cookie = sign_up_cookie(auth, email: "unlink@example.com")
@@ -305,6 +318,43 @@ class BetterAuthRoutesAccountTest < Minitest::Test
 
     assert_equal "provider-id@example.com", info[:user][:email]
     assert_equal({ok: true}, info[:data])
+  end
+
+  def test_account_info_uses_account_cookie_when_account_id_is_omitted
+    provider = {
+      id: "github",
+      get_user_info: ->(tokens) {
+        {
+          user: {id: "cookie-account-id", email: "cookie-info@example.com"},
+          data: {accessToken: tokens[:accessToken]}
+        }
+      }
+    }
+    auth = build_auth(account: {store_account_cookie: true}, social_providers: {github: provider})
+    session_cookie = sign_up_cookie(auth, email: "cookie-info-user@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => session_cookie})[:user]["id"]
+    account = auth.context.internal_adapter.create_account(
+      userId: user_id,
+      providerId: "github",
+      accountId: "cookie-account-id",
+      accessToken: "cookie-access-token"
+    )
+    cookie_ctx = BetterAuth::Endpoint::Context.new(
+      path: "/account-info",
+      method: "GET",
+      query: {},
+      body: {},
+      params: {},
+      headers: {},
+      context: auth.context
+    )
+    BetterAuth::Cookies.set_account_cookie(cookie_ctx, account)
+    account_cookie = cookie_ctx.response_headers.fetch("set-cookie").split(";").first
+
+    info = auth.api.account_info(headers: {"cookie" => "#{session_cookie}; #{account_cookie}"})
+
+    assert_equal "cookie-info@example.com", info[:user][:email]
+    assert_equal "cookie-access-token", info[:data][:accessToken]
   end
 
   private

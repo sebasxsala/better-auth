@@ -196,7 +196,7 @@ module BetterAuth
         method: "POST",
         metadata: {
           openapi: {
-            operationId: "linkSocial",
+            operationId: "linkSocialAccount",
             description: "Link a social account to the current user",
             requestBody: OpenAPI.json_request_body(
               OpenAPI.object_schema(
