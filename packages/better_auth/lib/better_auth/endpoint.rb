@@ -10,6 +10,7 @@ module BetterAuth
       :params_schema,
       :headers_schema,
       :metadata,
+      :options,
       :use,
       :handler
 
@@ -22,6 +23,7 @@ module BetterAuth
       @headers_schema = headers_schema
       @metadata = metadata || {}
       apply_default_open_api_metadata!
+      @options = endpoint_options
       @use = Array(use)
       @handler = handler || ->(_ctx) {}
     end
@@ -46,6 +48,17 @@ module BetterAuth
     end
 
     private
+
+    def endpoint_options
+      {
+        method: (methods.length == 1) ? methods.first : methods,
+        body: body_schema,
+        query: query_schema,
+        params: params_schema,
+        headers: headers_schema,
+        metadata: metadata
+      }.compact
+    end
 
     def apply_default_open_api_metadata!
       return unless path
@@ -109,7 +122,7 @@ module BetterAuth
         return value if value.is_a?(self)
 
         if value.is_a?(APIError)
-          return new(response: value, status: value.status_code, headers: value.headers)
+          return new(response: value, status: value.status_code, headers: merge_headers(context.response_headers, value.headers))
         end
 
         if rack_response?(value)
