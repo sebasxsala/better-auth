@@ -25,6 +25,7 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "better_auth", "~> 0.1"
   spec.add_dependency "base64", ">= 0.2", "< 1.0"
+  spec.add_dependency "logger", ">= 1.6", "< 2.0"
   spec.add_dependency "ruby-saml", "~> 1.18", ">= 1.18.1"
 
   spec.add_development_dependency "bundler", "~> 2.5"

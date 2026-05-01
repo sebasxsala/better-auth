@@ -339,7 +339,7 @@ module BetterAuth
           state = BetterAuth::Crypto.sign_jwt(state_data.merge(sso_oidc_pkce_state(provider)), ctx.context.secret, expires_in: 600)
           url = sso_oidc_authorization_url(provider, ctx, state, config, body)
         elsif provider["samlConfig"]
-          relay_state = BetterAuth::Crypto.sign_jwt(state_data.merge(nonce: SecureRandom.hex(8)), ctx.context.secret, expires_in: 600)
+          relay_state = BetterAuth::Crypto.sign_jwt(state_data.merge(nonce: BetterAuth::Crypto.random_string(16)), ctx.context.secret, expires_in: 600)
           url = sso_saml_authorization_url(provider, relay_state, ctx, config)
           sso_store_saml_authn_request(ctx, provider, url, config)
         else
@@ -459,7 +459,7 @@ module BetterAuth
         end
 
         sso_process_saml_logout_request(ctx, provider, sso_fetch(ctx.body, :saml_request) || sso_fetch(ctx.query, :saml_request))
-        response = Base64.strict_encode64("<samlp:LogoutResponse xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" ID=\"_#{SecureRandom.hex(16)}\" Version=\"2.0\" IssueInstant=\"#{Time.now.utc.iso8601}\" Destination=\"#{sso_saml_logout_destination(provider)}\"><samlp:Status><samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:Success\"/></samlp:Status></samlp:LogoutResponse>")
+        response = Base64.strict_encode64("<samlp:LogoutResponse xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" ID=\"_#{BetterAuth::Crypto.random_string(32)}\" Version=\"2.0\" IssueInstant=\"#{Time.now.utc.iso8601}\" Destination=\"#{sso_saml_logout_destination(provider)}\"><samlp:Status><samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:Success\"/></samlp:Status></samlp:LogoutResponse>")
         if sso_fetch(ctx.body, :saml_request)
           next sso_saml_post_form(sso_saml_logout_destination(provider), "SAMLResponse", response, relay_state)
         end
@@ -488,7 +488,7 @@ module BetterAuth
         name_id = saml_record["nameId"] || user_email
         session_index = saml_record["sessionIndex"]
 
-        request_id = "_#{SecureRandom.hex(16)}"
+        request_id = "_#{BetterAuth::Crypto.random_string(32)}"
         session_index_xml = session_index.to_s.empty? ? "" : "<samlp:SessionIndex>#{CGI.escapeHTML(session_index.to_s)}</samlp:SessionIndex>"
         request = Base64.strict_encode64("<samlp:LogoutRequest xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\" ID=\"#{request_id}\" Version=\"2.0\" IssueInstant=\"#{Time.now.utc.iso8601}\" Destination=\"#{CGI.escapeHTML(destination.to_s)}\"><saml:NameID>#{CGI.escapeHTML(name_id.to_s)}</saml:NameID>#{session_index_xml}</samlp:LogoutRequest>")
         sso_store_saml_logout_request(ctx, provider, request_id, config)
@@ -515,7 +515,7 @@ module BetterAuth
           next ctx.json({domainVerificationToken: active.fetch("value")}, status: 201)
         end
 
-        token = SecureRandom.alphanumeric(24)
+        token = BetterAuth::Crypto.random_string(24)
         ctx.context.internal_adapter.create_verification_value(identifier: identifier, value: token, expiresAt: Time.now + (7 * 24 * 60 * 60))
         config.dig(:domain_verification, :request)&.call(provider: provider, token: token, context: ctx)
         ctx.json({domainVerificationToken: token}, status: 201)
@@ -1300,7 +1300,7 @@ module BetterAuth
     def sso_oidc_pkce_state(provider)
       return {} unless normalize_hash(provider["oidcConfig"] || {})[:pkce]
 
-      {codeVerifier: SecureRandom.urlsafe_base64(48)}
+      {codeVerifier: BetterAuth::Crypto.random_string(128)}
     end
 
     def sso_decode_state(state, secret)
@@ -1533,13 +1533,22 @@ module BetterAuth
     end
 
     def sso_fetch(data, key)
+      return nil unless data.respond_to?(:[])
+
       compact = key.to_s.delete("_").downcase
-      data[key] ||
+      direct = data[key] ||
         data[key.to_s] ||
         data[Schema.storage_key(key)] ||
         data[Schema.storage_key(key).to_sym] ||
         data[compact] ||
         data[compact.to_sym]
+      return direct unless direct.nil?
+
+      data.each do |candidate, value|
+        normalized = candidate.to_s.delete("_").downcase
+        return value if normalized == compact
+      end
+      nil
     end
 
     def sso_redirect(ctx, location)
