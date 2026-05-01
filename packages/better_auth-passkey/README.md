@@ -77,6 +77,16 @@ auth.api.generate_passkey_registration_options(query: { context: invitation_toke
 
 During passkey-first registration, `after_verification` may return `{ user_id: "..." }` to attach the credential to a concrete user. During session-required registration, switching users is rejected.
 
+## Callback contracts
+
+Ruby uses hashes for the upstream TypeScript contracts:
+
+- Stored challenge value: `expectedChallenge`, `userData.id`, optional `userData.name`, optional `userData.displayName`, and optional `context`.
+- `resolve_user` receives `{ ctx:, context: }` and must return at least `id` and `name`; it may also return `display_name` and `email`.
+- Registration `after_verification` receives `{ ctx:, verification:, user:, client_data:, context: }`.
+- Authentication `after_verification` receives `{ ctx:, verification:, client_data: }`.
+- Passkey records use upstream wire keys including `userId`, `credentialID`, `publicKey`, `deviceType`, `backedUp`, `createdAt`, and optional `aaguid`.
+
 ## WebAuthn extensions
 
 ```ruby
