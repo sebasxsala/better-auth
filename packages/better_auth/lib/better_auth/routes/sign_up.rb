@@ -187,16 +187,38 @@ module BetterAuth
         "updatedAt" => now
       }
       reserved = %w[email password name image callbackURL callbackUrl callback_url rememberMe remember_me]
-      additional = parse_declared_input(ctx, "user", body.except(*reserved), allowed_base: [])
+      additional = synthetic_additional_user_fields(ctx, body.except(*reserved))
       custom = ctx.context.options.email_and_password[:custom_synthetic_user]
       return core_fields.merge(additional) unless custom.respond_to?(:call)
 
       value = {
         core_fields: core_fields.except("id"),
+        coreFields: core_fields.except("id"),
         additional_fields: additional,
+        additionalFields: additional,
         id: core_fields["id"]
       }
       stringify_synthetic_user(custom.call(value))
+    end
+
+    def self.synthetic_additional_user_fields(ctx, data)
+      additional = parse_declared_input(ctx, "user", data, allowed_base: [])
+      configured = ctx.context.options.user[:additional_fields] || {}
+      configured.each do |field, attributes|
+        storage_field = Schema.storage_key(field)
+        next if additional.key?(storage_field)
+
+        field_attributes = normalize_hash(attributes || {})
+        next unless field_attributes.key?("defaultValue") || field_attributes.key?("default_value")
+
+        default = field_attributes.key?("defaultValue") ? field_attributes["defaultValue"] : field_attributes["default_value"]
+        additional[storage_field] = resolve_default(default)
+      end
+      additional
+    end
+
+    def self.resolve_default(value)
+      value.respond_to?(:call) ? value.call : value
     end
 
     def self.stringify_synthetic_user(value)

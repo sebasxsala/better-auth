@@ -57,6 +57,24 @@ class BetterAuthRoutesEmailVerificationTest < Minitest::Test
     assert_equal true, user["emailVerified"]
   end
 
+  def test_verify_email_auto_sign_in_exposes_bearer_set_auth_token_header
+    auth = build_auth(
+      plugins: [BetterAuth::Plugins.bearer],
+      email_verification: {auto_sign_in_after_verification: true}
+    )
+    auth.api.sign_up_email(body: {email: "bearer-verified@example.com", password: "password123", name: "Verified"})
+    token = BetterAuth::Crypto.sign_jwt({"email" => "bearer-verified@example.com"}, SECRET, expires_in: 3600)
+
+    status, headers, _body = auth.api.verify_email(query: {token: token}, as_response: true)
+    session_token = headers.fetch("set-auth-token")
+    session = auth.api.get_session(headers: {"authorization" => "Bearer #{session_token}"})
+
+    assert_equal 200, status
+    assert_operator session_token.length, :>, 10
+    assert_equal "bearer-verified@example.com", session[:user]["email"]
+    assert_equal true, session[:user]["emailVerified"]
+  end
+
   def test_verify_email_redirects_to_callback_url_with_existing_query
     auth = build_auth
     auth.api.sign_up_email(body: {email: "redirect-verified@example.com", password: "password123", name: "Verified"})
@@ -138,6 +156,30 @@ class BetterAuthRoutesEmailVerificationTest < Minitest::Test
     assert_equal true, session[:user]["emailVerified"]
     assert storage.get(session[:session]["token"])
     assert storage.get("active-sessions-#{session[:user]["id"]}")
+  end
+
+  def test_verify_email_refreshes_email_verified_on_all_secondary_storage_sessions
+    storage = StringStorage.new
+    auth = build_auth(secondary_storage: storage)
+    first_cookie = sign_up_cookie(auth, email: "all-sessions@example.com")
+    _status, second_headers, _body = auth.api.sign_in_email(
+      body: {email: "all-sessions@example.com", password: "password123"},
+      as_response: true
+    )
+    second_cookie = cookie_header(second_headers.fetch("set-cookie"))
+    token = BetterAuth::Crypto.sign_jwt({"email" => "all-sessions@example.com"}, SECRET, expires_in: 3600)
+
+    auth.api.verify_email(query: {token: token})
+
+    first_session = auth.api.get_session(headers: {"cookie" => first_cookie})
+    second_session = auth.api.get_session(headers: {"cookie" => second_cookie})
+    first_stored = JSON.parse(storage.get(first_session[:session]["token"]))
+    second_stored = JSON.parse(storage.get(second_session[:session]["token"]))
+
+    assert_equal true, first_session[:user]["emailVerified"]
+    assert_equal true, second_session[:user]["emailVerified"]
+    assert_equal true, first_stored.fetch("user").fetch("emailVerified")
+    assert_equal true, second_stored.fetch("user").fetch("emailVerified")
   end
 
   def test_change_email_updates_secondary_storage_session_after_verification

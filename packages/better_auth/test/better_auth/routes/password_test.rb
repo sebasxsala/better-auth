@@ -35,6 +35,21 @@ class BetterAuthRoutesPasswordTest < Minitest::Test
     assert auth.api.sign_in_email(body: {email: "reset@example.com", password: "new-password"})[:token]
   end
 
+  def test_reset_password_updates_credential_account_updated_at
+    sent = []
+    auth = build_auth(email_and_password: {send_reset_password: ->(data, _request = nil) { sent << data }})
+    cookie = sign_up_cookie(auth, email: "reset-updated-at@example.com", password: "old-password")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    account = auth.context.internal_adapter.find_accounts(user_id).find { |entry| entry["providerId"] == "credential" }
+    original_updated_at = account.fetch("updatedAt")
+
+    auth.api.request_password_reset(body: {email: "reset-updated-at@example.com"})
+    auth.api.reset_password(body: {token: sent.first.fetch(:token), newPassword: "new-password"})
+
+    updated_account = auth.context.internal_adapter.find_accounts(user_id).find { |entry| entry["providerId"] == "credential" }
+    assert_operator updated_account.fetch("updatedAt"), :>, original_updated_at
+  end
+
   def test_request_password_reset_does_not_leak_missing_users
     sent = []
     auth = build_auth(email_and_password: {send_reset_password: ->(data, _request = nil) { sent << data }})

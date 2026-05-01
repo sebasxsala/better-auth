@@ -483,6 +483,47 @@ class BetterAuthRoutesAccountTest < Minitest::Test
     assert_equal "cookie-access-token", info[:data][:accessToken]
   end
 
+  def test_account_info_refreshes_expired_access_token_through_get_access_token_path
+    refreshed_at = Time.now + 3600
+    provider = {
+      id: "github",
+      refresh_access_token: ->(_refresh_token) {
+        {
+          accessToken: "refreshed-access",
+          refreshToken: "refreshed-refresh",
+          accessTokenExpiresAt: refreshed_at,
+          scopes: ["repo", "user"]
+        }
+      },
+      get_user_info: ->(tokens) {
+        {
+          user: {id: "refresh-info-id", email: "refresh-info@example.com"},
+          data: {accessToken: tokens[:accessToken], scopes: tokens[:scopes]}
+        }
+      }
+    }
+    auth = build_auth(social_providers: {github: provider})
+    cookie = sign_up_cookie(auth, email: "refresh-info-user@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    account = auth.context.internal_adapter.create_account(
+      userId: user_id,
+      providerId: "github",
+      accountId: "refresh-info-account",
+      accessToken: "expired-access",
+      refreshToken: "refresh-token",
+      accessTokenExpiresAt: Time.now - 60,
+      scope: "read"
+    )
+
+    info = auth.api.account_info(headers: {"cookie" => cookie}, query: {accountId: account["accountId"]})
+    stored = auth.context.internal_adapter.find_accounts(user_id).find { |entry| entry["id"] == account["id"] }
+
+    assert_equal "refreshed-access", info[:data][:accessToken]
+    assert_equal ["repo", "user"], info[:data][:scopes]
+    assert_equal "refreshed-access", stored["accessToken"]
+    assert_equal "refreshed-refresh", stored["refreshToken"]
+  end
+
   private
 
   def build_auth(options = {})
