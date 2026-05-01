@@ -18,6 +18,37 @@ class BetterAuthRoutesSessionTest < Minitest::Test
     assert_equal ["GET", "POST"], auth.api.endpoints.fetch(:get_session).methods
   end
 
+  def test_get_session_post_requires_deferred_refresh
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "post-session@example.com")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.get_session(headers: {"cookie" => cookie}, method: "POST")
+    end
+
+    assert_equal 405, error.status_code
+    assert_equal "METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED", error.code
+    assert_equal BetterAuth::BASE_ERROR_CODES["METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED"], error.message
+  end
+
+  def test_get_session_deferred_get_reports_needs_refresh_without_updating_session
+    auth = build_auth(session: {defer_session_refresh: true, update_age: 60, expires_in: 120, cookie_cache: {enabled: false}})
+    cookie = sign_up_cookie(auth, email: "deferred-session@example.com")
+    session = auth.api.get_session(headers: {"cookie" => cookie}, method: "POST")
+    stale_updated_at = Time.now - 61
+    auth.context.adapter.update(
+      model: "session",
+      where: [{field: "token", value: session[:session]["token"]}],
+      update: {updatedAt: stale_updated_at, expiresAt: Time.now + 30}
+    )
+
+    result = auth.api.get_session(headers: {"cookie" => cookie})
+    stored = auth.context.adapter.find_one(model: "session", where: [{field: "token", value: session[:session]["token"]}])
+
+    assert_equal true, result[:needsRefresh]
+    assert_in_delta stale_updated_at.to_i, stored.fetch("updatedAt").to_i, 1
+  end
+
   def test_get_session_returns_current_session_and_user
     auth = build_auth
     cookie = sign_up_cookie(auth, email: "session@example.com")
@@ -245,7 +276,31 @@ class BetterAuthRoutesSessionTest < Minitest::Test
     result = auth.api.update_session(headers: {"cookie" => cookie}, body: {deviceName: "mobile"})
 
     assert_equal "mobile", result.fetch(:session).fetch("deviceName")
-    assert_equal "update-session@example.com", result.fetch(:user).fetch("email")
+    refute result.key?(:user)
+  end
+
+  def test_update_session_allows_stale_regular_session
+    auth = build_auth(
+      session: {fresh_age: 1, expires_in: 3600, update_age: 3600},
+      plugins: [
+        BetterAuth::Plugins.additional_fields(
+          session: {
+            deviceName: {type: "string", required: false}
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "stale-update-session@example.com")
+    session = auth.api.get_session(headers: {"cookie" => cookie})[:session]
+    auth.context.internal_adapter.update_session(
+      session["token"],
+      "createdAt" => Time.now - 120,
+      "updatedAt" => Time.now - 120
+    )
+
+    result = auth.api.update_session(headers: {"cookie" => cookie}, body: {deviceName: "desktop"})
+
+    assert_equal "desktop", result.fetch(:session).fetch("deviceName")
   end
 
   def test_revoke_session_deletes_only_matching_user_session
@@ -261,7 +316,7 @@ class BetterAuthRoutesSessionTest < Minitest::Test
     refute_nil auth.api.get_session(headers: {"cookie" => second_cookie})
   end
 
-  def test_sensitive_session_routes_require_fresh_session
+  def test_sensitive_session_routes_ignore_cookie_cache_without_requiring_fresh_session
     auth = build_auth(session: {fresh_age: 60, cookie_cache: {enabled: true, strategy: "jwe", max_age: 300}})
     cookie = sign_up_cookie(auth, email: "stale-sensitive@example.com")
     session = auth.api.get_session(headers: {"cookie" => cookie})
@@ -271,12 +326,8 @@ class BetterAuthRoutesSessionTest < Minitest::Test
       update: {createdAt: Time.now - 300, updatedAt: Time.now - 300}
     )
 
-    error = assert_raises(BetterAuth::APIError) do
-      auth.api.revoke_sessions(headers: {"cookie" => cookie})
-    end
-
-    assert_equal 403, error.status_code
-    assert_equal "SESSION_NOT_FRESH", error.code
+    assert_equal({status: true}, auth.api.revoke_sessions(headers: {"cookie" => cookie}))
+    assert_nil auth.api.get_session(headers: {"cookie" => cookie}, query: {disableCookieCache: true})
   end
 
   def test_revoke_sessions_deletes_all_current_user_sessions

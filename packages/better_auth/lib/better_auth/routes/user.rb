@@ -122,7 +122,7 @@ module BetterAuth
         new_password = body["newPassword"] || body["new_password"]
         validate_password_length!(new_password, ctx.context.options.email_and_password)
         account = credential_account(ctx, session[:user]["id"])
-        raise APIError.new("BAD_REQUEST", message: "user already has a password") if account && account["password"]
+        raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["PASSWORD_ALREADY_SET"]) if account && account["password"]
 
         ctx.context.internal_adapter.link_account(
           userId: session[:user]["id"],
@@ -146,7 +146,8 @@ module BetterAuth
               OpenAPI.object_schema(
                 {
                   password: {type: ["string", "null"], description: "The user's password"},
-                  token: {type: ["string", "null"], description: "Delete account verification token"}
+                  token: {type: ["string", "null"], description: "Delete account verification token"},
+                  callbackURL: {type: ["string", "null"], description: "The URL to redirect to after deletion"}
                 }
               )
             ),
@@ -183,12 +184,14 @@ module BetterAuth
         elsif sender
           token = SecureRandom.hex(16)
           expires_in = ctx.context.options.user.dig(:delete_user, :delete_token_expires_in) || 3600
+          callback_url = body["callbackURL"] || body["callbackUrl"] || body["callback_url"] || "/"
+          url = "#{ctx.context.base_url}/delete-user/callback?token=#{URI.encode_www_form_component(token)}&callbackURL=#{URI.encode_www_form_component(callback_url)}"
           ctx.context.internal_adapter.create_verification_value(
             identifier: "delete-account-#{token}",
             value: session[:user]["id"],
             expiresAt: Time.now + expires_in.to_i
           )
-          sender.call({user: session[:user], token: token}, ctx.request)
+          sender.call({user: session[:user], url: url, token: token}, ctx.request)
           next ctx.json({success: true, message: "Verification email sent"})
         elsif !body["password"]
           require_fresh_session!(ctx, session)
@@ -240,9 +243,9 @@ module BetterAuth
         raise APIError.new("NOT_FOUND") unless enabled
         session = current_session(ctx)
         token = fetch_value(ctx.query, "token")
-        delete_user_by_token!(ctx, session, token)
         callback_url = fetch_value(ctx.query, "callbackURL")
         validate_callback_url!(ctx.context, callback_url)
+        delete_user_by_token!(ctx, session, token)
         delete_current_user!(ctx, session)
         raise ctx.redirect(callback_url) if callback_url
 
@@ -360,8 +363,10 @@ module BetterAuth
       fresh_age = ctx.context.session_config[:fresh_age].to_i
       return if fresh_age <= 0
 
-      updated_at = Session.normalize_time(session[:session]["updatedAt"] || session[:session]["updated_at"] || session[:session]["createdAt"] || session[:session]["created_at"])
-      raise APIError.new("UNAUTHORIZED") unless updated_at && updated_at + fresh_age > Time.now
+      created_at = Session.normalize_time(session[:session]["createdAt"] || session[:session]["created_at"])
+      return if created_at && created_at + fresh_age > Time.now
+
+      raise APIError.new("BAD_REQUEST", code: "SESSION_EXPIRED", message: BASE_ERROR_CODES["SESSION_EXPIRED"])
     end
 
     def self.parse_declared_input(ctx, model, data, allowed_base: [])

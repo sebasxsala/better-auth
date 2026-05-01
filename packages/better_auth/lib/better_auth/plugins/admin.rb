@@ -596,6 +596,7 @@ module BetterAuth
       Endpoint.new(
         path: "/admin/has-permission",
         method: "POST",
+        body_schema: ->(body) { body.is_a?(Hash) ? body : false },
         metadata: {
           openapi: {
             operationId: "hasPermission",

@@ -216,7 +216,11 @@ module BetterAuth
       end
 
       def to_rack_response
-        return @raw_response if raw_response?
+        to_response.to_a
+      end
+
+      def to_response
+        return Response.from_rack(@raw_response) if raw_response?
 
         body = if response.nil?
           [JSON.generate(nil)]
@@ -226,7 +230,7 @@ module BetterAuth
           [JSON.generate(response)]
         end
         response_headers = {"content-type" => "application/json"}.merge(headers)
-        [status, response_headers, body]
+        Response.new(status: status, headers: response_headers, body: body)
       end
 
       private

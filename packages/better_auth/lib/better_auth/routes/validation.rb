@@ -16,9 +16,10 @@ module BetterAuth
       }
     end
 
-    def self.request_query_schema(optional_strings: [])
+    def self.request_query_schema(required_strings: [], optional_strings: [])
       ->(query) {
         data = request_validation_hash(query)
+        return false unless required_strings.all? { |key| request_string?(data, key) }
         return false unless optional_strings.all? { |key| !data.key?(request_storage_key(key)) || request_string?(data, key) }
 
         data

@@ -239,6 +239,36 @@ class BetterAuthAPITest < Minitest::Test
     assert_equal({ok: true}, JSON.parse(body.join, symbolize_names: true))
   end
 
+  def test_direct_api_as_response_returns_response_object_that_can_be_used_as_rack_tuple
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            response: BetterAuth::Endpoint.new(path: "/response", method: "GET") do |ctx|
+              ctx.set_status(201)
+              ctx.set_header("x-test", "yes")
+              {ok: true}
+            end
+          }
+        }
+      ]
+    )
+
+    response = auth.api.response(as_response: true)
+    status, headers, body = response
+
+    assert_instance_of BetterAuth::Response, response
+    assert_equal 201, response.status
+    assert_equal 201, status
+    assert_equal "yes", response.headers.fetch("x-test")
+    assert_equal "yes", headers.fetch("x-test")
+    assert_equal({ok: true}, JSON.parse(body.join, symbolize_names: true))
+    assert_equal({ok: true}, response.json(symbolize_names: true))
+  end
+
   def test_direct_api_uses_request_context_and_returns_rack_response
     seen_context = nil
     request = Rack::Request.new(

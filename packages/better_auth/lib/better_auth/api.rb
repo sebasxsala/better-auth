@@ -180,7 +180,7 @@ module BetterAuth
     end
 
     def format_result(result, input)
-      return result.to_rack_response if result.raw_response?
+      return result.to_response if result.raw_response?
       as_response = input[:as_response] || request_like?(input[:request])
 
       if result.response.is_a?(APIError)
@@ -189,7 +189,7 @@ module BetterAuth
         raise error_with_headers(result.response, result.headers)
       end
 
-      return result.to_rack_response if as_response
+      return result.to_response if as_response
 
       if input[:return_headers]
         output = {
@@ -210,7 +210,7 @@ module BetterAuth
         response: error.to_h,
         status: error.status_code,
         headers: Endpoint::Result.merge_headers(headers, error.headers)
-      ).to_rack_response
+      ).to_response
     end
 
     def error_with_headers(error, headers)
@@ -316,11 +316,7 @@ module BetterAuth
 
       value.each_with_object({}) do |(key, object_value), result|
         normalized_key = normalize_key(key)
-        result[normalized_key] = if normalized_key == :metadata
-          object_value
-        else
-          object_value.is_a?(Hash) ? symbolize_keys(object_value) : object_value
-        end
+        result[normalized_key] = object_value
       end
     end
 

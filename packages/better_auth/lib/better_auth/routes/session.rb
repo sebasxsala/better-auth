@@ -16,10 +16,21 @@ module BetterAuth
           }
         }
       ) do |ctx|
-        session = current_session(ctx, allow_nil: true)
+        defer_refresh = ctx.context.session_config[:defer_session_refresh]
+        if ctx.method == "POST" && !defer_refresh
+          raise APIError.new(
+            "METHOD_NOT_ALLOWED",
+            code: "METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED",
+            message: BASE_ERROR_CODES["METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED"]
+          )
+        end
+
+        session = current_session(ctx, allow_nil: true, disable_refresh: defer_refresh && ctx.method == "GET")
         next ctx.json(nil) unless session
 
-        ctx.json(parsed_session_response(ctx, session))
+        response = parsed_session_response(ctx, session)
+        response[:needsRefresh] = session_needs_refresh?(ctx, session[:session]) if defer_refresh && ctx.method == "GET"
+        ctx.json(response)
       rescue APIError
         raise
       rescue => error
@@ -69,7 +80,7 @@ module BetterAuth
           }
         }
       ) do |ctx|
-        session = current_session(ctx, sensitive: true)
+        session = current_session(ctx)
         body = Routes.parse_declared_input(ctx, "session", ctx.body, allowed_base: [])
         raise APIError.new("BAD_REQUEST", message: "No fields to update") if body.empty?
 
@@ -77,7 +88,7 @@ module BetterAuth
         updated = ctx.context.internal_adapter.update_session(session[:session]["token"], update)
         merged = session[:session].merge(updated || update)
         Cookies.set_session_cookie(ctx, {session: merged, user: session[:user]}, Cookies.dont_remember?(ctx))
-        ctx.json(parsed_session_response(ctx, {session: merged, user: session[:user]}))
+        ctx.json({session: Schema.parse_output(ctx.context.options, "session", merged)})
       end
     end
 
@@ -164,11 +175,11 @@ module BetterAuth
       end
     end
 
-    def self.current_session(ctx, allow_nil: false, sensitive: false)
+    def self.current_session(ctx, allow_nil: false, sensitive: false, fresh: false, disable_refresh: false)
       data = Session.find_current(
         ctx,
         disable_cookie_cache: truthy_query?(ctx.query, "disableCookieCache"),
-        disable_refresh: truthy_query?(ctx.query, "disableRefresh"),
+        disable_refresh: disable_refresh || truthy_query?(ctx.query, "disableRefresh"),
         sensitive: sensitive
       )
       return nil if allow_nil && data.nil?
@@ -176,7 +187,7 @@ module BetterAuth
       raise APIError.new("UNAUTHORIZED") unless data
 
       session = stringify_keys(data[:session] || data["session"])
-      ensure_fresh_session!(ctx, session) if sensitive
+      ensure_fresh_session!(ctx, session) if fresh
 
       {
         session: session,
@@ -192,6 +203,16 @@ module BetterAuth
       return unless created_at && Time.now - created_at >= fresh_age
 
       raise APIError.new("FORBIDDEN", code: "SESSION_NOT_FRESH", message: BASE_ERROR_CODES.fetch("SESSION_NOT_FRESH"))
+    end
+
+    def self.session_needs_refresh?(ctx, session)
+      return false if truthy_query?(ctx.query, "disableRefresh") || ctx.context.session_config[:disable_session_refresh]
+
+      update_age = ctx.context.session_config[:update_age].to_i
+      return true if update_age.zero?
+
+      updated_at = normalize_time(session["updatedAt"])
+      updated_at && updated_at + update_age <= Time.now
     end
 
     def self.normalize_time(value)
