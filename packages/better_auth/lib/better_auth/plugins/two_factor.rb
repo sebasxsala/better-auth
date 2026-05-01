@@ -80,7 +80,7 @@ module BetterAuth
 
     def two_factor_enable_endpoint(config)
       Endpoint.new(path: "/two-factor/enable", method: "POST", metadata: two_factor_openapi("enableTwoFactor", "Enable two factor authentication", two_factor_enable_response_schema)) do |ctx|
-        session = Routes.current_session(ctx, sensitive: true)
+        session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         two_factor_check_password!(ctx, session[:user]["id"], body[:password], allow_passwordless: config[:allow_passwordless])
 
@@ -116,7 +116,7 @@ module BetterAuth
 
     def two_factor_disable_endpoint(config)
       Endpoint.new(path: "/two-factor/disable", method: "POST", metadata: two_factor_openapi("disableTwoFactor", "Disable two factor authentication", OpenAPI.status_response_schema)) do |ctx|
-        session = Routes.current_session(ctx, sensitive: true)
+        session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         two_factor_check_password!(ctx, session[:user]["id"], body[:password], allow_passwordless: config[:allow_passwordless])
 
@@ -148,7 +148,7 @@ module BetterAuth
     def two_factor_get_totp_uri_endpoint(config)
       Endpoint.new(path: "/two-factor/get-totp-uri", method: "POST", metadata: two_factor_openapi("getTOTPURI", "Get the TOTP URI", OpenAPI.object_schema({totpURI: {type: "string"}}, required: ["totpURI"]))) do |ctx|
         two_factor_totp_enabled!(config)
-        session = Routes.current_session(ctx, sensitive: true)
+        session = Routes.current_session(ctx)
         two_factor_check_password!(ctx, session[:user]["id"], normalize_hash(ctx.body)[:password], allow_passwordless: config[:totp_options][:allow_passwordless])
         record = two_factor_record(ctx, config, session[:user]["id"])
         raise APIError.new("BAD_REQUEST", message: TWO_FACTOR_ERROR_CODES["TOTP_NOT_ENABLED"]) unless record
@@ -272,7 +272,7 @@ module BetterAuth
 
     def two_factor_generate_backup_codes_endpoint(config)
       Endpoint.new(path: "/two-factor/generate-backup-codes", method: "POST", metadata: two_factor_openapi("generateBackupCodes", "Generate two factor backup codes", two_factor_backup_codes_response_schema)) do |ctx|
-        session = Routes.current_session(ctx, sensitive: true)
+        session = Routes.current_session(ctx)
         raise APIError.new("BAD_REQUEST", message: TWO_FACTOR_ERROR_CODES["TWO_FACTOR_NOT_ENABLED"]) unless session[:user]["twoFactorEnabled"]
 
         two_factor_check_password!(ctx, session[:user]["id"], normalize_hash(ctx.body)[:password], allow_passwordless: config[:backup_code_options][:allow_passwordless])

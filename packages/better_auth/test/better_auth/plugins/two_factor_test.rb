@@ -144,6 +144,26 @@ class BetterAuthPluginsTwoFactorTest < Minitest::Test
     assert_equal ["otp"], sign_in[:twoFactorMethods]
   end
 
+  def test_password_validated_two_factor_management_allows_stale_session
+    auth = build_auth(
+      session: {fresh_age: 60, cookie_cache: {enabled: true, strategy: "jwe", max_age: 300}},
+      plugins: [BetterAuth::Plugins.two_factor(skip_verification_on_enable: true)]
+    )
+    cookie = sign_up_cookie(auth, email: "stale-two-factor@example.com")
+    stale_session!(auth, cookie)
+
+    enabled = auth.api.enable_two_factor(headers: {"cookie" => cookie}, body: {password: "password123"}, return_headers: true)
+    assert_equal 10, enabled.fetch(:response)[:backupCodes].length
+
+    cookie = cookie_header(enabled.fetch(:headers).fetch("set-cookie"))
+    stale_session!(auth, cookie)
+    assert_match(/\Aotpauth:\/\/totp\//, auth.api.get_totp_uri(headers: {"cookie" => cookie}, body: {password: "password123"})[:totpURI])
+    assert_equal 10, auth.api.generate_backup_codes(headers: {"cookie" => cookie}, body: {password: "password123"})[:backupCodes].length
+
+    disabled = auth.api.disable_two_factor(headers: {"cookie" => cookie}, body: {password: "password123"}, return_headers: true)
+    assert_equal({status: true}, disabled.fetch(:response))
+  end
+
   def test_passwordless_users_can_manage_two_factor_when_allowed
     auth = build_auth(plugins: [BetterAuth::Plugins.two_factor(allow_passwordless: true)])
     cookie = sign_up_cookie(auth, email: "passwordless@example.com")
@@ -393,6 +413,15 @@ class BetterAuthPluginsTwoFactorTest < Minitest::Test
 
   def user_id_from_email(auth, email)
     auth.context.adapter.find_one(model: "user", where: [{field: "email", value: email}]).fetch("id")
+  end
+
+  def stale_session!(auth, cookie)
+    session = auth.api.get_session(headers: {"cookie" => cookie}, query: {disableCookieCache: true})
+    auth.context.adapter.update(
+      model: "session",
+      where: [{field: "token", value: session[:session]["token"]}],
+      update: {createdAt: Time.now - 300, updatedAt: Time.now - 300}
+    )
   end
 
   def cookie_header(set_cookie)
