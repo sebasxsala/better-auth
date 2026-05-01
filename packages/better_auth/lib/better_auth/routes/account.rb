@@ -56,7 +56,7 @@ module BetterAuth
           }
         }
       ) do |ctx|
-        session = current_session(ctx, sensitive: true)
+        session = current_session(ctx, sensitive: true, fresh: true)
         body = normalize_hash(ctx.body)
         accounts = ctx.context.internal_adapter.find_accounts(session[:user]["id"])
         if accounts.length == 1 && !ctx.context.options.account.dig(:account_linking, :allow_unlinking_all)
@@ -124,26 +124,8 @@ module BetterAuth
         provider_id = body["providerId"] || body["provider_id"]
         raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["VALIDATION_ERROR"]) if provider_id.to_s.empty?
 
-        provider = social_provider(ctx.context, provider_id)
-        raise APIError.new("BAD_REQUEST", message: "Provider #{provider_id} is not supported.") unless provider
-
         account_id = body["accountId"] || body["account_id"]
-        account = account_cookie(ctx, provider_id, account_id, user_id) || find_provider_account(ctx, user_id, provider_id, account_id)
-        raise APIError.new("BAD_REQUEST", message: "Account not found") unless account
-
-        if account["refreshToken"] && access_token_expired?(account) && provider_callable(provider, :refresh_access_token)
-          tokens = call_provider(provider, :refresh_access_token, oauth_token_value(ctx, account["refreshToken"]))
-          updated = update_account_tokens(ctx, account, tokens)
-          account = account.merge(token_hash(tokens))
-          Cookies.set_account_cookie(ctx, updated || account.merge(token_hash_for_storage(ctx, tokens)))
-        end
-
-        ctx.json({
-          accessToken: oauth_token_value(ctx, account["accessToken"]),
-          accessTokenExpiresAt: account["accessTokenExpiresAt"],
-          scopes: account["scopes"] || (account["scope"].to_s.empty? ? [] : account["scope"].to_s.split(",")),
-          idToken: account["idToken"]
-        })
+        ctx.json(access_token_response(ctx, user_id: user_id, provider_id: provider_id, account_id: account_id))
       end
     end
 
@@ -208,10 +190,15 @@ module BetterAuth
         refresh_token = oauth_token_value(ctx, account["refreshToken"])
         raise APIError.new("BAD_REQUEST", message: "Refresh token not found") if refresh_token.to_s.empty?
 
-        tokens = call_provider(provider, :refresh_access_token, refresh_token)
-        updated = update_account_tokens(ctx, account, tokens)
-        values = token_hash(tokens)
-        Cookies.set_account_cookie(ctx, updated || account.merge(token_hash_for_storage(ctx, tokens)))
+        begin
+          tokens = call_provider(provider, :refresh_access_token, refresh_token)
+          updated = update_account_tokens(ctx, account, tokens)
+          values = token_hash(tokens)
+          Cookies.set_account_cookie(ctx, updated || account.merge(token_hash_for_storage(ctx, tokens)))
+        rescue => error
+          log(ctx.context, :error, "FAILED_TO_REFRESH_ACCESS_TOKEN #{error.message}")
+          raise APIError.new("BAD_REQUEST", code: "FAILED_TO_REFRESH_ACCESS_TOKEN", message: "Failed to refresh access token")
+        end
         ctx.json({
           accessToken: values["accessToken"],
           refreshToken: values["refreshToken"] || refresh_token,
@@ -260,16 +247,46 @@ module BetterAuth
 
         provider = social_provider(ctx.context, account["providerId"])
         raise APIError.new("INTERNAL_SERVER_ERROR", message: "Provider account provider is #{account["providerId"]} but it is not configured") unless provider
-        raise APIError.new("BAD_REQUEST", message: "Access token not found") if account["accessToken"].to_s.empty?
 
-        info = call_provider(provider, :get_user_info, {
-          accessToken: oauth_token_value(ctx, account["accessToken"]),
-          access_token: oauth_token_value(ctx, account["accessToken"]),
-          idToken: account["idToken"],
-          scopes: account["scope"].to_s.split(",")
-        })
+        tokens = access_token_response(
+          ctx,
+          user_id: session[:user]["id"],
+          provider_id: account["providerId"],
+          account_id: account["accountId"],
+          provider: provider
+        )
+        raise APIError.new("BAD_REQUEST", message: "Access token not found") if tokens[:accessToken].to_s.empty?
+
+        info = call_provider(provider, :get_user_info, tokens.merge(access_token: tokens[:accessToken]))
         ctx.json(info)
       end
+    end
+
+    def self.access_token_response(ctx, user_id:, provider_id:, account_id: nil, provider: nil)
+      provider ||= social_provider(ctx.context, provider_id)
+      raise APIError.new("BAD_REQUEST", message: "Provider #{provider_id} is not supported.") unless provider
+
+      account = account_cookie(ctx, provider_id, account_id, user_id) || find_provider_account(ctx, user_id, provider_id, account_id)
+      raise APIError.new("BAD_REQUEST", message: "Account not found") unless account
+
+      if account["refreshToken"] && access_token_expired?(account) && provider_callable(provider, :refresh_access_token)
+        begin
+          tokens = call_provider(provider, :refresh_access_token, oauth_token_value(ctx, account["refreshToken"]))
+          updated = update_account_tokens(ctx, account, tokens)
+          account = account.merge(token_hash(tokens))
+          Cookies.set_account_cookie(ctx, updated || account.merge(token_hash_for_storage(ctx, tokens)))
+        rescue => error
+          log(ctx.context, :error, "FAILED_TO_GET_ACCESS_TOKEN #{error.message}")
+          raise APIError.new("BAD_REQUEST", code: "FAILED_TO_GET_ACCESS_TOKEN", message: "Failed to get a valid access token")
+        end
+      end
+
+      {
+        accessToken: oauth_token_value(ctx, account["accessToken"]),
+        accessTokenExpiresAt: account["accessTokenExpiresAt"],
+        scopes: account["scopes"] || (account["scope"].to_s.empty? ? [] : account["scope"].to_s.split(",")),
+        idToken: account["idToken"]
+      }
     end
 
     def self.social_provider(context, provider_id)

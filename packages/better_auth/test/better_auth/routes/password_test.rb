@@ -54,9 +54,23 @@ class BetterAuthRoutesPasswordTest < Minitest::Test
       auth.api.request_password_reset(body: {email: "unsafe-redirect@example.com", redirectTo: "https://evil.example/reset"})
     end
 
-    assert_equal 400, error.status_code
-    assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_CALLBACK_URL"], error.message
+    assert_equal 403, error.status_code
+    assert_equal "FORBIDDEN", error.code
+    assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_REDIRECT_URL"], error.message
     assert_empty sent
+  end
+
+  def test_request_password_reset_hides_sender_errors
+    auth = build_auth(
+      email_and_password: {
+        send_reset_password: ->(_data, _request = nil) { raise "smtp down" }
+      }
+    )
+    auth.api.sign_up_email(body: {email: "sender-error@example.com", password: "password123", name: "Reset"})
+
+    response = auth.api.request_password_reset(body: {email: "sender-error@example.com", redirectTo: "/reset"})
+
+    assert_equal({status: true, message: "If this email exists in our system, check your email for the reset link"}, response)
   end
 
   def test_request_password_reset_rejects_missing_or_invalid_email
@@ -119,6 +133,21 @@ class BetterAuthRoutesPasswordTest < Minitest::Test
 
     assert_equal 400, error.status_code
     assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_CALLBACK_URL"], error.message
+  end
+
+  def test_reset_password_callback_requires_callback_url
+    auth = build_auth(email_and_password: {send_reset_password: ->(_data, _request = nil) {}})
+    auth.api.sign_up_email(body: {email: "missing-callback-reset@example.com", password: "old-password", name: "Reset"})
+    auth.api.request_password_reset(body: {email: "missing-callback-reset@example.com", redirectTo: "/reset"})
+    verification = auth.context.adapter.find_many(model: "verification").first
+    token = verification["identifier"].delete_prefix("reset-password:")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.request_password_reset_callback(params: {token: token})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["VALIDATION_ERROR"], error.message
   end
 
   def test_reset_password_rejects_invalid_password_and_cannot_reuse_token

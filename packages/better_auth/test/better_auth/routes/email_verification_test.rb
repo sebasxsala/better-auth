@@ -81,7 +81,8 @@ class BetterAuthRoutesEmailVerificationTest < Minitest::Test
     end
 
     assert_equal 401, error.status_code
-    assert_equal "invalid_token", error.message
+    assert_equal "TOKEN_EXPIRED", error.code
+    assert_equal BetterAuth::BASE_ERROR_CODES["TOKEN_EXPIRED"], error.message
   end
 
   def test_verify_email_rejects_untrusted_callback_url

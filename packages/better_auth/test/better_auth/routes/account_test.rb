@@ -120,6 +120,56 @@ class BetterAuthRoutesAccountTest < Minitest::Test
     assert_equal "github", refresh_data[:providerId]
   end
 
+  def test_get_access_token_wraps_provider_refresh_errors
+    provider = {
+      id: "github",
+      refresh_access_token: ->(_refresh_token) { raise "provider down" }
+    }
+    auth = build_auth(social_providers: {github: provider})
+    cookie = sign_up_cookie(auth, email: "access-error@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    auth.context.internal_adapter.create_account(
+      userId: user_id,
+      providerId: "github",
+      accountId: "gh-error",
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      accessTokenExpiresAt: Time.now - 60
+    )
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.get_access_token(headers: {"cookie" => cookie}, body: {providerId: "github", accountId: "gh-error"})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal "FAILED_TO_GET_ACCESS_TOKEN", error.code
+    assert_equal "Failed to get a valid access token", error.message
+  end
+
+  def test_refresh_token_wraps_provider_refresh_errors
+    provider = {
+      id: "github",
+      refresh_access_token: ->(_refresh_token) { raise "provider down" }
+    }
+    auth = build_auth(social_providers: {github: provider})
+    cookie = sign_up_cookie(auth, email: "refresh-error@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    auth.context.internal_adapter.create_account(
+      userId: user_id,
+      providerId: "github",
+      accountId: "gh-refresh-error",
+      refreshToken: "old-refresh"
+    )
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.refresh_token(headers: {"cookie" => cookie}, body: {providerId: "github", accountId: "gh-refresh-error"})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal "FAILED_TO_REFRESH_ACCESS_TOKEN", error.code
+    assert_equal "Failed to refresh access token", error.message
+  end
+
   def test_get_access_token_rejects_missing_provider_id_before_provider_lookup
     auth = build_auth(social_providers: {github: {id: "github"}})
     cookie = sign_up_cookie(auth, email: "access-validation@example.com")
@@ -326,6 +376,46 @@ class BetterAuthRoutesAccountTest < Minitest::Test
 
     assert_equal "provider@example.com", info[:user][:email]
     assert_equal "access-token", info[:data][:accessToken]
+  end
+
+  def test_account_info_refreshes_expired_access_token_before_calling_provider
+    refreshed_at = Time.now + 3600
+    provider = {
+      id: "github",
+      refresh_access_token: ->(refresh_token) {
+        assert_equal "old-refresh", refresh_token
+        {
+          accessToken: "fresh-access",
+          refreshToken: "fresh-refresh",
+          accessTokenExpiresAt: refreshed_at,
+          scopes: ["repo"]
+        }
+      },
+      get_user_info: ->(tokens) {
+        {
+          user: {id: "gh-fresh", email: "fresh-info@example.com"},
+          data: {accessToken: tokens[:accessToken], scopes: tokens[:scopes]}
+        }
+      }
+    }
+    auth = build_auth(social_providers: {github: provider})
+    cookie = sign_up_cookie(auth, email: "fresh-info-user@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    account = auth.context.internal_adapter.create_account(
+      userId: user_id,
+      providerId: "github",
+      accountId: "gh-fresh",
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      accessTokenExpiresAt: Time.now - 60,
+      scope: "user"
+    )
+
+    info = auth.api.account_info(headers: {"cookie" => cookie}, query: {accountId: account["id"]})
+
+    assert_equal "fresh-info@example.com", info[:user][:email]
+    assert_equal "fresh-access", info[:data][:accessToken]
+    assert_equal ["repo"], info[:data][:scopes]
   end
 
   def test_account_info_accepts_provider_account_id_from_list_accounts

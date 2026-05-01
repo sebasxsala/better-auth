@@ -160,18 +160,20 @@ module BetterAuth
     end
 
     def self.verify_email_token(ctx, token, callback_url)
-      payload = Crypto.verify_jwt(token, ctx.context.secret)
-      return payload if payload
-
-      redirect_or_error(ctx, callback_url, "invalid_token")
+      decoded, = JWT.decode(token.to_s, ctx.context.secret.to_s, true, algorithm: "HS256")
+      decoded
+    rescue JWT::ExpiredSignature
+      redirect_or_error(ctx, callback_url, BASE_ERROR_CODES["TOKEN_EXPIRED"], code: "TOKEN_EXPIRED")
+    rescue JWT::DecodeError
+      redirect_or_error(ctx, callback_url, BASE_ERROR_CODES["INVALID_TOKEN"], code: "INVALID_TOKEN")
     end
 
-    def self.redirect_or_error(ctx, callback_url, error)
+    def self.redirect_or_error(ctx, callback_url, error, code: nil)
       if callback_url
         separator = callback_url.include?("?") ? "&" : "?"
-        raise ctx.redirect("#{callback_url}#{separator}error=#{error}")
+        raise ctx.redirect("#{callback_url}#{separator}error=#{code || error}")
       end
-      raise APIError.new("UNAUTHORIZED", message: error)
+      raise APIError.new("UNAUTHORIZED", code: code, message: error)
     end
 
     def self.redirect_or_json(ctx, callback_url, data)

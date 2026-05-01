@@ -34,7 +34,7 @@ class BetterAuthSessionTest < Minitest::Test
     assert_includes request_ctx.response_headers.fetch("set-cookie"), "Max-Age=120"
   end
 
-  def test_sensitive_current_session_rejects_stale_session
+  def test_fresh_current_session_rejects_stale_session
     auth = BetterAuth.auth(secret: SECRET, session: {fresh_age: 60, cookie_cache: {enabled: false}})
     user = auth.context.internal_adapter.create_user("name" => "Ada", "email" => "ada@example.com")
     session = auth.context.internal_adapter.create_session(user["id"])
@@ -48,11 +48,29 @@ class BetterAuthSessionTest < Minitest::Test
     request_ctx = endpoint_context(auth, cookie: ctx.response_headers.fetch("set-cookie").lines.first.split(";").first)
 
     error = assert_raises(BetterAuth::APIError) do
-      BetterAuth::Routes.current_session(request_ctx, sensitive: true)
+      BetterAuth::Routes.current_session(request_ctx, sensitive: true, fresh: true)
     end
 
     assert_equal 403, error.status_code
     assert_equal BetterAuth::BASE_ERROR_CODES.fetch("SESSION_NOT_FRESH"), error.message
+  end
+
+  def test_sensitive_current_session_does_not_require_fresh_session
+    auth = BetterAuth.auth(secret: SECRET, session: {fresh_age: 60, cookie_cache: {enabled: false}})
+    user = auth.context.internal_adapter.create_user("name" => "Ada", "email" => "ada-sensitive@example.com")
+    session = auth.context.internal_adapter.create_session(user["id"])
+    auth.context.adapter.update(
+      model: "session",
+      where: [{field: "token", value: session.fetch("token")}],
+      update: {createdAt: Time.now - 120}
+    )
+    ctx = endpoint_context(auth)
+    BetterAuth::Cookies.set_session_cookie(ctx, {session: session, user: user}, false)
+    request_ctx = endpoint_context(auth, cookie: ctx.response_headers.fetch("set-cookie").lines.first.split(";").first)
+
+    current_session = BetterAuth::Routes.current_session(request_ctx, sensitive: true)
+
+    assert_equal session.fetch("token"), current_session.fetch(:session).fetch("token")
   end
 
   def test_sensitive_current_session_allows_stale_session_when_fresh_age_disabled
