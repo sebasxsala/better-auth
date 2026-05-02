@@ -35,4 +35,54 @@ class BetterAuthStripeSchemaTest < Minitest::Test
     assert_equal({type: "string", required: false}, schema.fetch(:user).fetch(:fields).fetch(:role))
     refute schema.key?(:subscription)
   end
+
+  def test_custom_user_schema_merges_with_stripe_customer_field
+    schema = BetterAuth::Stripe::Schema.schema(
+      schema: {
+        user: {
+          fields: {
+            role: {type: "string", required: false}
+          }
+        }
+      }
+    )
+
+    fields = schema.fetch(:user).fetch(:fields)
+    assert_equal({type: "string", required: false}, fields.fetch(:stripeCustomerId))
+    assert_equal({type: "string", required: false}, fields.fetch(:role))
+  end
+
+  def test_custom_organization_schema_merges_when_organization_enabled
+    schema = BetterAuth::Stripe::Schema.schema(
+      organization: {enabled: true},
+      schema: {
+        organization: {
+          fields: {
+            billingEmail: {type: "string", required: false}
+          }
+        }
+      }
+    )
+
+    fields = schema.fetch(:organization).fetch(:fields)
+    assert_equal({type: "string", required: false}, fields.fetch(:stripeCustomerId))
+    assert_equal({type: "string", required: false}, fields.fetch(:billingEmail))
+  end
+
+  def test_custom_subscription_schema_merges_when_subscription_enabled
+    schema = BetterAuth::Stripe::Schema.schema(
+      subscription: {enabled: true, plans: []},
+      schema: {
+        subscription: {
+          fields: {
+            entitlement: {type: "string", required: false}
+          }
+        }
+      }
+    )
+
+    fields = schema.fetch(:subscription).fetch(:fields)
+    assert_equal({type: "string", required: true}, fields.fetch(:plan))
+    assert_equal({type: "string", required: false}, fields.fetch(:entitlement))
+  end
 end

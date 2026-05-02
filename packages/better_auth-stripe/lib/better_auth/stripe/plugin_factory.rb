@@ -11,6 +11,7 @@ module BetterAuth
         config = BetterAuth::Plugins.normalize_hash(options)
         BetterAuth::Plugin.new(
           id: "stripe",
+          version: BetterAuth::Stripe::VERSION,
           init: ->(ctx) { {context: {schema: BetterAuth::Schema.auth_tables(ctx.options)}} },
           schema: BetterAuth::Stripe::Schema.schema(config),
           endpoints: BetterAuth::Stripe::Routes.endpoints(config),

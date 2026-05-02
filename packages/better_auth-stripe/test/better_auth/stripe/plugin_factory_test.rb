@@ -18,4 +18,10 @@ class BetterAuthStripePluginFactoryTest < Minitest::Test
     assert_equal "stripe", plugin.id
     assert plugin.endpoints.key?(:stripe_webhook)
   end
+
+  def test_plugin_version_is_exposed
+    plugin = BetterAuth::Stripe::PluginFactory.build
+
+    assert_equal BetterAuth::Stripe::VERSION, plugin.version
+  end
 end
