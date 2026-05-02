@@ -25,6 +25,7 @@ on:
 
 permissions:
   contents: write
+  checks: read
   id-token: write
 
 concurrency:
@@ -690,9 +691,59 @@ jobs:
         working-directory: packages/better_auth-stripe
         run: bundle exec rake test
 
+  verify-ci:
+    name: Verify CI passed
+    needs: [prepare-release]
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      contents: read
+    steps:
+      - name: Skip CI gate for non-publishing runs
+        if: needs.prepare-release.outputs.should_publish != 'true' || needs.prepare-release.outputs.dry_run == 'true'
+        run: echo "Skipping CI gate because this run will not publish gems."
+
+      - name: Require successful CI check
+        if: needs.prepare-release.outputs.should_publish == 'true' && needs.prepare-release.outputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          expected_name="ci"
+          max_attempts=30
+          sleep_seconds=20
+
+          for attempt in $(seq 1 "$max_attempts"); do
+            response=$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${REPO}/commits/${COMMIT_SHA}/check-runs?per_page=100")
+
+            status=$(jq -r --arg name "$expected_name" '.check_runs[] | select(.name == $name) | .status // empty' <<< "$response" | head -n1)
+            conclusion=$(jq -r --arg name "$expected_name" '.check_runs[] | select(.name == $name) | .conclusion // empty' <<< "$response" | head -n1)
+
+            if [ "$conclusion" = "success" ]; then
+              echo "Required CI check passed: CI / ${expected_name}"
+              exit 0
+            fi
+
+            if [ -n "$conclusion" ]; then
+              echo "::error ::Required CI check failed for ${COMMIT_SHA}: CI / ${expected_name} concluded ${conclusion}."
+              exit 1
+            fi
+
+            echo "Waiting for required CI check CI / ${expected_name} on ${COMMIT_SHA} (attempt ${attempt}/${max_attempts}, status: ${status:-missing})..."
+            sleep "$sleep_seconds"
+          done
+
+          echo "::error ::Required CI check CI / ${expected_name} did not complete successfully for ${COMMIT_SHA}."
+          exit 1
+
   publish-core:
     name: Build and publish better_auth
-    needs: [prepare-release, test-core]
+    needs: [prepare-release, verify-ci, test-core]
     if: needs.prepare-release.outputs.core_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -740,7 +791,7 @@ jobs:
 
   publish-passkey:
     name: Build and publish better_auth-passkey
-    needs: [prepare-release, test-passkey]
+    needs: [prepare-release, verify-ci, test-passkey]
     if: needs.prepare-release.outputs.passkey_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -788,7 +839,7 @@ jobs:
 
   publish-rails:
     name: Build and publish better_auth-rails
-    needs: [prepare-release, test-rails]
+    needs: [prepare-release, verify-ci, test-rails]
     if: needs.prepare-release.outputs.rails_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -863,7 +914,7 @@ jobs:
 
   publish-sinatra:
     name: Build and publish better_auth-sinatra
-    needs: [prepare-release, test-sinatra]
+    needs: [prepare-release, verify-ci, test-sinatra]
     if: needs.prepare-release.outputs.sinatra_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -911,7 +962,7 @@ jobs:
 
   publish-hanami:
     name: Build and publish better_auth-hanami
-    needs: [prepare-release, test-hanami]
+    needs: [prepare-release, verify-ci, test-hanami]
     if: needs.prepare-release.outputs.hanami_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -959,7 +1010,7 @@ jobs:
 
   publish-api-key:
     name: Build and publish better_auth-api-key
-    needs: [prepare-release, test-api-key]
+    needs: [prepare-release, verify-ci, test-api-key]
     if: needs.prepare-release.outputs.api_key_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -1007,7 +1058,7 @@ jobs:
 
   publish-oauth-provider:
     name: Build and publish better_auth-oauth-provider
-    needs: [prepare-release, test-oauth-provider]
+    needs: [prepare-release, verify-ci, test-oauth-provider]
     if: needs.prepare-release.outputs.oauth_provider_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -1055,7 +1106,7 @@ jobs:
 
   publish-redis-storage:
     name: Build and publish better_auth-redis-storage
-    needs: [prepare-release, test-redis-storage]
+    needs: [prepare-release, verify-ci, test-redis-storage]
     if: needs.prepare-release.outputs.redis_storage_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -1103,7 +1154,7 @@ jobs:
 
   publish-mongo-adapter:
     name: Build and publish better_auth-mongo-adapter
-    needs: [prepare-release, test-mongo-adapter]
+    needs: [prepare-release, verify-ci, test-mongo-adapter]
     if: needs.prepare-release.outputs.mongo_adapter_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -1151,7 +1202,7 @@ jobs:
 
   publish-scim:
     name: Build and publish better_auth-scim
-    needs: [prepare-release, test-scim]
+    needs: [prepare-release, verify-ci, test-scim]
     if: needs.prepare-release.outputs.scim_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -1199,7 +1250,7 @@ jobs:
 
   publish-sso:
     name: Build and publish better_auth-sso
-    needs: [prepare-release, test-sso]
+    needs: [prepare-release, verify-ci, test-sso]
     if: needs.prepare-release.outputs.sso_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -1247,7 +1298,7 @@ jobs:
 
   publish-stripe:
     name: Build and publish better_auth-stripe
-    needs: [prepare-release, test-stripe]
+    needs: [prepare-release, verify-ci, test-stripe]
     if: needs.prepare-release.outputs.stripe_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
     runs-on: ubuntu-latest
     steps:
