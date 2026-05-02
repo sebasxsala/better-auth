@@ -682,6 +682,60 @@ class BetterAuthPluginsStripeTest < Minitest::Test
     assert_equal "Stripe webhook error", error.message
   end
 
+  def test_webhook_rejects_missing_signature
+    stripe = FakeStripeClient.new
+    auth = build_auth(stripe_client: stripe, stripe_webhook_secret: "whsec_test")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.stripe_webhook(headers: {}, body: {type: "customer.subscription.updated"})
+    end
+
+    assert_equal BetterAuth::Stripe::ERROR_CODES.fetch("STRIPE_SIGNATURE_NOT_FOUND"), error.message
+  end
+
+  def test_webhook_rejects_missing_secret
+    stripe = FakeStripeClient.new
+    auth = build_auth(stripe_client: stripe, stripe_webhook_secret: nil)
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.stripe_webhook(headers: {"stripe-signature" => "valid"}, body: {type: "customer.subscription.updated"})
+    end
+
+    assert_equal BetterAuth::Stripe::ERROR_CODES.fetch("STRIPE_WEBHOOK_SECRET_NOT_FOUND"), error.message
+  end
+
+  def test_webhook_rejects_null_constructed_event
+    stripe = FakeStripeClient.new
+    stripe.webhooks.async_event = false
+    auth = build_auth(stripe_client: stripe, stripe_webhook_secret: "whsec_test")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.stripe_webhook(headers: {"stripe-signature" => "valid"}, body: {type: "customer.subscription.updated"})
+    end
+
+    assert_equal BetterAuth::Stripe::ERROR_CODES.fetch("FAILED_TO_CONSTRUCT_STRIPE_EVENT"), error.message
+  end
+
+  def test_subscription_created_hook_skips_when_customer_reference_is_missing
+    stripe = FakeStripeClient.new
+    stripe.webhooks.async_event = {
+      type: "customer.subscription.created",
+      data: {
+        object: stripe_subscription(
+          id: "sub_missing_reference",
+          customer: "cus_missing_reference",
+          metadata: {}
+        )
+      }
+    }
+    auth = build_auth(stripe_client: stripe, stripe_webhook_secret: "whsec_test")
+
+    auth.api.stripe_webhook(headers: {"stripe-signature" => "valid"}, body: "{}")
+
+    subscription = auth.context.adapter.find_one(model: "subscription", where: [{field: "stripeSubscriptionId", value: "sub_missing_reference"}])
+    assert_nil subscription
+  end
+
   def test_subscription_success_uses_checkout_session_metadata_and_replaces_placeholder
     stripe = FakeStripeClient.new
     auth = build_auth(stripe_client: stripe)

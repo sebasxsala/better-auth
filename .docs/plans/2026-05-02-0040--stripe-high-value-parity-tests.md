@@ -67,10 +67,10 @@ Ruby-specific adaptation in Task 3: the Ruby API returns `BetterAuth::Response` 
 
 ### Webhook Edge Coverage: 4 tests
 
-- [ ] `BetterAuthStripeRoutesStripeWebhookTest#test_webhook_rejects_missing_signature`
-- [ ] `BetterAuthStripeRoutesStripeWebhookTest#test_webhook_rejects_missing_secret`
-- [ ] `BetterAuthStripeRoutesStripeWebhookTest#test_webhook_rejects_null_constructed_event`
-- [ ] `BetterAuthStripeHooksTest#test_subscription_created_hook_skips_when_customer_reference_is_missing`
+- [x] `BetterAuthStripeRoutesStripeWebhookTest#test_webhook_rejects_missing_signature`
+- [x] `BetterAuthStripeRoutesStripeWebhookTest#test_webhook_rejects_missing_secret`
+- [x] `BetterAuthStripeRoutesStripeWebhookTest#test_webhook_rejects_null_constructed_event`
+- [x] `BetterAuthStripeHooksTest#test_subscription_created_hook_skips_when_customer_reference_is_missing`
 
 ### Seat-Based Billing Coverage: 4 tests
 
@@ -502,7 +502,7 @@ git commit -m "test(stripe): cover subscription route behavior"
 - Modify: `packages/better_auth-stripe/test/better_auth/stripe/hooks_test.rb`
 - Modify: `packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb`
 
-- [ ] **Step 1: Add webhook route missing signature test**
+- [x] **Step 1: Add webhook route missing signature test**
 
 Add this behavior test to `BetterAuthPluginsStripeTest` in `packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb`:
 
@@ -519,7 +519,7 @@ def test_webhook_rejects_missing_signature
 end
 ```
 
-- [ ] **Step 2: Add webhook route missing secret test**
+- [x] **Step 2: Add webhook route missing secret test**
 
 Add this behavior test to `BetterAuthPluginsStripeTest` in `packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb`:
 
@@ -536,7 +536,7 @@ def test_webhook_rejects_missing_secret
 end
 ```
 
-- [ ] **Step 3: Add webhook null constructed event test**
+- [x] **Step 3: Add webhook null constructed event test**
 
 Add this behavior test to `BetterAuthPluginsStripeTest` in `packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb`:
 
@@ -554,7 +554,7 @@ def test_webhook_rejects_null_constructed_event
 end
 ```
 
-- [ ] **Step 4: Add hook missing customer reference test**
+- [x] **Step 4: Add hook missing customer reference test**
 
 Add this behavior test to `BetterAuthPluginsStripeTest` in `packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb` using the public webhook endpoint:
 
@@ -580,7 +580,7 @@ def test_subscription_created_hook_skips_when_customer_reference_is_missing
 end
 ```
 
-- [ ] **Step 5: Run focused webhook tests**
+- [x] **Step 5: Run focused webhook tests**
 
 Run:
 
@@ -593,7 +593,7 @@ rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/hooks_test.rb
 
 Expected: all focused webhook tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb packages/better_auth-stripe/test/better_auth/stripe/routes/stripe_webhook_test.rb packages/better_auth-stripe/test/better_auth/stripe/hooks_test.rb .docs/plans/2026-05-02-0040--stripe-high-value-parity-tests.md
