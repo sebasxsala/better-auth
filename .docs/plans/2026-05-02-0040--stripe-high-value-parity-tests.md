@@ -39,6 +39,8 @@
 
 Ruby-specific adaptation discovered in Task 1: `options[:schema]` must preserve custom field names such as `billingEmail` instead of normalizing them to `billing_email`, while still normalizing table/config keys. This matches upstream `mergeSchema` behavior and keeps user-defined schema fields addressable by their declared Better Auth names. Task 1 also exposed that the Ruby plugin omitted upstream's public `version` metadata, so `PluginFactory` now passes `BetterAuth::Stripe::VERSION` into `BetterAuth::Plugin.new`.
 
+Ruby-specific adaptation in Task 3: the Ruby API returns `BetterAuth::Response` for redirect responses, so the checkout-session placeholder test asserts through `response.status` and `response.headers`. The list route preserves the plan `limits` keys as configured; the test declares string keys and asserts string keys.
+
 ## Target Test Additions
 
 ### Schema And Factory Coverage: 4 tests
@@ -57,11 +59,11 @@ Ruby-specific adaptation discovered in Task 1: `options[:schema]` must preserve 
 
 ### Route Behavior Coverage: 5 tests
 
-- [ ] `BetterAuthStripeRoutesCancelSubscriptionTest#test_cancel_route_syncs_when_stripe_reports_already_canceled`
-- [ ] `BetterAuthStripeRoutesRestoreSubscriptionTest#test_restore_route_clears_cancel_at_period_end`
-- [ ] `BetterAuthStripeRoutesRestoreSubscriptionTest#test_restore_route_releases_pending_schedule`
-- [ ] `BetterAuthStripeRoutesListActiveSubscriptionsTest#test_list_route_returns_limits_and_annual_price_id`
-- [ ] `BetterAuthStripeRoutesSubscriptionSuccessTest#test_success_route_replaces_checkout_session_placeholder`
+- [x] `BetterAuthStripeRoutesCancelSubscriptionTest#test_cancel_route_syncs_when_stripe_reports_already_canceled`
+- [x] `BetterAuthStripeRoutesRestoreSubscriptionTest#test_restore_route_clears_cancel_at_period_end`
+- [x] `BetterAuthStripeRoutesRestoreSubscriptionTest#test_restore_route_releases_pending_schedule`
+- [x] `BetterAuthStripeRoutesListActiveSubscriptionsTest#test_list_route_returns_limits_and_annual_price_id`
+- [x] `BetterAuthStripeRoutesSubscriptionSuccessTest#test_success_route_replaces_checkout_session_placeholder`
 
 ### Webhook Edge Coverage: 4 tests
 
@@ -297,7 +299,7 @@ git commit -m "test(stripe): cover reference authorization guards"
 - Modify: `packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb`
 - Modify: route test files under `packages/better_auth-stripe/test/better_auth/stripe/routes/`
 
-- [ ] **Step 1: Add cancel route behavior test wrapper**
+- [x] **Step 1: Add cancel route behavior test wrapper**
 
 Add this behavior test to `BetterAuthPluginsStripeTest` in `packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb`, because the fake Stripe/auth helpers currently live in that integration file:
 
@@ -335,7 +337,7 @@ def test_cancel_route_syncs_when_stripe_reports_already_canceled
 end
 ```
 
-- [ ] **Step 2: Add restore route cancel-at-period-end test**
+- [x] **Step 2: Add restore route cancel-at-period-end test**
 
 Add this behavior test to `BetterAuthPluginsStripeTest` in `packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb`:
 
@@ -368,7 +370,7 @@ def test_restore_route_clears_cancel_at_period_end
 end
 ```
 
-- [ ] **Step 3: Add restore route schedule release test**
+- [x] **Step 3: Add restore route schedule release test**
 
 Add this behavior test to `BetterAuthPluginsStripeTest` in `packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb`:
 
@@ -399,7 +401,7 @@ def test_restore_route_releases_pending_schedule
 end
 ```
 
-- [ ] **Step 4: Add list route limits and annual price test**
+- [x] **Step 4: Add list route limits and annual price test**
 
 Add this behavior test to `BetterAuthPluginsStripeTest` in `packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb`:
 
@@ -430,7 +432,7 @@ end
 
 Use `build_auth(subscription: {enabled: true, plans: [{name: "pro", price_id: "price_pro_month", annual_discount_price_id: "price_pro_year", limits: {"projects" => 10}}]})` in this test setup so the expected annual price and limits are explicit in the test.
 
-- [ ] **Step 5: Add success route checkout-session callback replacement test**
+- [x] **Step 5: Add success route checkout-session callback replacement test**
 
 Add this behavior test to `BetterAuthPluginsStripeTest` in `packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb`:
 
@@ -471,7 +473,7 @@ def test_success_route_replaces_checkout_session_placeholder
 end
 ```
 
-- [ ] **Step 6: Run focused route/integration tests**
+- [x] **Step 6: Run focused route/integration tests**
 
 Run:
 
@@ -486,7 +488,7 @@ rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/routes/subscrip
 
 Expected: all focused route/integration tests pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb packages/better_auth-stripe/test/better_auth/stripe/routes .docs/plans/2026-05-02-0040--stripe-high-value-parity-tests.md

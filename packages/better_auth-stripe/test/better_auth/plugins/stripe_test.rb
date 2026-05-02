@@ -1103,6 +1103,155 @@ class BetterAuthPluginsStripeTest < Minitest::Test
     assert_equal true, updated.fetch("cancelAtPeriodEnd")
   end
 
+  def test_cancel_route_syncs_when_stripe_reports_already_canceled
+    stripe = FakeStripeClient.new
+    auth = build_auth(stripe_client: stripe)
+    cookie = sign_up_cookie(auth, email: "cancel-sync-route@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    subscription = auth.context.adapter.create(
+      model: "subscription",
+      data: {
+        plan: "pro",
+        referenceId: user.fetch("id"),
+        stripeCustomerId: "cus_cancel_route",
+        stripeSubscriptionId: "sub_cancel_route",
+        status: "active"
+      }
+    )
+    stripe.subscriptions.list_data = [
+      stripe_subscription(id: "sub_cancel_route", customer: "cus_cancel_route", cancel_at_period_end: true)
+    ]
+    stripe.subscriptions.retrieve_data["sub_cancel_route"] = stripe_subscription(id: "sub_cancel_route", customer: "cus_cancel_route", cancel_at_period_end: true)
+    stripe.billing_portal.create_error = RuntimeError.new("already set to be canceled")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.cancel_subscription(
+        headers: {"cookie" => cookie},
+        body: {subscriptionId: "sub_cancel_route", returnUrl: "/account"}
+      )
+    end
+
+    assert_includes error.message, "already set to be canceled"
+    updated = auth.context.adapter.find_one(model: "subscription", where: [{field: "id", value: subscription.fetch("id")}])
+    assert_equal true, updated.fetch("cancelAtPeriodEnd")
+  end
+
+  def test_restore_route_clears_cancel_at_period_end
+    stripe = FakeStripeClient.new
+    auth = build_auth(stripe_client: stripe)
+    cookie = sign_up_cookie(auth, email: "restore-period-route@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    auth.context.adapter.create(
+      model: "subscription",
+      data: {
+        plan: "pro",
+        referenceId: user.fetch("id"),
+        stripeCustomerId: "cus_restore_period",
+        stripeSubscriptionId: "sub_restore_period",
+        status: "active",
+        cancelAtPeriodEnd: true
+      }
+    )
+    stripe.subscriptions.list_data = [
+      stripe_subscription(id: "sub_restore_period", customer: "cus_restore_period", cancel_at_period_end: true)
+    ]
+
+    auth.api.restore_subscription(headers: {"cookie" => cookie}, body: {subscriptionId: "sub_restore_period"})
+
+    updated = auth.context.adapter.find_one(model: "subscription", where: [{field: "stripeSubscriptionId", value: "sub_restore_period"}])
+    assert_equal false, updated.fetch("cancelAtPeriodEnd")
+    assert_equal({cancel_at_period_end: false}, stripe.subscriptions.updated.fetch(0).fetch(:params))
+  end
+
+  def test_restore_route_releases_pending_schedule
+    stripe = FakeStripeClient.new
+    auth = build_auth(stripe_client: stripe)
+    cookie = sign_up_cookie(auth, email: "restore-schedule-route@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    auth.context.adapter.create(
+      model: "subscription",
+      data: {
+        plan: "pro",
+        referenceId: user.fetch("id"),
+        stripeCustomerId: "cus_restore_schedule",
+        stripeSubscriptionId: "sub_restore_schedule",
+        status: "active",
+        stripeScheduleId: "sched_restore_route"
+      }
+    )
+    stripe.subscription_schedules.retrieve_data["sched_restore_route"] = {"id" => "sched_restore_route", "status" => "active"}
+
+    auth.api.restore_subscription(headers: {"cookie" => cookie}, body: {subscriptionId: "sub_restore_schedule"})
+
+    updated = auth.context.adapter.find_one(model: "subscription", where: [{field: "stripeSubscriptionId", value: "sub_restore_schedule"}])
+    assert_nil updated["stripeScheduleId"]
+    assert_equal "sched_restore_route", stripe.subscription_schedules.released.fetch(0)
+  end
+
+  def test_list_route_returns_limits_and_annual_price_id
+    stripe = FakeStripeClient.new
+    auth = build_auth(
+      stripe_client: stripe,
+      subscription: {
+        enabled: true,
+        plans: [{name: "pro", price_id: "price_pro_month", annual_discount_price_id: "price_pro_year", limits: {"projects" => 10}}]
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "list-limits-route@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    auth.context.adapter.create(
+      model: "subscription",
+      data: {
+        plan: "pro",
+        referenceId: user.fetch("id"),
+        stripeCustomerId: "cus_list_limits",
+        stripeSubscriptionId: "sub_list_limits",
+        status: "active",
+        billingInterval: "year"
+      }
+    )
+
+    subscriptions = auth.api.list_active_subscriptions(headers: {"cookie" => cookie})
+
+    assert_equal "price_pro_year", subscriptions.fetch(0).fetch("priceId")
+    assert_equal({"projects" => 10}, subscriptions.fetch(0).fetch("limits"))
+  end
+
+  def test_success_route_replaces_checkout_session_placeholder
+    stripe = FakeStripeClient.new
+    auth = build_auth(stripe_client: stripe)
+    cookie = sign_up_cookie(auth, email: "success-placeholder-route@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    subscription = auth.context.adapter.create(
+      model: "subscription",
+      data: {
+        plan: "pro",
+        referenceId: user.fetch("id"),
+        stripeCustomerId: "cus_success_placeholder",
+        status: "incomplete"
+      }
+    )
+    stripe.checkout.retrieve_data["cs_success_placeholder"] = {
+      "id" => "cs_success_placeholder",
+      "metadata" => {"subscriptionId" => subscription.fetch("id")}
+    }
+    stripe.subscriptions.list_data = [
+      stripe_subscription(id: "sub_success_placeholder", customer: "cus_success_placeholder")
+    ]
+
+    response = auth.api.subscription_success(
+      headers: {"cookie" => cookie},
+      query: {
+        callbackURL: "/done?session={CHECKOUT_SESSION_ID}",
+        checkoutSessionId: "cs_success_placeholder"
+      },
+      as_response: true
+    )
+
+    assert_equal 302, response.status
+    assert_includes response.headers.fetch("location"), "session=cs_success_placeholder"
+  end
+
   def test_user_reference_authorization_branches_match_upstream
     stripe = FakeStripeClient.new
     auth = build_auth(
