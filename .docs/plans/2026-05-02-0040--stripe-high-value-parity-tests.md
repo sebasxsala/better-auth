@@ -41,6 +41,8 @@ Ruby-specific adaptation discovered in Task 1: `options[:schema]` must preserve 
 
 Ruby-specific adaptation in Task 3: the Ruby API returns `BetterAuth::Response` for redirect responses, so the checkout-session placeholder test asserts through `response.status` and `response.headers`. The list route preserves the plan `limits` keys as configured; the test declares string keys and asserts string keys.
 
+Ruby-specific adaptation in Task 5: organization records use string keys in the Ruby test helpers, and `FakeStripeClient` is scoped as `BetterAuthPluginsStripeTest::FakeStripeClient`. The seat sync no-op test sets the fake Stripe seat item quantity to the expected member count after adding the member, because the organization hook runs after membership mutation.
+
 ## Target Test Additions
 
 ### Schema And Factory Coverage: 4 tests
@@ -74,10 +76,10 @@ Ruby-specific adaptation in Task 3: the Ruby API returns `BetterAuth::Response` 
 
 ### Seat-Based Billing Coverage: 4 tests
 
-- [ ] `BetterAuthStripeOrganizationHooksTest#test_sync_seats_uses_custom_proration_behavior`
-- [ ] `BetterAuthStripeOrganizationHooksTest#test_sync_seats_does_not_update_when_quantity_matches`
-- [ ] `BetterAuthStripeRoutesUpgradeSubscriptionTest#test_seat_only_plan_does_not_duplicate_base_price`
-- [ ] `BetterAuthStripeRoutesUpgradeSubscriptionTest#test_metered_seat_upgrade_keeps_quantity_only_for_seat_item`
+- [x] `BetterAuthStripeOrganizationHooksTest#test_sync_seats_uses_custom_proration_behavior`
+- [x] `BetterAuthStripeOrganizationHooksTest#test_sync_seats_does_not_update_when_quantity_matches`
+- [x] `BetterAuthStripeRoutesUpgradeSubscriptionTest#test_seat_only_plan_does_not_duplicate_base_price`
+- [x] `BetterAuthStripeRoutesUpgradeSubscriptionTest#test_metered_seat_upgrade_keeps_quantity_only_for_seat_item`
 
 ## Task 1: Schema And Plugin Factory Tests
 
@@ -607,7 +609,7 @@ git commit -m "test(stripe): cover webhook edge cases"
 - Modify: `packages/better_auth-stripe/test/better_auth/stripe/organization_hooks_test.rb`
 - Modify: `packages/better_auth-stripe/test/better_auth/stripe/routes/upgrade_subscription_test.rb`
 
-- [ ] **Step 1: Add sync seats proration behavior test**
+- [x] **Step 1: Add sync seats proration behavior test**
 
 Add this behavior test to `BetterAuthPluginsStripeOrganizationTest` in `packages/better_auth-stripe/test/better_auth/plugins/stripe_organization_test.rb` using the existing `build_seat_auth` helper:
 
@@ -640,7 +642,7 @@ def test_sync_seats_uses_custom_proration_behavior
 end
 ```
 
-- [ ] **Step 2: Add sync seats no-op test when quantity matches**
+- [x] **Step 2: Add sync seats no-op test when quantity matches**
 
 Add this test:
 
@@ -674,7 +676,7 @@ def test_sync_seats_does_not_update_when_quantity_matches
 end
 ```
 
-- [ ] **Step 3: Add seat-only plan checkout duplication test**
+- [x] **Step 3: Add seat-only plan checkout duplication test**
 
 Add this behavior test to `BetterAuthPluginsStripeOrganizationTest` in `packages/better_auth-stripe/test/better_auth/plugins/stripe_organization_test.rb` using `build_seat_auth`:
 
@@ -705,7 +707,7 @@ def test_seat_only_plan_does_not_duplicate_base_price
 end
 ```
 
-- [ ] **Step 4: Add metered seat upgrade quantity test**
+- [x] **Step 4: Add metered seat upgrade quantity test**
 
 Add this behavior test to `BetterAuthPluginsStripeOrganizationTest` in `packages/better_auth-stripe/test/better_auth/plugins/stripe_organization_test.rb`:
 
@@ -756,7 +758,7 @@ def test_metered_seat_upgrade_keeps_quantity_only_for_seat_item
 end
 ```
 
-- [ ] **Step 5: Run focused organization tests**
+- [x] **Step 5: Run focused organization tests**
 
 Run:
 
@@ -769,7 +771,7 @@ rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/routes/upgrade_
 
 Expected: all focused seat/organization tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/better_auth-stripe/test/better_auth/plugins/stripe_organization_test.rb packages/better_auth-stripe/test/better_auth/stripe/organization_hooks_test.rb packages/better_auth-stripe/test/better_auth/stripe/routes/upgrade_subscription_test.rb .docs/plans/2026-05-02-0040--stripe-high-value-parity-tests.md

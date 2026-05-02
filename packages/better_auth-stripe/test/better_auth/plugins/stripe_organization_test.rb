@@ -175,6 +175,71 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
     assert_equal 2, updated_subscription.fetch("seats")
   end
 
+  def test_sync_seats_uses_custom_proration_behavior
+    stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
+    auth = build_seat_auth(stripe, proration_behavior: "always_invoice")
+    cookie = sign_up_cookie(auth, "seat-proration@example.com")
+    organization = auth.api.create_organization(
+      headers: {"cookie" => cookie},
+      body: {name: "Seat Proration Org", slug: "seat-proration-org"}
+    )
+    auth.context.adapter.update(model: "organization", where: [{field: "id", value: organization.fetch("id")}], update: {stripeCustomerId: "cus_seat_proration"})
+    auth.context.adapter.create(
+      model: "subscription",
+      data: {
+        plan: "team",
+        referenceId: organization.fetch("id"),
+        stripeCustomerId: "cus_seat_proration",
+        stripeSubscriptionId: "sub_seat_proration",
+        status: "active"
+      }
+    )
+    stripe.subscriptions.retrieve_data["sub_seat_proration"] = stripe_subscription(
+      id: "sub_seat_proration",
+      customer: "cus_seat_proration",
+      quantity: 1,
+      extra_items: [{id: "si_proration_seat", quantity: 1, price: {id: "price_team_seat"}}]
+    )
+    member_user = auth.context.internal_adapter.create_user(email: "seat-proration-member@example.com", name: "Member", emailVerified: true)
+
+    auth.api.add_member(headers: {"cookie" => cookie}, body: {organizationId: organization.fetch("id"), userId: member_user.fetch("id"), role: "member"})
+
+    assert_equal "always_invoice", stripe.subscriptions.updated.fetch(0).fetch(:params).fetch(:proration_behavior)
+  end
+
+  def test_sync_seats_does_not_update_when_quantity_matches
+    stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
+    auth = build_seat_auth(stripe)
+    cookie = sign_up_cookie(auth, "seat-noop@example.com")
+    organization = auth.api.create_organization(
+      headers: {"cookie" => cookie},
+      body: {name: "Seat Noop Org", slug: "seat-noop-org"}
+    )
+    auth.context.adapter.update(model: "organization", where: [{field: "id", value: organization.fetch("id")}], update: {stripeCustomerId: "cus_seat_noop"})
+    auth.context.adapter.create(
+      model: "subscription",
+      data: {
+        plan: "team",
+        referenceId: organization.fetch("id"),
+        stripeCustomerId: "cus_seat_noop",
+        stripeSubscriptionId: "sub_seat_noop",
+        status: "active"
+      }
+    )
+    current_member_count = auth.context.adapter.count(model: "member", where: [{field: "organizationId", value: organization.fetch("id")}])
+    stripe.subscriptions.retrieve_data["sub_seat_noop"] = stripe_subscription(
+      id: "sub_seat_noop",
+      customer: "cus_seat_noop",
+      quantity: current_member_count,
+      extra_items: [{id: "si_noop_seat", quantity: current_member_count + 1, price: {id: "price_team_seat"}}]
+    )
+    member_user = auth.context.internal_adapter.create_user(email: "seat-noop-member@example.com", name: "Member", emailVerified: true)
+
+    auth.api.add_member(headers: {"cookie" => cookie}, body: {organizationId: organization.fetch("id"), userId: member_user.fetch("id"), role: "member"})
+
+    assert_empty stripe.subscriptions.updated
+  end
+
   def test_active_organization_upgrade_with_multiple_item_changes_uses_direct_subscription_update
     stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
     auth = build_multi_item_auth(stripe)
@@ -645,6 +710,93 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
     auth.api.stripe_webhook(headers: {"stripe-signature" => "valid"}, body: {type: "customer.subscription.updated", data: {object: stripe_subscription(id: "sub_seat_edge", customer: "cus_seat_edge", price_id: "price_same_seat", status: "active", extra_items: [{id: "si_team_seat", quantity: 5, price: {id: "price_team_seat"}}])}})
     updated = auth.context.adapter.find_one(model: "subscription", where: [{field: "stripeSubscriptionId", value: "sub_seat_edge"}])
     assert_equal 5, updated.fetch("seats")
+  end
+
+  def test_seat_only_plan_does_not_duplicate_base_price
+    stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.stripe(
+          stripe_client: stripe,
+          organization: {enabled: true},
+          subscription: {
+            enabled: true,
+            plans: [{name: "team", price_id: "price_team_seat", seat_price_id: "price_team_seat"}],
+            authorize_reference: ->(_data, _ctx) { true }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, "seat-only@example.com")
+    organization = auth.api.create_organization(
+      headers: {"cookie" => cookie},
+      body: {name: "Seat Only Org", slug: "seat-only-org"}
+    )
+
+    auth.api.upgrade_subscription(
+      headers: {"cookie" => cookie},
+      body: {
+        plan: "team",
+        customerType: "organization",
+        referenceId: organization.fetch("id"),
+        successUrl: "/success",
+        cancelUrl: "/cancel"
+      }
+    )
+
+    line_items = stripe.checkout.created.fetch(0).fetch(:line_items)
+    prices = line_items.map { |item| item.fetch(:price) }
+    assert_equal prices.uniq, prices
+  end
+
+  def test_metered_seat_upgrade_keeps_quantity_only_for_seat_item
+    stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
+    stripe.prices.retrieve_data["price_metered"] = {"id" => "price_metered", "recurring" => {"usage_type" => "metered"}}
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.stripe(
+          stripe_client: stripe,
+          organization: {enabled: true},
+          subscription: {
+            enabled: true,
+            plans: [{name: "team", price_id: "price_metered", seat_price_id: "price_team_seat"}],
+            authorize_reference: ->(_data, _ctx) { true }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, "metered-seat@example.com")
+    organization = auth.api.create_organization(
+      headers: {"cookie" => cookie},
+      body: {name: "Metered Seat Org", slug: "metered-seat-org"}
+    )
+
+    auth.api.upgrade_subscription(
+      headers: {"cookie" => cookie},
+      body: {
+        plan: "team",
+        customerType: "organization",
+        referenceId: organization.fetch("id"),
+        successUrl: "/success",
+        cancelUrl: "/cancel"
+      }
+    )
+
+    line_items = stripe.checkout.created.fetch(0).fetch(:line_items)
+    base_item = line_items.find { |item| item.fetch(:price) == "price_metered" }
+    seat_item = line_items.find { |item| item.fetch(:price) == "price_team_seat" }
+    refute base_item.key?(:quantity)
+    assert_operator seat_item.fetch(:quantity), :>=, 1
   end
 
   def test_organization_reference_requires_reference_id_or_active_organization_id
