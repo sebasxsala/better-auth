@@ -375,7 +375,7 @@ rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/metadata_test.r
 
 Expected: 4 runs, 0 failures.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/better_auth-stripe/lib/better_auth/stripe/metadata.rb packages/better_auth-stripe/lib/better_auth/plugins/stripe.rb packages/better_auth-stripe/test/better_auth/stripe/metadata_test.rb .docs/plans/2026-05-01-2350--modularize-stripe-plugin.md
@@ -389,7 +389,7 @@ git commit -m "refactor(stripe): extract metadata helpers"
 - Modify: `packages/better_auth-stripe/lib/better_auth/stripe/schema.rb`
 - Test: `packages/better_auth-stripe/test/better_auth/stripe/schema_test.rb`
 
-- [ ] **Step 1: Move schema implementation**
+- [x] **Step 1: Move schema implementation**
 
 Move `stripe_schema(config)` to `BetterAuth::Stripe::Schema.schema(config)`.
 
@@ -401,13 +401,13 @@ def stripe_schema(config)
 end
 ```
 
-- [ ] **Step 2: Add custom schema merge parity check**
+- [x] **Step 2: Add custom schema merge parity check**
 
 Upstream `schema.ts` merges `options.schema`. If Ruby does not currently support `config[:schema]`, add support in `BetterAuth::Stripe::Schema.schema` by deep merging `config[:schema]` into the generated schema, with the upstream adaptation that `subscription` custom schema is ignored when subscriptions are disabled.
 
-Use existing `BetterAuth::Plugins.deep_merge_hashes` if available; otherwise use `BetterAuth::Stripe::Metadata.deep_merge`.
+Ruby adaptation: `BetterAuth::Stripe::Schema.deep_merge_schema` is used instead of `BetterAuth::Stripe::Metadata.deep_merge` because metadata deep merge normalizes camelCase keys to snake_case, while raw plugin schema still needs upstream-style camelCase field names before Better Auth normalizes schema storage keys.
 
-- [ ] **Step 3: Add schema tests**
+- [x] **Step 3: Add schema tests**
 
 Create `schema_test.rb` with:
 
@@ -440,7 +440,7 @@ class BetterAuthStripeSchemaTest < Minitest::Test
 end
 ```
 
-- [ ] **Step 4: Run schema tests**
+- [x] **Step 4: Run schema tests**
 
 Run:
 
@@ -450,7 +450,7 @@ rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/schema_test.rb
 
 Expected: 3 runs, 0 failures.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/better_auth-stripe/lib/better_auth/stripe/schema.rb packages/better_auth-stripe/lib/better_auth/plugins/stripe.rb packages/better_auth-stripe/test/better_auth/stripe/schema_test.rb .docs/plans/2026-05-01-2350--modularize-stripe-plugin.md
@@ -1317,6 +1317,7 @@ Initial inventory from this planning pass:
 - [ ] Async Stripe calls are synchronous through the Stripe Ruby SDK adapter.
 - [ ] Upstream camelCase organization hook names are adapted to Ruby snake_case hook names.
 - [ ] Keep both snake_case and camelCase request inputs where the current Ruby plugin already supports them.
+- [x] Schema custom merge uses a schema-specific deep merge to preserve raw camelCase field keys until Better Auth schema normalization runs.
 
 ## Self-Review
 

@@ -26,40 +26,7 @@ module BetterAuth
     end
 
     def stripe_schema(config)
-      schema = {
-        user: {
-          fields: {
-            stripeCustomerId: {type: "string", required: false}
-          }
-        }
-      }
-      if config.dig(:subscription, :enabled)
-        schema[:subscription] = {
-          fields: {
-            plan: {type: "string", required: true},
-            referenceId: {type: "string", required: true},
-            stripeCustomerId: {type: "string", required: false},
-            stripeSubscriptionId: {type: "string", required: false},
-            status: {type: "string", required: false, default_value: "incomplete"},
-            periodStart: {type: "date", required: false},
-            periodEnd: {type: "date", required: false},
-            trialStart: {type: "date", required: false},
-            trialEnd: {type: "date", required: false},
-            cancelAtPeriodEnd: {type: "boolean", required: false, default_value: false},
-            cancelAt: {type: "date", required: false},
-            canceledAt: {type: "date", required: false},
-            endedAt: {type: "date", required: false},
-            seats: {type: "number", required: false},
-            billingInterval: {type: "string", required: false},
-            stripeScheduleId: {type: "string", required: false},
-            limits: {type: "json", required: false}
-          }
-        }
-      end
-      if config.dig(:organization, :enabled)
-        schema[:organization] = {fields: {stripeCustomerId: {type: "string", required: false}}}
-      end
-      schema
+      BetterAuth::Stripe::Schema.schema(config)
     end
 
     def stripe_endpoints(config)
