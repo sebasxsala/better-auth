@@ -632,7 +632,7 @@ rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/middleware_test
 
 Expected: middleware authorization tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/better_auth-stripe/lib/better_auth/stripe/middleware.rb packages/better_auth-stripe/lib/better_auth/plugins/stripe.rb packages/better_auth-stripe/test/better_auth/stripe/routes/upgrade_subscription_test.rb packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb .docs/plans/2026-05-01-2350--modularize-stripe-plugin.md
@@ -646,7 +646,7 @@ git commit -m "refactor(stripe): extract reference middleware"
 - Modify: `packages/better_auth-stripe/lib/better_auth/stripe/hooks.rb`
 - Test: `packages/better_auth-stripe/test/better_auth/stripe/hooks_test.rb`
 
-- [ ] **Step 1: Move webhook event handlers**
+- [x] **Step 1: Move webhook event handlers**
 
 Move these methods to `BetterAuth::Stripe::Hooks`:
 
@@ -668,7 +668,7 @@ on_subscription_updated
 on_subscription_deleted
 ```
 
-- [ ] **Step 2: Wire dependencies through module calls**
+- [x] **Step 2: Wire dependencies through module calls**
 
 Inside `Hooks`, call:
 
@@ -680,9 +680,11 @@ BetterAuth::Stripe::ERROR_CODES
 
 instead of using methods on `BetterAuth::Plugins`.
 
-- [ ] **Step 3: Add hook tests**
+- [x] **Step 3: Add hook tests**
 
-Move these existing tests from `stripe_test.rb` into `hooks_test.rb`:
+Ruby adaptation: added `packages/better_auth-stripe/test/better_auth/stripe/hooks_test.rb` to pin the modular handler API, while keeping the full webhook behavior matrix in `stripe_test.rb` until route-level tests are split. The full package suite remains the behavior regression suite for this extraction.
+
+Move these existing tests from `stripe_test.rb` into `hooks_test.rb` when the webhook route tests are split:
 
 ```ruby
 test_webhook_verifies_signature_and_updates_subscription
@@ -694,7 +696,7 @@ test_subscription_update_invokes_trial_end_and_expired_callbacks
 test_created_webhook_skips_duplicates_missing_reference_and_unknown_plan
 ```
 
-- [ ] **Step 4: Run hook tests**
+- [x] **Step 4: Run hook tests**
 
 Run:
 
