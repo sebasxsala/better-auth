@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "securerandom"
-
 module BetterAuth
   module Plugins
     singleton_class.remove_method(:stripe) if singleton_class.method_defined?(:stripe)
@@ -14,15 +12,7 @@ module BetterAuth
     STRIPE_UNSAFE_METADATA_KEYS = BetterAuth::Stripe::Metadata::UNSAFE_KEYS
 
     def stripe(options = {})
-      config = normalize_hash(options)
-      Plugin.new(
-        id: "stripe",
-        init: ->(ctx) { {context: {schema: Schema.auth_tables(ctx.options)}} },
-        schema: stripe_schema(config),
-        endpoints: stripe_endpoints(config),
-        error_codes: STRIPE_ERROR_CODES,
-        options: config.merge(database_hooks: stripe_database_hooks(config), organization_hooks: stripe_organization_hooks(config))
-      )
+      BetterAuth::Stripe::PluginFactory.build(options)
     end
 
     def stripe_schema(config)
@@ -34,36 +24,7 @@ module BetterAuth
     end
 
     def stripe_database_hooks(config)
-      return {} unless config[:create_customer_on_sign_up]
-
-      {
-        user: {
-          create: {
-            before: lambda do |data, hook_ctx|
-              next unless data["email"] && !data["stripeCustomerId"]
-
-              data["id"] ||= SecureRandom.hex(16)
-              customer = stripe_find_or_create_user_customer(config, data, nil, hook_ctx)
-              {data: {id: data["id"], stripeCustomerId: stripe_id(customer)}}
-            rescue
-              nil
-            end
-          },
-          update: {
-            after: lambda do |user, _ctx|
-              next unless user && user["stripeCustomerId"]
-
-              customer = stripe_client(config).customers.retrieve(user["stripeCustomerId"])
-              next if stripe_fetch(customer, "deleted")
-              next if stripe_fetch(customer, "email") == user["email"]
-
-              stripe_client(config).customers.update(user["stripeCustomerId"], email: user["email"])
-            rescue
-              nil
-            end
-          }
-        }
-      }
+      BetterAuth::Stripe::PluginFactory.database_hooks(config)
     end
 
     def stripe_organization_hooks(config)

@@ -1063,7 +1063,7 @@ rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/routes/stripe_w
 
 Expected: all moved webhook route tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/better_auth-stripe/lib/better_auth/stripe/routes/stripe_webhook.rb packages/better_auth-stripe/lib/better_auth/plugins/stripe.rb packages/better_auth-stripe/test/better_auth/stripe/routes/stripe_webhook_test.rb packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb .docs/plans/2026-05-01-2350--modularize-stripe-plugin.md
@@ -1077,7 +1077,7 @@ git commit -m "refactor(stripe): extract webhook route"
 - Modify: `packages/better_auth-stripe/lib/better_auth/plugins/stripe.rb`
 - Test: `packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb`
 
-- [ ] **Step 1: Move plugin assembly**
+- [x] **Step 1: Move plugin assembly**
 
 Move `stripe(options = {})` to:
 
@@ -1109,7 +1109,7 @@ end
 
 Use existing Ruby `Schema.auth_tables(ctx.options)` behavior exactly as the current plugin does.
 
-- [ ] **Step 2: Move database hooks**
+- [x] **Step 2: Move database hooks**
 
 Move `stripe_database_hooks(config)` into `BetterAuth::Stripe::PluginFactory.database_hooks(config)`.
 
@@ -1121,7 +1121,9 @@ return {} unless config[:create_customer_on_sign_up]
 
 and preserve the current tolerant rescue behavior on sign-up and email sync.
 
-- [ ] **Step 3: Reduce public facade**
+- [x] **Step 3: Reduce public facade**
+
+Ruby adaptation: `packages/better_auth-stripe/lib/better_auth/plugins/stripe.rb` still contains compatibility delegators and shared customer/schedule helper delegators while route extraction is in progress. Plugin assembly and database hook behavior now live in `BetterAuth::Stripe::PluginFactory`.
 
 `packages/better_auth-stripe/lib/better_auth/plugins/stripe.rb` should contain:
 
@@ -1164,7 +1166,7 @@ module BetterAuth
 end
 ```
 
-- [ ] **Step 4: Run broad existing tests**
+- [x] **Step 4: Run broad existing tests**
 
 Run:
 
