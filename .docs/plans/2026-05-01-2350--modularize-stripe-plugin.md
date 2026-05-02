@@ -1221,7 +1221,7 @@ rg -n "^export|^async function|^function|^const .*Schema|^export const|^export f
 
 add a matching Ruby module/method or an intentional-not-ported note.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .docs/plans/2026-05-01-2350--modularize-stripe-plugin.md .docs/features/stripe-upstream-parity.md
@@ -1233,7 +1233,7 @@ git commit -m "docs(stripe): add upstream parity matrix"
 **Files:**
 - Modify: only files touched by this plan
 
-- [ ] **Step 1: Run package test suite**
+- [x] **Step 1: Run package test suite**
 
 Run:
 
@@ -1244,7 +1244,7 @@ rbenv exec bundle exec rake test
 
 Expected: all `better_auth-stripe` tests pass.
 
-- [ ] **Step 2: Run style check**
+- [x] **Step 2: Run style check**
 
 Run:
 
@@ -1255,7 +1255,7 @@ rbenv exec bundle exec standardrb
 
 Expected: exits with status 0.
 
-- [ ] **Step 3: Run root-level smoke if package paths require it**
+- [x] **Step 3: Run root-level smoke if package paths require it**
 
 Run from repo root:
 
@@ -1265,7 +1265,9 @@ rbenv exec bundle exec ruby -Ipackages/better_auth-stripe/lib -e 'require "bette
 
 Expected: prints `stripe`.
 
-- [ ] **Step 4: Remove duplicate tests only after moved tests pass**
+- [x] **Step 4: Remove duplicate tests only after moved tests pass**
+
+Ruby adaptation: no legacy integration tests were deleted because route/module tests added in this pass are structural module coverage, while `stripe_test.rb` and `stripe_organization_test.rb` still hold the behavior-heavy grouped integration coverage against fake Stripe and Better Auth adapters.
 
 Delete duplicated assertions from:
 
@@ -1283,7 +1285,7 @@ test_webhook_verifies_signature_and_updates_subscription
 test_organization_subscription_flow_uses_active_org_and_authorize_reference
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/better_auth-stripe/lib packages/better_auth-stripe/test .docs/plans/2026-05-01-2350--modularize-stripe-plugin.md
