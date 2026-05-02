@@ -32,7 +32,9 @@ ActiveRecord is declared as a runtime dependency of `better_auth-rails`. The ada
 - exercises plugin-model CRUD and adapter query behavior for `select`, `sort_by`, `limit`, `offset`, string operators, numeric comparison operators, `update_many(returning:)`, and joins;
 - runs Rack signup, signin, and get-session base routes against ActiveRecord persistence, including rebuilding the auth instance between signup and signin.
 
-Rails mounting specs cover default `/api/auth`, custom mount paths, plugin endpoints, request cookies flowing into core, `Set-Cookie` flowing back through Rails, and core origin/CSRF checks staying active for mutating mounted requests. MySQL real-database Rails coverage remains future polish.
+Rails mounting specs cover default `/api/auth`, custom mount paths, plugin endpoints, request cookies flowing into core, `Set-Cookie` flowing back through Rails, and core origin/CSRF checks staying active for mutating mounted requests.
+
+A MySQL integration spec mirrors the PostgreSQL coverage: it runs the generated Rails migration against the Docker MySQL service, exercises the same ActiveRecord adapter queries (CRUD, filters, joins), and runs Rack signup/signin/get-session base routes against ActiveRecord persistence with MySQL.
 
 ## Verification
 
