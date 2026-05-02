@@ -850,7 +850,11 @@ jobs:
             exit 0
           fi
 
-          gem push better_auth_rails-*.gem
+          if gem push better_auth_rails-*.gem; then
+            echo "Published better_auth_rails $TARGET_VERSION"
+          else
+            echo "::warning ::Could not publish better_auth_rails $TARGET_VERSION. The alias gem is optional and may be owned by a different RubyGems account."
+          fi
 
   publish-sinatra:
     name: Build and publish better_auth-sinatra
