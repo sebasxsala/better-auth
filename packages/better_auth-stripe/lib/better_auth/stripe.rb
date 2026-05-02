@@ -2,9 +2,23 @@
 
 require "better_auth"
 require_relative "stripe/version"
+require_relative "stripe/client_adapter"
+require_relative "stripe/error_codes"
+require_relative "stripe/metadata"
+require_relative "stripe/schema"
+require_relative "stripe/types"
+require_relative "stripe/utils"
+require_relative "stripe/middleware"
+require_relative "stripe/hooks"
+require_relative "stripe/organization_hooks"
+require_relative "stripe/routes/index"
+require_relative "stripe/routes/upgrade_subscription"
+require_relative "stripe/routes/cancel_subscription"
+require_relative "stripe/routes/restore_subscription"
+require_relative "stripe/routes/list_active_subscriptions"
+require_relative "stripe/routes/create_billing_portal"
+require_relative "stripe/routes/subscription_success"
+require_relative "stripe/routes/cancel_subscription_callback"
+require_relative "stripe/routes/stripe_webhook"
+require_relative "stripe/plugin_factory"
 require_relative "plugins/stripe"
-
-module BetterAuth
-  module Stripe
-  end
-end
