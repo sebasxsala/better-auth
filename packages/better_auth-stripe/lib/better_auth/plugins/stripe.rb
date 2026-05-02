@@ -11,7 +11,7 @@ module BetterAuth
     module_function
 
     STRIPE_ERROR_CODES = BetterAuth::Stripe::ERROR_CODES
-    STRIPE_UNSAFE_METADATA_KEYS = %w[__proto__ constructor prototype].freeze
+    STRIPE_UNSAFE_METADATA_KEYS = BetterAuth::Stripe::Metadata::UNSAFE_KEYS
 
     def stripe(options = {})
       config = normalize_hash(options)
@@ -1099,40 +1099,23 @@ module BetterAuth
     end
 
     def stripe_metadata(internal, *user_metadata)
-      user_metadata.compact
-        .reduce({}) do |acc, entry|
-          next acc unless entry.respond_to?(:each)
-
-          acc.merge(entry.each_with_object({}) do |(key, value), result|
-            metadata_key = stripe_metadata_key(key)
-            result[metadata_key] = value unless STRIPE_UNSAFE_METADATA_KEYS.include?(metadata_key)
-          end)
-        end
-        .merge(internal.transform_keys { |key| stripe_metadata_key(key) })
+      BetterAuth::Stripe::Metadata.merge(internal, *user_metadata)
     end
 
     def stripe_customer_metadata_set(internal_fields, *user_metadata)
-      stripe_metadata(internal_fields, *user_metadata)
+      BetterAuth::Stripe::Metadata.customer_set(internal_fields, *user_metadata)
     end
 
     def stripe_customer_metadata_get(metadata)
-      {
-        userId: stripe_metadata_fetch(metadata, "userId"),
-        organizationId: stripe_metadata_fetch(metadata, "organizationId"),
-        customerType: stripe_metadata_fetch(metadata, "customerType")
-      }
+      BetterAuth::Stripe::Metadata.customer_get(metadata)
     end
 
     def stripe_subscription_metadata_set(internal_fields, *user_metadata)
-      stripe_metadata(internal_fields, *user_metadata)
+      BetterAuth::Stripe::Metadata.subscription_set(internal_fields, *user_metadata)
     end
 
     def stripe_subscription_metadata_get(metadata)
-      {
-        userId: stripe_metadata_fetch(metadata, "userId"),
-        subscriptionId: stripe_metadata_fetch(metadata, "subscriptionId"),
-        referenceId: stripe_metadata_fetch(metadata, "referenceId")
-      }
+      BetterAuth::Stripe::Metadata.subscription_get(metadata)
     end
 
     def stripe_notify_customer_created(config, customer, user, ctx)
@@ -1147,31 +1130,15 @@ module BetterAuth
     end
 
     def stripe_metadata_key(key)
-      case normalize_key(key)
-      when :user_id then "userId"
-      when :organization_id then "organizationId"
-      when :customer_type then "customerType"
-      when :subscription_id then "subscriptionId"
-      when :reference_id then "referenceId"
-      else
-        key.to_s
-      end
+      BetterAuth::Stripe::Metadata.metadata_key(key)
     end
 
     def stripe_metadata_fetch(metadata, key)
-      return nil unless metadata.respond_to?(:[])
-
-      metadata[key] || metadata[key.to_sym] || metadata[normalize_key(key)] || metadata[normalize_key(key).to_s]
+      BetterAuth::Stripe::Metadata.metadata_fetch(metadata, key)
     end
 
     def stripe_deep_merge(base, override)
-      normalize_hash(base).merge(normalize_hash(override)) do |_key, old, new|
-        if old.is_a?(Hash) && new.is_a?(Hash)
-          stripe_deep_merge(old, new)
-        else
-          new
-        end
-      end
+      BetterAuth::Stripe::Metadata.deep_merge(base, override)
     end
 
     def stripe_redirect?(body)
@@ -1179,12 +1146,7 @@ module BetterAuth
     end
 
     def stripe_stringify_keys(value)
-      return value unless value.is_a?(Hash)
-
-      value.each_with_object({}) do |(key, object), result|
-        result[key.to_s] = object
-        result[key.to_sym] = object
-      end
+      BetterAuth::Stripe::Metadata.stringify_keys(value)
     end
 
     def stripe_url(ctx, url)

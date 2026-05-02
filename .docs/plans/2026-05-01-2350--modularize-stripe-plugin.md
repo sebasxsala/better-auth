@@ -263,7 +263,7 @@ rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/client_adapter_
 
 Expected: 2 runs, 0 failures.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/better_auth-stripe/lib/better_auth/stripe/client_adapter.rb packages/better_auth-stripe/lib/better_auth/stripe/error_codes.rb packages/better_auth-stripe/lib/better_auth/plugins/stripe.rb packages/better_auth-stripe/test/better_auth/stripe/client_adapter_test.rb .docs/plans/2026-05-01-2350--modularize-stripe-plugin.md
@@ -277,7 +277,7 @@ git commit -m "refactor(stripe): extract client adapter and errors"
 - Modify: `packages/better_auth-stripe/lib/better_auth/stripe/metadata.rb`
 - Test: `packages/better_auth-stripe/test/better_auth/stripe/metadata_test.rb`
 
-- [ ] **Step 1: Move metadata implementation**
+- [x] **Step 1: Move metadata implementation**
 
 Move these methods from `plugins/stripe.rb` to `BetterAuth::Stripe::Metadata`:
 
@@ -327,7 +327,7 @@ def stripe_subscription_metadata_get(metadata)
 end
 ```
 
-- [ ] **Step 2: Preserve unsafe key filtering**
+- [x] **Step 2: Preserve unsafe key filtering**
 
 Move `STRIPE_UNSAFE_METADATA_KEYS` to:
 
@@ -341,7 +341,7 @@ module BetterAuth
 end
 ```
 
-- [ ] **Step 3: Add metadata tests mirroring upstream**
+- [x] **Step 3: Add metadata tests mirroring upstream**
 
 Create `metadata_test.rb` with tests that cover:
 
@@ -365,7 +365,7 @@ assert_equal "user", metadata.fetch("customerType")
 assert_equal "value", metadata.fetch("customField")
 ```
 
-- [ ] **Step 4: Run metadata tests**
+- [x] **Step 4: Run metadata tests**
 
 Run:
 
