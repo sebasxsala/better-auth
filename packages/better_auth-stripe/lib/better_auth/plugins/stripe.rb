@@ -75,196 +75,27 @@ module BetterAuth
     end
 
     def stripe_cancel_subscription_endpoint(config)
-      Endpoint.new(path: "/subscription/cancel", method: "POST") do |ctx|
-        session = Routes.current_session(ctx)
-        body = normalize_hash(ctx.body)
-        customer_type = stripe_customer_type!(body)
-        reference_id = stripe_reference_id!(ctx, session, customer_type, body[:reference_id], config)
-        stripe_authorize_reference!(ctx, session, reference_id, "cancel-subscription", customer_type, stripe_subscription_options(config), explicit: body.key?(:reference_id))
-        subscription = stripe_find_subscription_for_action(ctx, reference_id, body[:subscription_id], active_only: true)
-        raise APIError.new("BAD_REQUEST", message: STRIPE_ERROR_CODES.fetch("SUBSCRIPTION_NOT_FOUND")) unless subscription && subscription["stripeCustomerId"]
-
-        active = stripe_active_subscriptions(config, subscription["stripeCustomerId"])
-        if active.empty?
-          ctx.context.adapter.delete_many(model: "subscription", where: [{field: "referenceId", value: reference_id}])
-          raise APIError.new("BAD_REQUEST", message: STRIPE_ERROR_CODES.fetch("SUBSCRIPTION_NOT_FOUND"))
-        end
-        stripe_subscription = active.find { |entry| stripe_fetch(entry, "id") == subscription["stripeSubscriptionId"] }
-        raise APIError.new("BAD_REQUEST", message: STRIPE_ERROR_CODES.fetch("SUBSCRIPTION_NOT_FOUND")) unless stripe_subscription
-
-        portal = stripe_client(config).billing_portal.sessions.create(
-          customer: subscription["stripeCustomerId"],
-          return_url: stripe_url(ctx, "#{ctx.context.base_url}/subscription/cancel/callback?callbackURL=#{Rack::Utils.escape(body[:return_url] || "/")}&subscriptionId=#{Rack::Utils.escape(subscription.fetch("id"))}"),
-          flow_data: {type: "subscription_cancel", subscription_cancel: {subscription: stripe_fetch(stripe_subscription, "id")}}
-        )
-        ctx.json(stripe_stringify_keys(portal).merge(redirect: stripe_redirect?(body)))
-      rescue APIError
-        raise
-      rescue => error
-        if error.message.include?("already set to be canceled") && subscription && !stripe_pending_cancel?(subscription)
-          stripe_sub = stripe_client(config).subscriptions.retrieve(subscription["stripeSubscriptionId"])
-          ctx.context.adapter.update(model: "subscription", where: [{field: "id", value: subscription.fetch("id")}], update: stripe_subscription_state(stripe_sub, include_status: false))
-        end
-        raise APIError.new("BAD_REQUEST", message: error.message)
-      end
+      BetterAuth::Stripe::Routes::CancelSubscription.endpoint(config)
     end
 
     def stripe_restore_subscription_endpoint(config)
-      Endpoint.new(path: "/subscription/restore", method: "POST") do |ctx|
-        session = Routes.current_session(ctx)
-        body = normalize_hash(ctx.body)
-        customer_type = stripe_customer_type!(body)
-        reference_id = stripe_reference_id!(ctx, session, customer_type, body[:reference_id], config)
-        stripe_authorize_reference!(ctx, session, reference_id, "restore-subscription", customer_type, stripe_subscription_options(config), explicit: body.key?(:reference_id))
-        subscription = stripe_find_subscription_for_action(ctx, reference_id, body[:subscription_id], active_only: false)
-        raise APIError.new("BAD_REQUEST", message: STRIPE_ERROR_CODES.fetch("SUBSCRIPTION_NOT_FOUND")) unless subscription && subscription["stripeCustomerId"]
-        raise APIError.new("BAD_REQUEST", message: STRIPE_ERROR_CODES.fetch("SUBSCRIPTION_NOT_ACTIVE")) unless stripe_active_or_trialing?(subscription)
-
-        if subscription["stripeScheduleId"]
-          schedule = stripe_client(config).subscription_schedules.retrieve(subscription["stripeScheduleId"])
-          if stripe_fetch(schedule, "status") == "active"
-            schedule = stripe_client(config).subscription_schedules.release(subscription["stripeScheduleId"])
-          end
-          ctx.context.adapter.update(model: "subscription", where: [{field: "id", value: subscription.fetch("id")}], update: {stripeScheduleId: nil})
-          next ctx.json(stripe_stringify_keys(schedule))
-        end
-
-        raise APIError.new("BAD_REQUEST", message: STRIPE_ERROR_CODES.fetch("SUBSCRIPTION_NOT_SCHEDULED_FOR_CANCELLATION")) unless stripe_pending_cancel?(subscription)
-
-        active = stripe_active_subscriptions(config, subscription["stripeCustomerId"]).first
-        raise APIError.new("BAD_REQUEST", message: STRIPE_ERROR_CODES.fetch("SUBSCRIPTION_NOT_FOUND")) unless active
-
-        update_params = if stripe_fetch(active, "cancel_at")
-          {cancel_at: ""}
-        elsif stripe_fetch(active, "cancel_at_period_end")
-          {cancel_at_period_end: false}
-        else
-          {}
-        end
-        restored = stripe_client(config).subscriptions.update(stripe_fetch(active, "id"), update_params)
-        ctx.context.adapter.update(model: "subscription", where: [{field: "id", value: subscription.fetch("id")}], update: {cancelAtPeriodEnd: false, cancelAt: nil, canceledAt: nil})
-        ctx.json(stripe_stringify_keys(restored))
-      end
+      BetterAuth::Stripe::Routes::RestoreSubscription.endpoint(config)
     end
 
     def stripe_list_subscriptions_endpoint(config)
-      Endpoint.new(path: "/subscription/list", method: "GET") do |ctx|
-        session = Routes.current_session(ctx)
-        query = normalize_hash(ctx.query)
-        customer_type = stripe_customer_type!(query)
-        reference_id = stripe_reference_id!(ctx, session, customer_type, query[:reference_id], config)
-        stripe_authorize_reference!(ctx, session, reference_id, "list-subscription", customer_type, stripe_subscription_options(config), explicit: query.key?(:reference_id))
-        plans = stripe_plans(config)
-        subscriptions = ctx.context.adapter.find_many(model: "subscription", where: [{field: "referenceId", value: reference_id}]).select { |entry| stripe_active_or_trialing?(entry) }
-        ctx.json(subscriptions.map do |entry|
-          plan = plans.find { |item| item[:name].to_s.downcase == entry["plan"].to_s.downcase }
-          price_id = if entry["billingInterval"] == "year"
-            plan&.fetch(:annual_discount_price_id, nil) || plan&.fetch(:price_id, nil)
-          else
-            plan&.fetch(:price_id, nil)
-          end
-          entry.merge("limits" => plan&.fetch(:limits, nil), "priceId" => price_id)
-        end)
-      end
+      BetterAuth::Stripe::Routes::ListActiveSubscriptions.endpoint(config)
     end
 
     def stripe_billing_portal_endpoint(config)
-      Endpoint.new(path: "/subscription/billing-portal", method: "POST") do |ctx|
-        session = Routes.current_session(ctx)
-        body = normalize_hash(ctx.body)
-        customer_type = stripe_customer_type!(body)
-        reference_id = stripe_reference_id!(ctx, session, customer_type, body[:reference_id], config)
-        stripe_authorize_reference!(ctx, session, reference_id, "billing-portal", customer_type, stripe_subscription_options(config), explicit: body.key?(:reference_id))
-        customer_id = if customer_type == "organization"
-          org = ctx.context.adapter.find_one(model: "organization", where: [{field: "id", value: reference_id}])
-          org&.fetch("stripeCustomerId", nil) || stripe_active_subscription(ctx, reference_id)&.fetch("stripeCustomerId", nil)
-        else
-          session.fetch(:user)["stripeCustomerId"] || stripe_active_subscription(ctx, reference_id)&.fetch("stripeCustomerId", nil)
-        end
-        raise APIError.new("NOT_FOUND", message: STRIPE_ERROR_CODES.fetch("CUSTOMER_NOT_FOUND")) unless customer_id
-
-        portal = stripe_client(config).billing_portal.sessions.create(customer: customer_id, return_url: stripe_url(ctx, body[:return_url] || "/"), locale: body[:locale])
-        ctx.json(stripe_stringify_keys(portal).merge(redirect: stripe_redirect?(body)))
-      rescue APIError
-        raise
-      rescue
-        raise APIError.new("INTERNAL_SERVER_ERROR", message: STRIPE_ERROR_CODES.fetch("UNABLE_TO_CREATE_BILLING_PORTAL"))
-      end
+      BetterAuth::Stripe::Routes::CreateBillingPortal.endpoint(config)
     end
 
-    def stripe_cancel_callback_endpoint(config = nil)
-      Endpoint.new(path: "/subscription/cancel/callback", method: "GET") do |ctx|
-        query = normalize_hash(ctx.query)
-        callback = query[:callback_url] || "/"
-        unless query[:subscription_id]
-          raise ctx.redirect(stripe_url(ctx, callback))
-        end
-        session = Routes.current_session(ctx, allow_nil: true)
-        raise ctx.redirect(stripe_url(ctx, callback)) unless session
-
-        subscription = ctx.context.adapter.find_one(model: "subscription", where: [{field: "id", value: query[:subscription_id]}])
-        if subscription && !stripe_pending_cancel?(subscription) && subscription["stripeCustomerId"]
-          current = stripe_active_subscriptions(config || {}, subscription["stripeCustomerId"]).find { |entry| stripe_fetch(entry, "id") == subscription["stripeSubscriptionId"] }
-          if current && stripe_stripe_pending_cancel?(current)
-            ctx.context.adapter.update(model: "subscription", where: [{field: "id", value: subscription.fetch("id")}], update: stripe_subscription_state(current, include_status: true))
-            stripe_subscription_options(config || {})[:on_subscription_cancel]&.call({subscription: subscription, stripeSubscription: current, stripe_subscription: current, cancellationDetails: stripe_fetch(current, "cancellation_details"), cancellation_details: stripe_fetch(current, "cancellation_details"), event: nil})
-          end
-        end
-        raise ctx.redirect(stripe_url(ctx, callback))
-      end
+    def stripe_cancel_callback_endpoint(config)
+      BetterAuth::Stripe::Routes::CancelSubscriptionCallback.endpoint(config)
     end
 
-    def stripe_success_endpoint(config = nil)
-      Endpoint.new(path: "/subscription/success", method: "GET") do |ctx|
-        query = normalize_hash(ctx.query)
-        callback = query[:callback_url] || "/"
-        checkout_session_id = query[:checkout_session_id]
-        subscription_id = query[:subscription_id]
-        if checkout_session_id
-          callback = callback.to_s.gsub("{CHECKOUT_SESSION_ID}", checkout_session_id.to_s)
-          checkout_session = begin
-            stripe_client(config || {}).checkout.sessions.retrieve(checkout_session_id)
-          rescue
-            nil
-          end
-          raise ctx.redirect(stripe_url(ctx, callback)) unless checkout_session
-
-          metadata = normalize_hash(stripe_fetch(checkout_session || {}, "metadata") || {})
-          subscription_id = metadata[:subscription_id]
-        end
-
-        unless subscription_id
-          raise ctx.redirect(stripe_url(ctx, callback))
-        end
-        session = Routes.current_session(ctx, allow_nil: true)
-        raise ctx.redirect(stripe_url(ctx, callback)) unless session
-
-        subscription = ctx.context.adapter.find_one(model: "subscription", where: [{field: "id", value: subscription_id}])
-        raise ctx.redirect(stripe_url(ctx, callback)) unless subscription
-        raise ctx.redirect(stripe_url(ctx, callback)) if stripe_active_or_trialing?(subscription)
-
-        customer_id = subscription["stripeCustomerId"] || session.fetch(:user)["stripeCustomerId"]
-        raise ctx.redirect(stripe_url(ctx, callback)) unless customer_id
-
-        stripe_subscription = stripe_active_subscriptions(config || {}, customer_id).first
-        if stripe_subscription
-          resolved = stripe_resolve_plan_item(config || {}, stripe_subscription)
-          item = resolved&.fetch(:item, nil)
-          plan = resolved&.fetch(:plan, nil)
-          if item && plan
-            ctx.context.adapter.update(
-              model: "subscription",
-              where: [{field: "id", value: subscription.fetch("id")}],
-              update: stripe_subscription_state(stripe_subscription, include_status: true, compact: false).merge(
-                plan: plan[:name].to_s.downcase,
-                seats: stripe_resolve_quantity(stripe_subscription, item, plan),
-                stripeSubscriptionId: stripe_fetch(stripe_subscription, "id")
-              )
-            )
-          end
-        end
-        raise ctx.redirect(stripe_url(ctx, callback))
-      end
+    def stripe_success_endpoint(config)
+      BetterAuth::Stripe::Routes::SubscriptionSuccess.endpoint(config)
     end
 
     def stripe_webhook_endpoint(config)

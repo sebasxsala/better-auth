@@ -889,7 +889,7 @@ rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/routes/upgrade_
 
 Expected: all moved upgrade route tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/better_auth-stripe/lib/better_auth/stripe/routes/index.rb packages/better_auth-stripe/lib/better_auth/stripe/routes/upgrade_subscription.rb packages/better_auth-stripe/lib/better_auth/plugins/stripe.rb packages/better_auth-stripe/test/better_auth/stripe/routes/upgrade_subscription_test.rb packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb .docs/plans/2026-05-01-2350--modularize-stripe-plugin.md
@@ -903,7 +903,7 @@ git commit -m "refactor(stripe): extract upgrade route"
 - Modify: route files under `packages/better_auth-stripe/lib/better_auth/stripe/routes/`
 - Test: route tests under `packages/better_auth-stripe/test/better_auth/stripe/routes/`
 
-- [ ] **Step 1: Move cancel route**
+- [x] **Step 1: Move cancel route**
 
 Move `stripe_cancel_subscription_endpoint(config)` to `BetterAuth::Stripe::Routes::CancelSubscription.endpoint(config)`.
 
@@ -920,7 +920,7 @@ Run:
 rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/routes/cancel_subscription_test.rb
 ```
 
-- [ ] **Step 2: Move restore route**
+- [x] **Step 2: Move restore route**
 
 Move `stripe_restore_subscription_endpoint(config)` to `BetterAuth::Stripe::Routes::RestoreSubscription.endpoint(config)`.
 
@@ -937,7 +937,7 @@ Run:
 rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/routes/restore_subscription_test.rb
 ```
 
-- [ ] **Step 3: Move list route**
+- [x] **Step 3: Move list route**
 
 Move `stripe_list_subscriptions_endpoint(config)` to `BetterAuth::Stripe::Routes::ListActiveSubscriptions.endpoint(config)`.
 
@@ -954,7 +954,7 @@ Run:
 rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/routes/list_active_subscriptions_test.rb
 ```
 
-- [ ] **Step 4: Move billing portal route**
+- [x] **Step 4: Move billing portal route**
 
 Move `stripe_billing_portal_endpoint(config)` to `BetterAuth::Stripe::Routes::CreateBillingPortal.endpoint(config)`.
 
@@ -972,7 +972,7 @@ Run:
 rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/routes/create_billing_portal_test.rb
 ```
 
-- [ ] **Step 5: Move success and cancel callback routes**
+- [x] **Step 5: Move success and cancel callback routes**
 
 Move:
 

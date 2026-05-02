@@ -11,12 +11,12 @@ module BetterAuth
 
         endpoints.merge(
           upgrade_subscription: BetterAuth::Stripe::Routes::UpgradeSubscription.endpoint(config),
-          cancel_subscription_callback: BetterAuth::Plugins.stripe_cancel_callback_endpoint(config),
-          cancel_subscription: BetterAuth::Plugins.stripe_cancel_subscription_endpoint(config),
-          restore_subscription: BetterAuth::Plugins.stripe_restore_subscription_endpoint(config),
-          list_active_subscriptions: BetterAuth::Plugins.stripe_list_subscriptions_endpoint(config),
-          subscription_success: BetterAuth::Plugins.stripe_success_endpoint(config),
-          create_billing_portal: BetterAuth::Plugins.stripe_billing_portal_endpoint(config)
+          cancel_subscription_callback: BetterAuth::Stripe::Routes::CancelSubscriptionCallback.endpoint(config),
+          cancel_subscription: BetterAuth::Stripe::Routes::CancelSubscription.endpoint(config),
+          restore_subscription: BetterAuth::Stripe::Routes::RestoreSubscription.endpoint(config),
+          list_active_subscriptions: BetterAuth::Stripe::Routes::ListActiveSubscriptions.endpoint(config),
+          subscription_success: BetterAuth::Stripe::Routes::SubscriptionSuccess.endpoint(config),
+          create_billing_portal: BetterAuth::Stripe::Routes::CreateBillingPortal.endpoint(config)
         )
       end
     end
