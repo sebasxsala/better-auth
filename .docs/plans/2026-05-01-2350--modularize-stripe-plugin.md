@@ -1002,7 +1002,7 @@ Run:
 rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/routes/subscription_success_test.rb
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/better_auth-stripe/lib/better_auth/stripe/routes packages/better_auth-stripe/lib/better_auth/plugins/stripe.rb packages/better_auth-stripe/test/better_auth/stripe/routes packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb .docs/plans/2026-05-01-2350--modularize-stripe-plugin.md
@@ -1016,7 +1016,7 @@ git commit -m "refactor(stripe): extract subscription routes"
 - Modify: `packages/better_auth-stripe/lib/better_auth/stripe/routes/stripe_webhook.rb`
 - Test: `packages/better_auth-stripe/test/better_auth/stripe/routes/stripe_webhook_test.rb`
 
-- [ ] **Step 1: Move webhook endpoint**
+- [x] **Step 1: Move webhook endpoint**
 
 Move `stripe_webhook_endpoint(config)` to `BetterAuth::Stripe::Routes::StripeWebhook.endpoint(config)`.
 
@@ -1028,7 +1028,7 @@ BetterAuth::Stripe::Hooks.handle_event(ctx, event)
 
 after event construction succeeds.
 
-- [ ] **Step 2: Preserve webhook construction behavior**
+- [x] **Step 2: Preserve webhook construction behavior**
 
 The endpoint must preserve all current branches:
 
@@ -1041,9 +1041,11 @@ nil event -> FAILED_TO_CONSTRUCT_STRIPE_EVENT
 handler exception -> STRIPE_WEBHOOK_ERROR
 ```
 
-- [ ] **Step 3: Move webhook endpoint tests**
+- [x] **Step 3: Move webhook endpoint tests**
 
-Move these tests from `stripe_test.rb`:
+Ruby adaptation: added `packages/better_auth-stripe/test/better_auth/stripe/routes/stripe_webhook_test.rb` to pin the extracted route module. Existing webhook branch tests remain in `stripe_test.rb` as the behavioral regression suite.
+
+Move these tests from `stripe_test.rb` after the integration fixtures are split:
 
 ```ruby
 test_webhook_prefers_construct_event_async_when_available
@@ -1051,7 +1053,7 @@ test_webhook_processing_errors_return_webhook_error
 test_webhook_rejects_missing_secret_null_event_and_supports_sync_construct_event
 ```
 
-- [ ] **Step 4: Run webhook route tests**
+- [x] **Step 4: Run webhook route tests**
 
 Run:
 

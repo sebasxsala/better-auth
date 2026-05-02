@@ -6,7 +6,7 @@ module BetterAuth
       module_function
 
       def endpoints(config)
-        endpoints = {stripe_webhook: BetterAuth::Plugins.stripe_webhook_endpoint(config)}
+        endpoints = {stripe_webhook: BetterAuth::Stripe::Routes::StripeWebhook.endpoint(config)}
         return endpoints unless config.dig(:subscription, :enabled)
 
         endpoints.merge(
