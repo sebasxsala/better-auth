@@ -94,7 +94,7 @@ equivalent.
 
 <div className="grid gap-3 md:grid-cols-2 not-prose my-6">
   <FeatureCard title="Rack" status="Supported" body="Core auth object is a Rack app and can be mounted directly in Rack-compatible servers." />
-  <FeatureCard title="Rails" status="Partial" body="Mount helpers, ActiveRecord adapter, controller helpers, migrations, generators, and plugin schema coverage are implemented." />
+  <FeatureCard title="Rails" status="Supported" body="Mount helpers, ActiveRecord adapter, controller helpers, migrations, generators, plugin schema coverage, and cookie/CSRF compatibility are implemented and tested." />
   <FeatureCard title="Sinatra" status="Supported" body="Sinatra extension, Rack mounting, request helpers, and SQL migration Rake tasks are implemented." />
   <FeatureCard title="Hanami" status="Supported" body="Hanami 2.3+ integration includes route mounting, action helpers, Sequel adapter, ROM::SQL migrations, relations, repos, and generators." />
 </div>
@@ -109,7 +109,7 @@ equivalent.
   <FeatureCard title="Sessions and cookies" status="Supported" body="Signed cookies, cache cookies, stateless defaults, chunking, deletion, revocation routes, secondary storage, dynamic domains, and Redis-backed session storage are implemented." />
   <FeatureCard title="CSRF and trusted origins" status="Supported" body="Origin checks, trusted origins, dynamic trusted origins, baseURL allowed hosts, proxy-aware IP handling, and callback validation are implemented." />
   <FeatureCard title="Database schema and hooks" status="Supported" body="Base schema, plugin schema merge, SQL and Rails migration generation, adapter hooks, and Better Auth logical field names are implemented." />
-  <FeatureCard title="OpenAPI" status="Partial" body="OpenAPI 3.1.1 metadata, route and model inventory, security schemes, servers, selected request bodies, path params, and reference HTML are implemented." />
+  <FeatureCard title="OpenAPI" status="Supported" body="OpenAPI 3.1.1 metadata, route and model inventory, security schemes, servers, request bodies, path params, response schemas, plugin endpoint coverage, and reference HTML are implemented." />
 </div>
 
 ## Storage And Adapters
@@ -148,7 +148,7 @@ equivalent.
   <FeatureCard title="OIDC provider" status="Supported" body="Discovery, prompt/max-age, registration, consent, token flows, userinfo, logout, and client-secret storage modes." />
   <FeatureCard title="One tap" status="Supported" body="Google ID-token callback, account reuse/linking, disabled signup, and session cookies." />
   <FeatureCard title="One-time token" status="Supported" body="Generate/verify, single-use, expiration, cookie behavior, storage modes, and set-ott." />
-  <FeatureCard title="OpenAPI" status="Partial" body="Metadata, route inventory, models, security, selected schemas, and reference HTML. Exact upstream snapshot parity is still in progress." />
+  <FeatureCard title="OpenAPI" status="Supported" body="Metadata, route inventory, models, security, request and response schemas, path parameters, and reference HTML. Coverage includes core and plugin endpoints." />
   <FeatureCard title="Organization" status="Supported" body="Org/member CRUD, invitations, teams, roles, hooks, permissions, and schema migrations." />
   <FeatureCard title="Passkey" status="Supported" body="WebAuthn registration/authentication, challenge cookies, credential management, and schema output." />
   <FeatureCard title="Phone number" status="Supported" body="OTP send/verify, sign-in/sign-up, updates, reset password, attempt limits, and validation hooks." />
