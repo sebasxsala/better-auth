@@ -788,7 +788,7 @@ git commit -m "refactor(stripe): extract organization hooks"
 - Modify: `packages/better_auth-stripe/lib/better_auth/stripe/routes/upgrade_subscription.rb`
 - Test: `packages/better_auth-stripe/test/better_auth/stripe/routes/upgrade_subscription_test.rb`
 
-- [ ] **Step 1: Move route registry**
+- [x] **Step 1: Move route registry**
 
 Move `stripe_endpoints(config)` to `BetterAuth::Stripe::Routes.endpoints(config)`.
 
@@ -809,7 +809,7 @@ The endpoint hash must keep current Ruby API names:
 
 Only include subscription endpoints when `config.dig(:subscription, :enabled)` is truthy.
 
-- [ ] **Step 2: Move upgrade endpoint**
+- [x] **Step 2: Move upgrade endpoint**
 
 Move `stripe_upgrade_subscription_endpoint(config)` to:
 
@@ -861,9 +861,11 @@ BetterAuth::Stripe::Middleware
 BetterAuth::Stripe::Metadata
 ```
 
-- [ ] **Step 3: Add route tests**
+- [x] **Step 3: Add route tests**
 
-Move these tests from `stripe_test.rb` into `routes/upgrade_subscription_test.rb`:
+Ruby adaptation: added `packages/better_auth-stripe/test/better_auth/stripe/routes/upgrade_subscription_test.rb` to pin the route registry and extracted endpoint. The broad upgrade behavior tests below remain in `stripe_test.rb` until all route files are extracted, so shared fake Stripe/auth setup is not duplicated mid-refactor.
+
+Move these tests from `stripe_test.rb` into `routes/upgrade_subscription_test.rb` after route extraction completes:
 
 ```ruby
 test_creates_customer_on_sign_up_and_subscription_checkout
@@ -877,7 +879,7 @@ test_schedule_release_and_line_item_replacement_parity
 test_metered_prices_omit_quantity_for_direct_and_scheduled_upgrades_but_licensed_keeps_quantity
 ```
 
-- [ ] **Step 4: Run upgrade route tests**
+- [x] **Step 4: Run upgrade route tests**
 
 Run:
 
