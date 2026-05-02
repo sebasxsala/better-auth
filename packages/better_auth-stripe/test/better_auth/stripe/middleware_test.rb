@@ -47,4 +47,90 @@ class BetterAuthStripeMiddlewareTest < Minitest::Test
 
     assert_nil BetterAuth::Stripe::Middleware.authorize_reference!(nil, session, "user_123", "upgrade-subscription", "user", {}, explicit: false)
   end
+
+  def test_explicit_other_user_reference_requires_authorize_reference
+    session = {
+      user: {"id" => "user_123"},
+      session: {"id" => "session_123"}
+    }
+
+    error = assert_raises(BetterAuth::APIError) do
+      BetterAuth::Stripe::Middleware.authorize_reference!(
+        nil,
+        session,
+        "user_456",
+        "upgrade-subscription",
+        "user",
+        {},
+        explicit: true
+      )
+    end
+
+    assert_equal BetterAuth::Stripe::ERROR_CODES.fetch("REFERENCE_ID_NOT_ALLOWED"), error.message
+  end
+
+  def test_authorize_reference_callback_can_allow_other_user_reference
+    session = {
+      user: {"id" => "user_123"},
+      session: {"id" => "session_123"}
+    }
+    calls = []
+    options = {
+      authorize_reference: lambda do |payload, _ctx|
+        calls << payload
+        payload[:referenceId] == "user_456" && payload[:action] == "upgrade-subscription"
+      end
+    }
+
+    assert_nil BetterAuth::Stripe::Middleware.authorize_reference!(
+      nil,
+      session,
+      "user_456",
+      "upgrade-subscription",
+      "user",
+      options,
+      explicit: true
+    )
+    assert_equal 1, calls.length
+  end
+
+  def test_organization_reference_requires_active_organization_or_reference_id
+    session = {
+      user: {"id" => "user_123"},
+      session: {}
+    }
+
+    error = assert_raises(BetterAuth::APIError) do
+      BetterAuth::Stripe::Middleware.reference_id!(
+        nil,
+        session,
+        "organization",
+        nil,
+        {organization: {enabled: true}}
+      )
+    end
+
+    assert_equal BetterAuth::Stripe::ERROR_CODES.fetch("ORGANIZATION_REFERENCE_ID_REQUIRED"), error.message
+  end
+
+  def test_organization_reference_requires_authorize_reference_callback
+    session = {
+      user: {"id" => "user_123"},
+      session: {"activeOrganizationId" => "org_123"}
+    }
+
+    error = assert_raises(BetterAuth::APIError) do
+      BetterAuth::Stripe::Middleware.authorize_reference!(
+        nil,
+        session,
+        "org_123",
+        "upgrade-subscription",
+        "organization",
+        {},
+        explicit: false
+      )
+    end
+
+    assert_equal BetterAuth::Stripe::ERROR_CODES.fetch("AUTHORIZE_REFERENCE_REQUIRED"), error.message
+  end
 end

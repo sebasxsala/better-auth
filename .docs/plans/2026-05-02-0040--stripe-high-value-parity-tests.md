@@ -50,10 +50,10 @@ Ruby-specific adaptation discovered in Task 1: `options[:schema]` must preserve 
 
 ### Authorization And Reference Guards: 4 tests
 
-- [ ] `BetterAuthStripeMiddlewareTest#test_explicit_other_user_reference_requires_authorize_reference`
-- [ ] `BetterAuthStripeMiddlewareTest#test_authorize_reference_callback_can_allow_other_user_reference`
-- [ ] `BetterAuthStripeMiddlewareTest#test_organization_reference_requires_active_organization_or_reference_id`
-- [ ] `BetterAuthStripeMiddlewareTest#test_organization_reference_requires_authorize_reference_callback`
+- [x] `BetterAuthStripeMiddlewareTest#test_explicit_other_user_reference_requires_authorize_reference`
+- [x] `BetterAuthStripeMiddlewareTest#test_authorize_reference_callback_can_allow_other_user_reference`
+- [x] `BetterAuthStripeMiddlewareTest#test_organization_reference_requires_active_organization_or_reference_id`
+- [x] `BetterAuthStripeMiddlewareTest#test_organization_reference_requires_authorize_reference_callback`
 
 ### Route Behavior Coverage: 5 tests
 
@@ -175,7 +175,7 @@ git commit -m "test(stripe): cover schema merge parity"
 **Files:**
 - Modify: `packages/better_auth-stripe/test/better_auth/stripe/middleware_test.rb`
 
-- [ ] **Step 1: Add user reference authorization tests**
+- [x] **Step 1: Add user reference authorization tests**
 
 Append these tests to `BetterAuthStripeMiddlewareTest`:
 
@@ -227,7 +227,7 @@ def test_authorize_reference_callback_can_allow_other_user_reference
 end
 ```
 
-- [ ] **Step 2: Add organization reference authorization tests**
+- [x] **Step 2: Add organization reference authorization tests**
 
 Append these tests to `BetterAuthStripeMiddlewareTest`:
 
@@ -273,7 +273,7 @@ def test_organization_reference_requires_authorize_reference_callback
 end
 ```
 
-- [ ] **Step 3: Run focused tests and verify pass**
+- [x] **Step 3: Run focused tests and verify pass**
 
 Run:
 
@@ -284,7 +284,7 @@ rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/middleware_test
 
 Expected: middleware tests pass.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/better_auth-stripe/test/better_auth/stripe/middleware_test.rb .docs/plans/2026-05-02-0040--stripe-high-value-parity-tests.md
