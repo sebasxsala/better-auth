@@ -422,6 +422,21 @@ jobs:
           --health-interval 1s
           --health-timeout 5s
           --health-retries 10
+      mysql:
+        image: mysql:latest
+        env:
+          MYSQL_ROOT_PASSWORD: root_password
+          MYSQL_DATABASE: better_auth
+          MYSQL_USER: user
+          MYSQL_PASSWORD: password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uuser -ppassword"
+          --health-interval 1s
+          --health-timeout 5s
+          --health-retries 30
+          --health-start-period 30s
     steps:
       - uses: actions/checkout@v4
 
