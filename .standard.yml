@@ -1,0 +1,19 @@
+# frozen_string_literal: true
+
+# StandardRB Configuration for monorepo root
+# https://github.com/standardrb/standard
+
+ignore:
+  - 'vendor/**/*'
+  - 'node_modules/**/*'
+  - 'tmp/**/*'
+  - 'coverage/**/*'
+  - 'doc/**/*'
+  - 'pkg/**/*'
+  - 'docs/**/*'
+  - 'upstream/**/*'
+  - '.git/**/*'
+  - '.claude/**/*'
+  - '.agents/**/*'
+  - '.ruby-lsp/**/*'
+  - 'hanami-app/**/*'
