@@ -101,6 +101,7 @@ RSpec.describe "BetterAuth::Rails PostgreSQL integration" do
       force_allow_id: true
     )
     joined = active_record_adapter.find_one(model: "session", where: [{field: "id", value: session["id"]}], join: {user: true})
+    user_with_audit_logs = active_record_adapter.find_one(model: "user", where: [{field: "id", value: "user-1"}], join: {auditLog: true})
 
     expect(selected).to eq([{"id" => "audit-2", "action" => "logout"}])
     expect(by_prefix.map { |row| row["action"] }).to eq(["login", "logout"])
@@ -115,6 +116,7 @@ RSpec.describe "BetterAuth::Rails PostgreSQL integration" do
     expect(with_offset.map { |row| row["action"] }).to eq(["logout"])
     expect(updated.map { |row| row["attempts"] }).to eq([3, 3])
     expect(joined.fetch("user")).to include("id" => "user-1", "email" => "ada@example.com")
+    expect(user_with_audit_logs.fetch("auditLog").map { |audit_log| audit_log.fetch("action") }).to contain_exactly("login", "logout")
     expect(ActiveRecord::Base.connection.data_source_exists?("audit_logs")).to be(true)
     expect(ActiveRecord::Base.connection.foreign_keys("audit_logs").map(&:to_table)).to include("users")
   end

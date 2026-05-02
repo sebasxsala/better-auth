@@ -1,10 +1,32 @@
 # frozen_string_literal: true
 
 require "json"
+require "rack/mock_request"
 require_relative "../test_helper"
 
 class BetterAuthAPITest < Minitest::Test
   SECRET = "test-secret-that-is-long-enough-for-validation"
+
+  def test_endpoint_registry_exposes_path_and_options_metadata
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            echo: BetterAuth::Endpoint.new(path: "/echo", method: "POST", metadata: {scope: "server"}) { {ok: true} }
+          }
+        }
+      ]
+    )
+
+    endpoint = auth.api.endpoints.fetch(:echo)
+
+    assert_equal "/echo", endpoint.path
+    assert_equal "POST", endpoint.options.fetch(:method)
+    assert_equal "server", endpoint.options.fetch(:metadata).fetch(:scope)
+  end
 
   def test_direct_api_runs_before_hooks_and_replaces_arrays
     auth = BetterAuth.auth(
@@ -217,6 +239,82 @@ class BetterAuthAPITest < Minitest::Test
     assert_equal({ok: true}, JSON.parse(body.join, symbolize_names: true))
   end
 
+  def test_direct_api_as_response_returns_response_object_that_can_be_used_as_rack_tuple
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            response: BetterAuth::Endpoint.new(path: "/response", method: "GET") do |ctx|
+              ctx.set_status(201)
+              ctx.set_header("x-test", "yes")
+              {ok: true}
+            end
+          }
+        }
+      ]
+    )
+
+    response = auth.api.response(as_response: true)
+    status, headers, body = response
+
+    assert_instance_of BetterAuth::Response, response
+    assert_equal 201, response.status
+    assert_equal 201, status
+    assert_equal "yes", response.headers.fetch("x-test")
+    assert_equal "yes", headers.fetch("x-test")
+    assert_equal({ok: true}, JSON.parse(body.join, symbolize_names: true))
+    assert_equal({ok: true}, response.json(symbolize_names: true))
+  end
+
+  def test_direct_api_uses_request_context_and_returns_rack_response
+    seen_context = nil
+    request = Rack::Request.new(
+      Rack::MockRequest.env_for(
+        "/from-request",
+        "REQUEST_METHOD" => "POST",
+        "HTTP_X_API_CLIENT" => "rack"
+      )
+    )
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            from_request: BetterAuth::Endpoint.new(path: "/from-request", method: ["POST", "GET"]) do |ctx|
+              seen_context = ctx
+              ctx.set_cookie("session", "value")
+              {method: ctx.method, header: ctx.headers["x-api-client"], same_request: ctx.request.equal?(request)}
+            end
+          },
+          hooks: {
+            after: [
+              {
+                matcher: ->(ctx) { ctx.path == "/from-request" },
+                handler: lambda do |ctx|
+                  ctx.set_cookie("after", "hook")
+                  nil
+                end
+              }
+            ]
+          }
+        }
+      ]
+    )
+
+    status, headers, body = auth.api.from_request(request: request)
+
+    assert_equal 200, status
+    assert_includes headers["set-cookie"], "session=value"
+    assert_includes headers["set-cookie"], "after=hook"
+    assert_equal({method: "POST", header: "rack", same_request: true}, JSON.parse(body.join, symbolize_names: true))
+    assert_same request, seen_context.request
+  end
+
   def test_direct_api_errors_throw_unless_as_response_is_requested
     auth = BetterAuth.auth(
       base_url: "http://localhost:3000",
@@ -238,5 +336,107 @@ class BetterAuthAPITest < Minitest::Test
     status, _headers, body = auth.api.fail(as_response: true)
     assert_equal 403, status
     assert_equal({code: "FORBIDDEN", message: "Blocked"}, JSON.parse(body.join, symbolize_names: true))
+  end
+
+  def test_direct_api_error_preserves_headers_accumulated_before_raise
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            fail: BetterAuth::Endpoint.new(path: "/fail", method: "POST") do |ctx|
+              ctx.set_cookie("session", "", max_age: 0)
+              ctx.set_cookie("session_data", "", max_age: 0)
+              raise ctx.error("UNAUTHORIZED", message: "cleared")
+            end
+          }
+        }
+      ]
+    )
+
+    error = assert_raises(BetterAuth::APIError) { auth.api.fail }
+
+    assert_equal "UNAUTHORIZED", error.status
+    assert_includes error.headers.fetch("set-cookie"), "session="
+    assert_includes error.headers.fetch("set-cookie"), "session_data="
+    assert_includes error.headers.fetch("set-cookie"), "Max-Age=0"
+
+    status, headers, _body = auth.api.fail(as_response: true)
+    assert_equal 401, status
+    assert_includes headers.fetch("set-cookie"), "session="
+    assert_includes headers.fetch("set-cookie"), "session_data="
+  end
+
+  def test_direct_api_error_merges_accumulated_headers_with_explicit_error_headers
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            redirect: BetterAuth::Endpoint.new(path: "/redirect", method: "POST") do |ctx|
+              ctx.set_cookie("session", "", max_age: 0)
+              raise BetterAuth::APIError.new("FOUND", message: "redirect", headers: {"location" => "/login"})
+            end
+          }
+        }
+      ]
+    )
+
+    error = assert_raises(BetterAuth::APIError) { auth.api.redirect }
+
+    assert_equal "FOUND", error.status
+    assert_equal "/login", error.headers.fetch("location")
+    assert_includes error.headers.fetch("set-cookie"), "session="
+
+    status, headers, _body = auth.api.redirect(as_response: true)
+    assert_equal 302, status
+    assert_equal "/login", headers.fetch("location")
+    assert_includes headers.fetch("set-cookie"), "session="
+  end
+
+  def test_after_hook_error_preserves_headers_accumulated_by_endpoint_and_hook
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            fail_after: BetterAuth::Endpoint.new(path: "/fail-after", method: "POST") do |ctx|
+              ctx.set_cookie("endpoint", "value")
+              {ok: true}
+            end
+          },
+          hooks: {
+            after: [
+              {
+                matcher: ->(ctx) { ctx.path == "/fail-after" },
+                handler: lambda do |ctx|
+                  ctx.set_cookie("after", "value")
+                  raise BetterAuth::APIError.new("BAD_REQUEST", message: "from after", headers: {"x-error" => "yes"})
+                end
+              }
+            ]
+          }
+        }
+      ]
+    )
+
+    error = assert_raises(BetterAuth::APIError) { auth.api.fail_after }
+
+    assert_equal "BAD_REQUEST", error.status
+    assert_equal "yes", error.headers.fetch("x-error")
+    assert_includes error.headers.fetch("set-cookie"), "endpoint=value"
+    assert_includes error.headers.fetch("set-cookie"), "after=value"
+
+    status, headers, _body = auth.api.fail_after(as_response: true)
+    assert_equal 400, status
+    assert_equal "yes", headers.fetch("x-error")
+    assert_includes headers.fetch("set-cookie"), "endpoint=value"
+    assert_includes headers.fetch("set-cookie"), "after=value"
   end
 end

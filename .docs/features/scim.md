@@ -28,7 +28,7 @@ To match upstream `@better-auth/scim`, Ruby SCIM lives in `better_auth-scim`.
 
 ## Key Differences
 
-- Filter support follows upstream server behavior for `userName eq` and `externalId eq`, including linked-account `externalId` values and intentional SCIM-style errors for unsupported operators (`ne`, `co`, `sw`, `ew`, and `pr`).
+- Filter support follows upstream server behavior for `userName eq`, including intentional SCIM-style errors for unsupported attributes such as `externalId` and unsupported operators (`ne`, `co`, `sw`, `ew`, and `pr`).
 - Organization-scoped provisioning requires the organization plugin and rejects token generation or resource access when the authenticated user/resource is outside the organization.
 
 ## Testing

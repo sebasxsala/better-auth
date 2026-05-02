@@ -156,7 +156,7 @@ module BetterAuth
     end
 
     def organization_create_endpoint(config)
-      Endpoint.new(path: "/organization/create", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/create", method: "POST", metadata: organization_openapi("createOrganization", "Create an organization", response: organization_ref_schema("Organization"))) do |ctx|
         body = normalize_hash(ctx.body)
         session = Routes.current_session(ctx, allow_nil: true)
         user = session ? session[:user] : ctx.context.internal_adapter.find_user_by_id(body[:user_id])
@@ -204,7 +204,8 @@ module BetterAuth
     end
 
     def organization_check_slug_endpoint
-      Endpoint.new(path: "/organization/check-slug", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/check-slug", method: "POST", metadata: organization_openapi("checkOrganizationSlug", "Check if an organization slug is available", response: OpenAPI.status_response_schema)) do |ctx|
+        Routes.request_only_session(ctx)
         slug = normalize_hash(ctx.body)[:slug].to_s
         if slug.empty? || organization_by_slug(ctx, slug)
           raise APIError.new("BAD_REQUEST", message: ORGANIZATION_ERROR_CODES.fetch("ORGANIZATION_SLUG_ALREADY_TAKEN"))
@@ -214,7 +215,7 @@ module BetterAuth
     end
 
     def organization_list_endpoint
-      Endpoint.new(path: "/organization/list", method: "GET") do |ctx|
+      Endpoint.new(path: "/organization/list", method: "GET", metadata: organization_openapi("listOrganizations", "List organizations", response: organization_array_schema("Organization"))) do |ctx|
         session = Routes.current_session(ctx)
         members = ctx.context.adapter.find_many(model: "member", where: [{field: "userId", value: session[:user]["id"]}])
         organizations = members.filter_map { |member| organization_by_id(ctx, member["organizationId"]) }
@@ -223,7 +224,7 @@ module BetterAuth
     end
 
     def organization_update_endpoint(config)
-      Endpoint.new(path: "/organization/update", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/update", method: "POST", metadata: organization_openapi("updateOrganization", "Update an organization", response: organization_ref_schema("Organization"))) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         id = body[:organization_id] || body[:organizationId]
@@ -248,7 +249,7 @@ module BetterAuth
     end
 
     def organization_delete_endpoint(config)
-      Endpoint.new(path: "/organization/delete", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/delete", method: "POST", metadata: organization_openapi("deleteOrganization", "Delete an organization", response: OpenAPI.status_response_schema)) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         organization = organization_by_id(ctx, body[:organization_id]) || organization_by_slug(ctx, body[:organization_slug])
@@ -269,7 +270,7 @@ module BetterAuth
     end
 
     def organization_set_active_endpoint
-      Endpoint.new(path: "/organization/set-active", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/set-active", method: "POST", metadata: organization_openapi("setActiveOrganization", "Set the active organization", response: organization_nullable_schema("Organization"))) do |ctx|
         session = Routes.current_session(ctx, sensitive: true)
         body = normalize_hash(ctx.body)
         if body.key?(:organization_id) && body[:organization_id].nil?
@@ -288,7 +289,7 @@ module BetterAuth
     end
 
     def organization_get_full_endpoint(config)
-      Endpoint.new(path: "/organization/get-full-organization", method: "GET") do |ctx|
+      Endpoint.new(path: "/organization/get-full-organization", method: "GET", metadata: organization_openapi("getOrganization", "Get the full organization", response: organization_nullable_schema("Organization"))) do |ctx|
         session = Routes.current_session(ctx)
         query = normalize_hash(ctx.query)
         explicit_lookup = query.key?(:organization_slug) || query.key?(:organization_id)
@@ -315,7 +316,7 @@ module BetterAuth
     end
 
     def organization_invite_endpoint(config)
-      Endpoint.new(path: "/organization/invite-member", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/invite-member", method: "POST", metadata: organization_openapi("createOrganizationInvitation", "Create an organization invitation", response: organization_ref_schema("Invitation"))) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         organization = organization_by_id(ctx, body[:organization_id] || session[:session]["activeOrganizationId"]) || organization_by_slug(ctx, body[:organization_slug])
@@ -370,7 +371,7 @@ module BetterAuth
     end
 
     def organization_accept_invitation_endpoint(config)
-      Endpoint.new(path: "/organization/accept-invitation", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/accept-invitation", method: "POST", metadata: organization_openapi("acceptOrganizationInvitation", "Accept an organization invitation", response: organization_accept_invitation_schema)) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         invitation = invitation_by_id(ctx, body[:invitation_id] || body[:id])
@@ -394,7 +395,7 @@ module BetterAuth
     end
 
     def organization_reject_invitation_endpoint(_config)
-      Endpoint.new(path: "/organization/reject-invitation", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/reject-invitation", method: "POST", metadata: organization_openapi("rejectOrganizationInvitation", "Reject an organization invitation", response: organization_ref_schema("Invitation"))) do |ctx|
         session = Routes.current_session(ctx)
         invitation = invitation_by_id(ctx, normalize_hash(ctx.body)[:invitation_id])
         raise APIError.new("BAD_REQUEST", message: ORGANIZATION_ERROR_CODES.fetch("INVITATION_NOT_FOUND")) unless invitation
@@ -405,7 +406,7 @@ module BetterAuth
     end
 
     def organization_cancel_invitation_endpoint(config)
-      Endpoint.new(path: "/organization/cancel-invitation", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/cancel-invitation", method: "POST", metadata: organization_openapi("cancelOrganizationInvitation", "Cancel an organization invitation", response: organization_ref_schema("Invitation"))) do |ctx|
         session = Routes.current_session(ctx)
         invitation = invitation_by_id(ctx, normalize_hash(ctx.body)[:invitation_id])
         raise APIError.new("BAD_REQUEST", message: ORGANIZATION_ERROR_CODES.fetch("INVITATION_NOT_FOUND")) unless invitation
@@ -416,7 +417,7 @@ module BetterAuth
     end
 
     def organization_get_invitation_endpoint
-      Endpoint.new(path: "/organization/get-invitation", method: "GET") do |ctx|
+      Endpoint.new(path: "/organization/get-invitation", method: "GET", metadata: organization_openapi("getOrganizationInvitation", "Get an organization invitation", response: organization_ref_schema("Invitation"))) do |ctx|
         invitation = invitation_by_id(ctx, normalize_hash(ctx.query)[:id] || normalize_hash(ctx.query)[:invitation_id])
         raise APIError.new("BAD_REQUEST", message: ORGANIZATION_ERROR_CODES.fetch("INVITATION_NOT_FOUND")) unless invitation
         ctx.json(invitation_wire(ctx, invitation))
@@ -424,7 +425,7 @@ module BetterAuth
     end
 
     def organization_list_invitations_endpoint(config)
-      Endpoint.new(path: "/organization/list-invitations", method: "GET") do |ctx|
+      Endpoint.new(path: "/organization/list-invitations", method: "GET", metadata: organization_openapi("listOrganizationInvitations", "List organization invitations", response: organization_array_schema("Invitation"))) do |ctx|
         session = Routes.current_session(ctx)
         organization_id = normalize_hash(ctx.query)[:organization_id] || session[:session]["activeOrganizationId"]
         raise APIError.new("BAD_REQUEST", message: ORGANIZATION_ERROR_CODES.fetch("NO_ACTIVE_ORGANIZATION")) unless organization_id
@@ -435,7 +436,7 @@ module BetterAuth
     end
 
     def organization_list_user_invitations_endpoint
-      Endpoint.new(path: "/organization/list-user-invitations", method: "GET") do |ctx|
+      Endpoint.new(path: "/organization/list-user-invitations", method: "GET", metadata: organization_openapi("listUserInvitations", "List user invitations", response: organization_array_schema("Invitation"))) do |ctx|
         session = Routes.current_session(ctx)
         invitations = ctx.context.adapter.find_many(model: "invitation", where: [{field: "email", value: session[:user]["email"].to_s.downcase}, {field: "status", value: "pending"}])
         ctx.json(invitations.map { |entry| invitation_wire(ctx, entry) })
@@ -443,7 +444,7 @@ module BetterAuth
     end
 
     def organization_add_member_endpoint(config)
-      Endpoint.new(path: "/organization/add-member", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/add-member", method: "POST", metadata: organization_openapi("addOrganizationMember", "Add an organization member", response: organization_ref_schema("Member"))) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         organization_id = body[:organization_id]
@@ -464,7 +465,7 @@ module BetterAuth
     end
 
     def organization_remove_member_endpoint(config)
-      Endpoint.new(path: "/organization/remove-member", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/remove-member", method: "POST", metadata: organization_openapi("removeOrganizationMember", "Remove an organization member", response: OpenAPI.status_response_schema)) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         member = member_by_id(ctx, body[:member_id]) || require_member(ctx, body[:user_id], body[:organization_id])
@@ -481,7 +482,7 @@ module BetterAuth
     end
 
     def organization_update_member_role_endpoint(config)
-      Endpoint.new(path: "/organization/update-member-role", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/update-member-role", method: "POST", metadata: organization_openapi("updateOrganizationMemberRole", "Update an organization member role", response: organization_ref_schema("Member"))) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         member = member_by_id(ctx, body[:member_id]) || require_member(ctx, body[:user_id], body[:organization_id])
@@ -493,7 +494,7 @@ module BetterAuth
     end
 
     def organization_get_active_member_endpoint(_config)
-      Endpoint.new(path: "/organization/get-active-member", method: "GET") do |ctx|
+      Endpoint.new(path: "/organization/get-active-member", method: "GET", metadata: organization_openapi("getActiveOrganizationMember", "Get the active organization member", response: organization_ref_schema("Member"))) do |ctx|
         session = Routes.current_session(ctx)
         organization_id = normalize_hash(ctx.query)[:organization_id] || session[:session]["activeOrganizationId"]
         raise APIError.new("BAD_REQUEST", message: ORGANIZATION_ERROR_CODES.fetch("NO_ACTIVE_ORGANIZATION")) unless organization_id
@@ -503,7 +504,7 @@ module BetterAuth
     end
 
     def organization_get_active_member_role_endpoint(_config)
-      Endpoint.new(path: "/organization/get-active-member-role", method: "GET") do |ctx|
+      Endpoint.new(path: "/organization/get-active-member-role", method: "GET", metadata: organization_openapi("getActiveOrganizationMemberRole", "Get the active organization member role", response: organization_active_member_role_schema)) do |ctx|
         session = Routes.current_session(ctx)
         query = normalize_hash(ctx.query)
         organization_id = query[:organization_id] || session[:session]["activeOrganizationId"]
@@ -515,7 +516,7 @@ module BetterAuth
     end
 
     def organization_leave_endpoint(config)
-      Endpoint.new(path: "/organization/leave", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/leave", method: "POST", metadata: organization_openapi("leaveOrganization", "Leave an organization", response: OpenAPI.status_response_schema)) do |ctx|
         session = Routes.current_session(ctx)
         organization_id = normalize_hash(ctx.body)[:organization_id]
         member = require_member!(ctx, session[:user]["id"], organization_id)
@@ -527,7 +528,7 @@ module BetterAuth
     end
 
     def organization_list_members_endpoint(_config)
-      Endpoint.new(path: "/organization/list-members", method: "GET") do |ctx|
+      Endpoint.new(path: "/organization/list-members", method: "GET", metadata: organization_openapi("listOrganizationMembers", "List organization members", response: organization_members_response_schema)) do |ctx|
         session = Routes.current_session(ctx)
         query = normalize_hash(ctx.query)
         organization_id = query[:organization_id] || organization_by_slug(ctx, query[:organization_slug])&.fetch("id") || session[:session]["activeOrganizationId"]
@@ -538,7 +539,7 @@ module BetterAuth
     end
 
     def organization_has_permission_endpoint(config)
-      Endpoint.new(path: "/organization/has-permission", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/has-permission", method: "POST", metadata: organization_openapi("hasOrganizationPermission", "Check if the member has organization permission", response: organization_permission_response_schema)) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         organization_id = body[:organization_id] || session[:session]["activeOrganizationId"]
@@ -550,7 +551,7 @@ module BetterAuth
     end
 
     def organization_create_team_endpoint(config)
-      Endpoint.new(path: "/organization/create-team", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/create-team", method: "POST", metadata: organization_openapi("createOrganizationTeam", "Create an organization team", response: organization_ref_schema("Team"))) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         organization_id = body[:organization_id] || session[:session]["activeOrganizationId"]
@@ -570,7 +571,7 @@ module BetterAuth
     end
 
     def organization_list_teams_endpoint(_config)
-      Endpoint.new(path: "/organization/list-teams", method: "GET") do |ctx|
+      Endpoint.new(path: "/organization/list-teams", method: "GET", metadata: organization_openapi("listOrganizationTeams", "List organization teams", response: organization_array_schema("Team"))) do |ctx|
         session = Routes.current_session(ctx)
         organization_id = normalize_hash(ctx.query)[:organization_id] || session[:session]["activeOrganizationId"]
         require_member!(ctx, session[:user]["id"], organization_id)
@@ -580,7 +581,7 @@ module BetterAuth
     end
 
     def organization_update_team_endpoint(config)
-      Endpoint.new(path: "/organization/update-team", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/update-team", method: "POST", metadata: organization_openapi("updateOrganizationTeam", "Update an organization team", response: organization_ref_schema("Team"))) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         team = team_by_id(ctx, body[:team_id])
@@ -592,7 +593,7 @@ module BetterAuth
     end
 
     def organization_remove_team_endpoint(config)
-      Endpoint.new(path: "/organization/remove-team", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/remove-team", method: "POST", metadata: organization_openapi("removeOrganizationTeam", "Remove an organization team", response: OpenAPI.status_response_schema)) do |ctx|
         session = Routes.current_session(ctx)
         team = team_by_id(ctx, normalize_hash(ctx.body)[:team_id])
         raise APIError.new("BAD_REQUEST", message: ORGANIZATION_ERROR_CODES.fetch("TEAM_NOT_FOUND")) unless team
@@ -608,7 +609,7 @@ module BetterAuth
     end
 
     def organization_set_active_team_endpoint(_config)
-      Endpoint.new(path: "/organization/set-active-team", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/set-active-team", method: "POST", metadata: organization_openapi("setActiveOrganizationTeam", "Set the active organization team", response: organization_nullable_schema("Team"))) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         if body.key?(:team_id) && body[:team_id].nil?
@@ -626,7 +627,7 @@ module BetterAuth
     end
 
     def organization_list_user_teams_endpoint
-      Endpoint.new(path: "/organization/list-user-teams", method: "GET") do |ctx|
+      Endpoint.new(path: "/organization/list-user-teams", method: "GET", metadata: organization_openapi("listUserTeams", "List user teams", response: organization_array_schema("Team"))) do |ctx|
         session = Routes.current_session(ctx)
         memberships = ctx.context.adapter.find_many(model: "teamMember", where: [{field: "userId", value: session[:user]["id"]}])
         ctx.json(memberships.filter_map { |entry| team_by_id(ctx, entry["teamId"]) }.map { |team| team_wire(ctx, team) })
@@ -634,7 +635,7 @@ module BetterAuth
     end
 
     def organization_list_team_members_endpoint(_config)
-      Endpoint.new(path: "/organization/list-team-members", method: "GET") do |ctx|
+      Endpoint.new(path: "/organization/list-team-members", method: "GET", metadata: organization_openapi("listTeamMembers", "List team members", response: organization_array_schema("TeamMember"))) do |ctx|
         session = Routes.current_session(ctx)
         team_id = normalize_hash(ctx.query)[:team_id] || session[:session]["activeTeamId"]
         raise APIError.new("BAD_REQUEST", message: ORGANIZATION_ERROR_CODES.fetch("YOU_DO_NOT_HAVE_AN_ACTIVE_TEAM")) unless team_id
@@ -646,7 +647,7 @@ module BetterAuth
     end
 
     def organization_add_team_member_endpoint(config)
-      Endpoint.new(path: "/organization/add-team-member", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/add-team-member", method: "POST", metadata: organization_openapi("addTeamMember", "Add a team member", response: organization_ref_schema("TeamMember"))) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         team = team_by_id(ctx, body[:team_id])
@@ -667,7 +668,7 @@ module BetterAuth
     end
 
     def organization_remove_team_member_endpoint(config)
-      Endpoint.new(path: "/organization/remove-team-member", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/remove-team-member", method: "POST", metadata: organization_openapi("removeTeamMember", "Remove a team member", response: OpenAPI.status_response_schema)) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         team = team_by_id(ctx, body[:team_id])
@@ -679,7 +680,7 @@ module BetterAuth
     end
 
     def organization_create_role_endpoint(config)
-      Endpoint.new(path: "/organization/create-role", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/create-role", method: "POST", metadata: organization_openapi("createOrganizationRole", "Create an organization role", response: organization_role_action_schema)) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         organization_id = body[:organization_id] || session[:session]["activeOrganizationId"]
@@ -698,7 +699,7 @@ module BetterAuth
     end
 
     def organization_list_roles_endpoint(config)
-      Endpoint.new(path: "/organization/list-roles", method: "GET") do |ctx|
+      Endpoint.new(path: "/organization/list-roles", method: "GET", metadata: organization_openapi("listOrganizationRoles", "List organization roles", response: {type: "array", items: organization_role_schema})) do |ctx|
         session = Routes.current_session(ctx)
         organization_id = normalize_hash(ctx.query)[:organization_id] || session[:session]["activeOrganizationId"]
         require_org_permission!(ctx, config, session, organization_id, {ac: ["read"]}, ORGANIZATION_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_LIST_A_ROLE"))
@@ -709,7 +710,7 @@ module BetterAuth
     end
 
     def organization_get_role_endpoint(config)
-      Endpoint.new(path: "/organization/get-role", method: "GET") do |ctx|
+      Endpoint.new(path: "/organization/get-role", method: "GET", metadata: organization_openapi("getOrganizationRole", "Get an organization role", response: organization_role_schema)) do |ctx|
         session = Routes.current_session(ctx)
         query = normalize_hash(ctx.query)
         organization_id = query[:organization_id] || session[:session]["activeOrganizationId"]
@@ -721,7 +722,7 @@ module BetterAuth
     end
 
     def organization_update_role_endpoint(config)
-      Endpoint.new(path: "/organization/update-role", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/update-role", method: "POST", metadata: organization_openapi("updateOrganizationRole", "Update an organization role", response: organization_role_action_schema)) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         organization_id = body[:organization_id] || session[:session]["activeOrganizationId"]
@@ -746,7 +747,7 @@ module BetterAuth
     end
 
     def organization_delete_role_endpoint(config)
-      Endpoint.new(path: "/organization/delete-role", method: "POST") do |ctx|
+      Endpoint.new(path: "/organization/delete-role", method: "POST", metadata: organization_openapi("deleteOrganizationRole", "Delete an organization role", response: OpenAPI.success_response_schema)) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         organization_id = body[:organization_id] || session[:session]["activeOrganizationId"]
@@ -764,6 +765,104 @@ module BetterAuth
         ctx.context.adapter.delete(model: "organizationRole", where: [{field: "id", value: role["id"]}])
         ctx.json({success: true})
       end
+    end
+
+    def organization_openapi(operation_id, description, response:, response_description: "Success", request: nil, required: [], parameters: nil)
+      openapi = {
+        operationId: operation_id,
+        description: description,
+        responses: {
+          "200" => OpenAPI.json_response(response_description, response)
+        }
+      }
+      openapi[:requestBody] = OpenAPI.json_request_body(OpenAPI.object_schema(request, required: required)) if request
+      openapi[:parameters] = parameters if parameters
+
+      {openapi: openapi}
+    end
+
+    def organization_ref_schema(name)
+      {
+        type: "object",
+        "$ref": "#/components/schemas/#{name}"
+      }
+    end
+
+    def organization_nullable_schema(name)
+      {
+        type: ["object", "null"],
+        "$ref": "#/components/schemas/#{name}"
+      }
+    end
+
+    def organization_array_schema(name)
+      {
+        type: "array",
+        items: organization_ref_schema(name)
+      }
+    end
+
+    def organization_accept_invitation_schema
+      OpenAPI.object_schema(
+        {
+          invitation: organization_ref_schema("Invitation"),
+          member: organization_ref_schema("Member")
+        },
+        required: ["invitation", "member"]
+      )
+    end
+
+    def organization_active_member_role_schema
+      OpenAPI.object_schema(
+        {
+          role: {type: "string"},
+          member: organization_ref_schema("Member")
+        },
+        required: ["role", "member"]
+      )
+    end
+
+    def organization_members_response_schema
+      OpenAPI.object_schema(
+        {
+          members: organization_array_schema("Member"),
+          total: {type: "number"}
+        },
+        required: ["members", "total"]
+      )
+    end
+
+    def organization_permission_response_schema
+      OpenAPI.object_schema(
+        {
+          error: {type: ["string", "null"]},
+          success: {type: "boolean"}
+        },
+        required: ["success"]
+      )
+    end
+
+    def organization_role_schema
+      OpenAPI.object_schema(
+        {
+          id: {type: "string"},
+          organizationId: {type: "string"},
+          role: {type: "string"},
+          permission: {type: "object"}
+        },
+        required: ["role", "permission"]
+      )
+    end
+
+    def organization_role_action_schema
+      OpenAPI.object_schema(
+        {
+          success: {type: "boolean"},
+          roleData: organization_role_schema,
+          statements: {type: "object"}
+        },
+        required: ["success", "roleData"]
+      )
     end
 
     def parse_roles(roles)

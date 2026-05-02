@@ -31,10 +31,11 @@ module BetterAuth
     }.freeze
 
     attr_reader :app_name,
-      :base_url,
+      :base_url_config,
       :base_path,
       :context_base_url,
       :secret,
+      :secret_config,
       :database,
       :plugins,
       :trusted_origins,
@@ -73,8 +74,19 @@ module BetterAuth
       @hooks = options[:hooks]
       @on_api_error = symbolize_keys(options[:on_api_error] || options[:on_apierror] || {})
       @social_providers = symbolize_keys(options[:social_providers] || {})
-      @trusted_origins_callback = options[:trusted_origins] if options[:trusted_origins].respond_to?(:call)
-      @secret = resolve_secret(options)
+      @trusted_origins_callbacks = []
+      @trusted_origins_callbacks << options[:trusted_origins] if options[:trusted_origins].respond_to?(:call)
+      @trusted_origins_callback = combined_trusted_origins_callback
+      legacy_secret = resolve_secret(options, allow_test_default: false)
+      secrets = options.key?(:secrets) ? options[:secrets] : SecretConfig.parse_env(ENV["BETTER_AUTH_SECRETS"])
+      if secrets
+        @secret_config = SecretConfig.build(secrets, legacy_secret, logger: logger)
+        @secret = @secret_config.current_secret
+      else
+        @secret = legacy_secret || (test_environment? ? DEFAULT_SECRET : nil)
+        @secret_config = @secret
+      end
+      @base_url_config = options[:base_url]
       @base_url, @context_base_url = normalize_base_url(options[:base_url])
       @session = normalize_session(options[:session])
       @account = normalize_account(options[:account])
@@ -96,8 +108,24 @@ module BetterAuth
       end
     end
 
+    def base_url
+      Thread.current[base_url_runtime_key] || @base_url
+    end
+
+    def set_runtime_base_url(value)
+      Thread.current[base_url_runtime_key] = value
+    end
+
+    def clear_runtime_base_url!
+      Thread.current[base_url_runtime_key] = nil
+    end
+
     def production?
       production_environment?
+    end
+
+    def dynamic_base_url?
+      URLHelpers.dynamic_config?(base_url_config)
     end
 
     def to_h
@@ -106,6 +134,7 @@ module BetterAuth
         base_url: base_url,
         base_path: base_path,
         secret: secret,
+        secret_config: secret_config,
         database: database,
         plugins: plugins,
         trusted_origins: trusted_origins,
@@ -134,6 +163,11 @@ module BetterAuth
         next unless respond_to?(key)
         next if key == :database_hooks
 
+        if key == :trusted_origins
+          merge_trusted_origins_default(value)
+          next
+        end
+
         instance_variable_set("@#{key}", merge_default_value([key], public_send(key), value))
       end
     end
@@ -146,7 +180,12 @@ module BetterAuth
       return false unless uri
 
       if pattern.include?("*") || pattern.include?("?")
-        return wildcard_match?(pattern, origin_for(uri) || url) if pattern.include?("://")
+        if pattern.include?("://")
+          origin = origin_for(uri)
+          return true if origin && wildcard_match?(pattern, origin)
+
+          return wildcard_match?(pattern, url)
+        end
 
         return wildcard_match?(pattern, uri.host.to_s)
       end
@@ -191,12 +230,26 @@ module BetterAuth
       configured = value || env_base_url
       return ["", ""] unless configured && !configured.empty?
 
+      if URLHelpers.dynamic_config?(configured)
+        validate_dynamic_base_url!(configured)
+        resolved = URLHelpers.resolve_base_url(configured, base_path)
+        return ["", ""] unless resolved
+
+        uri = URI.parse(resolved)
+        return [self.class.origin_for(uri), resolved.sub(%r{/+\z}, "")]
+      end
+
       with_path = append_base_path(configured.to_s)
       uri = URI.parse(with_path)
       validate_http_url!(uri, configured)
       [self.class.origin_for(uri), with_path.sub(%r{/+\z}, "")]
     rescue URI::InvalidURIError
       raise Error, "Invalid base URL: #{configured}. Please provide a valid base URL."
+    end
+
+    def validate_dynamic_base_url!(value)
+      allowed_hosts = value[:allowed_hosts] || value["allowed_hosts"] || value[:allowedHosts] || value["allowedHosts"]
+      raise Error, "baseURL.allowedHosts cannot be empty" if allowed_hosts.respond_to?(:empty?) && allowed_hosts.empty?
     end
 
     def normalize_base_path(value)
@@ -235,13 +288,18 @@ module BetterAuth
       ].find { |value| value && !value.empty? }
     end
 
-    def resolve_secret(options)
-      options[:secret] || ENV["BETTER_AUTH_SECRET"] || ENV["AUTH_SECRET"] || (test_environment? ? DEFAULT_SECRET : nil)
+    def resolve_secret(options, allow_test_default: true)
+      [options[:secret], ENV["BETTER_AUTH_SECRET"], ENV["AUTH_SECRET"]].find { |value| value && !value.empty? } ||
+        ((allow_test_default && test_environment?) ? DEFAULT_SECRET : nil)
     end
 
     def validate_secret
       if secret.nil? || secret.empty?
         raise Error, "BETTER_AUTH_SECRET is missing. Set it in your environment or pass `secret` to BetterAuth.auth(secret: ...)."
+      end
+
+      if production_environment? && secret == DEFAULT_SECRET
+        raise Error, "You are using the default secret. Please set `BETTER_AUTH_SECRET` in your environment variables or pass `secret` in your auth config."
       end
 
       return if test_environment? && secret == DEFAULT_SECRET
@@ -263,7 +321,8 @@ module BetterAuth
       session = deep_merge(DEFAULT_SESSION, configured)
 
       if database.nil?
-        session = deep_merge(session, DEFAULT_STATELESS_SESSION)
+        session = deep_merge(session, deep_dup(DEFAULT_STATELESS_SESSION))
+        session[:cookie_cache][:max_age] ||= session[:expires_in]
       else
         session[:cookie_cache] = cookie_cache unless cookie_cache.empty?
       end
@@ -316,9 +375,36 @@ module BetterAuth
     def normalize_trusted_origins(value)
       origins = []
       origins << base_url unless base_url.nil? || base_url.empty?
+      origins.concat(dynamic_base_url_trusted_origins)
       origins.concat(Array(value).compact) unless value.respond_to?(:call)
       origins.concat(env_trusted_origins)
       origins.map(&:to_s).reject(&:empty?).uniq
+    end
+
+    def dynamic_base_url_trusted_origins
+      return [] unless URLHelpers.dynamic_config?(base_url_config)
+
+      protocol = base_url_config[:protocol] || base_url_config["protocol"] || "https"
+      allowed_hosts = base_url_config[:allowed_hosts] || base_url_config["allowed_hosts"] || base_url_config[:allowedHosts] || base_url_config["allowedHosts"] || []
+      Array(allowed_hosts).map do |host|
+        host = host.to_s
+        host.match?(%r{\Ahttps?://}i) ? host : "#{protocol}://#{host}"
+      end
+    end
+
+    def merge_trusted_origins_default(value)
+      if value.respond_to?(:call)
+        @trusted_origins_callbacks << value
+        @trusted_origins_callback = combined_trusted_origins_callback
+      else
+        @trusted_origins = (trusted_origins + Array(value).compact.map(&:to_s).reject(&:empty?)).uniq
+      end
+    end
+
+    def combined_trusted_origins_callback
+      return nil if @trusted_origins_callbacks.empty?
+
+      ->(request) { @trusted_origins_callbacks.flat_map { |callback| Array(callback.call(request)) }.compact }
     end
 
     def env_trusted_origins
@@ -386,6 +472,10 @@ module BetterAuth
       elsif logger.respond_to?(:warn)
         logger.warn(message)
       end
+    end
+
+    def base_url_runtime_key
+      :"better_auth_configuration_base_url_#{object_id}"
     end
 
     def test_environment?

@@ -1,160 +1,222 @@
 ---
 title: Hooks
-description: Better Auth Ruby hooks let you customize Better Auth behavior.
+description: Learn how to customize endpoint behavior with before hooks, after hooks, endpoint context, cookies, errors, and background tasks.
 ---
 
-Better Auth Ruby supports API hooks around endpoint execution and database hooks
-around adapter writes.
+Hooks let you adjust Better Auth endpoint behavior without replacing the endpoint.
 
-## API Hooks
+## Before Hooks
 
-API hooks run for both Rack requests and direct `auth.api` calls.
+Before hooks run before the endpoint handler.
 
-```ruby title="config/auth.rb"
+### Example: Enforce Email Domain Restriction
+
+```ruby
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   hooks: {
-    before: lambda do |ctx|
-      next unless ctx.path == "/sign-up/email"
-
-      ctx.body["source"] = "web"
-
+    before: [
       {
-        context: {
-          body: ctx.body
-        }
-      }
-    end
-  }
-)
-```
-
-Return a response hash to short-circuit the endpoint.
-
-```ruby title="config/auth.rb"
-auth = BetterAuth.auth(
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  hooks: {
-    before: lambda do |ctx|
-      next unless ctx.path == "/sign-in/email"
-      next unless maintenance_mode?
-
-      {
-        error: "Sign in is temporarily unavailable"
-      }
-    end
-  }
-)
-```
-
-Use an `after` hook to replace or decorate the response.
-
-```ruby title="config/auth.rb"
-auth = BetterAuth.auth(
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  hooks: {
-    after: lambda do |ctx|
-      next unless ctx.path == "/get-session"
-      next unless ctx.returned
-
-      ctx.returned.merge(
-        server_time: Time.now.utc.iso8601
-      )
-    end
-  }
-)
-```
-
-## Endpoint Context
-
-Hook callbacks receive `path`, `method`, `query`, `body`, `params`, `headers`,
-`request`, `context`, and `returned`. Hooks can set response headers and cookies
-through context helpers.
-
-```ruby title="config/auth.rb"
-auth = BetterAuth.auth(
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  hooks: {
-    after: lambda do |ctx|
-      ctx.set_header("x-auth-path", ctx.path)
-      nil
-    end
-  }
-)
-```
-
-## Database Hooks
-
-Database hooks run around adapter `create`, `update`, and `delete` operations.
-They can transform write data or cancel deletes.
-
-```ruby title="config/auth.rb"
-auth = BetterAuth.auth(
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  database_hooks: {
-    account: {
-      create: {
-        before: lambda do |account, _context|
-          data = account.dup
-          data["accessToken"] = encrypt(data["accessToken"]) if data["accessToken"]
-          data["refreshToken"] = encrypt(data["refreshToken"]) if data["refreshToken"]
-
-          {
-            data: data
-          }
+        matcher: ->(ctx) { ctx.path == "/sign-up/email" },
+        handler: lambda do |ctx|
+          email = ctx.body["email"].to_s
+          if email.end_with?("@blocked.test")
+            BetterAuth::APIError.new("BAD_REQUEST", message: "Email domain is blocked")
+          end
         end
-      }
-    }
-  }
-)
-```
-
-`before` hooks can return `{ data: updated_data }`, `false` to cancel a delete,
-or `nil` to continue unchanged.
-
-```ruby title="config/auth.rb"
-auth = BetterAuth.auth(
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  database_hooks: {
-    user: {
-      create: {
-        after: ->(user, _context) {
-          Analytics.track("user_created", user_id: user.fetch("id"))
-        }
-      }
-    }
-  }
-)
-```
-
-## Plugin Hooks
-
-```ruby title="config/auth.rb"
-plugin = BetterAuth::Plugin.new(
-  id: "audit",
-  hooks: {
-    after: [
-      {
-        matcher: ->(ctx) { ctx.path == "/sign-in/email" },
-        handler: ->(ctx) {
-          AuditLog.create!(
-            event: "sign_in_email",
-            response: ctx.returned
-          )
-          nil
-        }
       }
     ]
   }
 )
+```
 
-auth = BetterAuth.auth(
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  plugins: [plugin]
+Return an `APIError`, Rack response, endpoint result, or hash response to stop the request early.
+
+### Example: Modify Request Context
+
+```ruby
+hooks: {
+  before: [
+    {
+      matcher: ->(ctx) { ctx.path == "/sign-up/email" },
+      handler: lambda do |ctx|
+        ctx.merge_context!(
+          body: {
+            "name" => ctx.body["name"].to_s.strip
+          }
+        )
+        nil
+      end
+    }
+  ]
+}
+```
+
+## After Hooks
+
+After hooks run after the endpoint handler and can replace or decorate the response.
+
+### Example: Send A Notification When A New User Is Registered
+
+```ruby
+hooks: {
+  after: [
+    {
+      matcher: ->(ctx) { ctx.path == "/sign-up/email" },
+      handler: lambda do |ctx|
+        ctx.context.run_in_background(
+          -> { Analytics.track("signup", email: ctx.body["email"]) }
+        )
+        nil
+      end
+    }
+  ]
+}
+```
+
+## Ctx
+
+Hook handlers receive `BetterAuth::Endpoint::Context`.
+
+### Request Response
+
+#### JSON Responses
+
+```ruby
+handler: ->(ctx) { ctx.json({blocked: true}, status: 403) }
+```
+
+#### Redirects
+
+```ruby
+handler: ->(ctx) { ctx.redirect("/login") }
+```
+
+#### Cookies
+
+```ruby
+handler: lambda do |ctx|
+  ctx.set_cookie("theme", "dark", same_site: "lax", path: "/")
+  nil
+end
+```
+
+Read request cookies with:
+
+```ruby
+ctx.get_cookie("better-auth.session_token")
+```
+
+#### Errors
+
+```ruby
+handler: ->(ctx) { ctx.error("UNAUTHORIZED", message: "login required") }
+```
+
+### Context
+
+`ctx.context` is the auth context. It exposes app options, cookies, adapters, configured social providers, secrets, logger, session config, and rate limit config.
+
+#### New Session
+
+`ctx.context.new_session` contains a newly created session when a route creates one.
+
+#### Returned
+
+Endpoint results are normalized into Rack responses after hooks run.
+
+#### Response Headers
+
+Use `ctx.set_header` to add headers:
+
+```ruby
+ctx.set_header("x-auth-flow", "signup")
+```
+
+#### Predefined Auth Cookies
+
+Auth cookie definitions are available through:
+
+```ruby
+ctx.context.auth_cookies
+```
+
+#### Secret
+
+```ruby
+ctx.context.secret
+```
+
+#### Password
+
+```ruby
+password = ctx.context.password
+hash = password[:hash].call("password123")
+password[:verify].call(password: "password123", hash: hash)
+```
+
+#### Adapter
+
+```ruby
+ctx.context.adapter
+```
+
+#### Internal Adapter
+
+Use the internal adapter to preserve database hooks and secondary storage semantics.
+
+```ruby
+ctx.context.internal_adapter.find_user_by_email("john@example.com")
+```
+
+#### GenerateId
+
+The configured ID generator lives at:
+
+```ruby
+ctx.context.options.advanced.dig(:database, :generate_id)
+```
+
+#### RunInBackground
+
+```ruby
+ctx.context.run_in_background(
+  -> { AuditLog.create!(event: "auth_event") }
 )
 ```
 
-## Not Supported
+Configure the background task handler:
 
-- TypeScript hook builders or inference helpers.
-- Browser/client hooks from upstream packages.
+```ruby
+advanced: {
+  background_tasks: {
+    handler: ->(task) { Thread.new { task.call } }
+  }
+}
+```
+
+#### RunInBackgroundOrAwait
+
+Ruby exposes one background entry point: `run_in_background`. If no handler is configured, the task is called inline.
+
+## Reusable Hooks
+
+Extract hook definitions into methods or constants.
+
+```ruby
+RequireCompanyEmail = {
+  matcher: ->(ctx) { ctx.path == "/sign-up/email" },
+  handler: lambda do |ctx|
+    next if ctx.body["email"].to_s.end_with?("@company.com")
+
+    ctx.error("BAD_REQUEST", message: "Use your company email")
+  end
+}
+
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  hooks: {
+    before: [RequireCompanyEmail]
+  }
+)
+```

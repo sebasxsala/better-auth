@@ -8,6 +8,12 @@ require_relative "../../test_helper"
 class BetterAuthPluginsGenericOAuthTest < Minitest::Test
   SECRET = "phase-eight-secret-with-enough-entropy-123"
 
+  def test_oauth2_callback_endpoint_is_get_only_like_upstream
+    auth = build_auth
+
+    assert_equal ["GET"], auth.api.endpoints.fetch(:o_auth2_callback).methods
+  end
+
   def test_sign_in_oauth2_generates_authorization_url_with_state_and_scopes
     auth = build_auth
 
@@ -340,6 +346,36 @@ class BetterAuthPluginsGenericOAuthTest < Minitest::Test
     state_cookie = callback_headers.fetch("set-cookie").lines.find { |line| line.start_with?("better-auth.oauth_state=") }
     assert state_cookie
     assert_includes state_cookie, "Max-Age=0"
+  end
+
+  def test_cookie_state_strategy_survives_secret_rotation
+    old_auth = build_auth(
+      account: {store_state_strategy: "cookie"},
+      secrets: [{version: 1, value: "old-generic-oauth-secret-with-enough-entropy"}]
+    )
+    _status, headers, body = old_auth.api.sign_in_with_oauth2(
+      body: {providerId: "custom", callbackURL: "/dashboard", newUserCallbackURL: "/welcome"},
+      as_response: true
+    )
+    state = Rack::Utils.parse_query(URI.parse(JSON.parse(body.join).fetch("url")).query).fetch("state")
+    new_auth = build_auth(
+      database: old_auth.context.adapter,
+      account: {store_state_strategy: "cookie"},
+      secrets: [
+        {version: 2, value: "new-generic-oauth-secret-with-enough-entropy"},
+        {version: 1, value: "old-generic-oauth-secret-with-enough-entropy"}
+      ]
+    )
+
+    callback_status, callback_headers, = new_auth.api.o_auth2_callback(
+      params: {providerId: "custom"},
+      query: {code: "oauth-code", state: state},
+      headers: {"cookie" => cookie_header(headers.fetch("set-cookie"))},
+      as_response: true
+    )
+
+    assert_equal 302, callback_status
+    assert_equal "/welcome", callback_headers.fetch("location")
   end
 
   def test_cookie_state_strategy_rejects_state_mismatch

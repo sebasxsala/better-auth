@@ -11,8 +11,8 @@ module BetterAuth
             fields: {
               role: {type: "string", required: false, input: false},
               banned: {type: "boolean", required: false, input: false, default_value: false},
-              banReason: {type: "string", required: false, input: false},
-              banExpires: {type: "date", required: false, input: false}
+              banReason: {type: "string", required: false, input: false, default_value: nil},
+              banExpires: {type: "date", required: false, input: false, default_value: nil}
             }
           },
           session: {

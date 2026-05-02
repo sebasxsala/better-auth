@@ -3,11 +3,34 @@
 module BetterAuth
   module Routes
     def self.get_session
-      Endpoint.new(path: "/get-session", method: "GET") do |ctx|
-        session = current_session(ctx, allow_nil: true)
+      Endpoint.new(
+        path: "/get-session",
+        method: ["GET", "POST"],
+        metadata: {
+          openapi: {
+            operationId: "getSession",
+            description: "Get the current session",
+            responses: {
+              "200" => OpenAPI.json_response("Current session or null", OpenAPI.session_response_schema_pair.merge(nullable: true))
+            }
+          }
+        }
+      ) do |ctx|
+        defer_refresh = ctx.context.session_config[:defer_session_refresh]
+        if ctx.method == "POST" && !defer_refresh
+          raise APIError.new(
+            "METHOD_NOT_ALLOWED",
+            code: "METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED",
+            message: BASE_ERROR_CODES["METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED"]
+          )
+        end
+
+        session = current_session(ctx, allow_nil: true, disable_refresh: defer_refresh && ctx.method == "GET")
         next ctx.json(nil) unless session
 
-        ctx.json(parsed_session_response(ctx, session))
+        response = parsed_session_response(ctx, session)
+        response[:needsRefresh] = session_needs_refresh?(ctx, session[:session]) if defer_refresh && ctx.method == "GET"
+        ctx.json(response)
       rescue APIError
         raise
       rescue => error
@@ -17,7 +40,22 @@ module BetterAuth
     end
 
     def self.list_sessions
-      Endpoint.new(path: "/list-sessions", method: "GET") do |ctx|
+      Endpoint.new(
+        path: "/list-sessions",
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "listSessions",
+            description: "List active sessions for the current user",
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Active sessions",
+                {type: "array", items: {type: "object", "$ref": "#/components/schemas/Session"}}
+              )
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx)
         sessions = ctx.context.internal_adapter.list_sessions(session[:user]["id"])
         active = sessions
@@ -29,8 +67,22 @@ module BetterAuth
     end
 
     def self.update_session
-      Endpoint.new(path: "/update-session", method: "POST") do |ctx|
-        session = current_session(ctx, sensitive: true)
+      Endpoint.new(
+        path: "/update-session",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "updateSession",
+            description: "Update the current session",
+            responses: {
+              "200" => OpenAPI.json_response("Updated session", OpenAPI.session_response_schema_pair)
+            }
+          }
+        }
+      ) do |ctx|
+        session = current_session(ctx)
+        raise APIError.new("BAD_REQUEST", code: "BODY_MUST_BE_AN_OBJECT", message: BASE_ERROR_CODES["BODY_MUST_BE_AN_OBJECT"]) unless ctx.body.is_a?(Hash)
+
         body = Routes.parse_declared_input(ctx, "session", ctx.body, allowed_base: [])
         raise APIError.new("BAD_REQUEST", message: "No fields to update") if body.empty?
 
@@ -38,12 +90,32 @@ module BetterAuth
         updated = ctx.context.internal_adapter.update_session(session[:session]["token"], update)
         merged = session[:session].merge(updated || update)
         Cookies.set_session_cookie(ctx, {session: merged, user: session[:user]}, Cookies.dont_remember?(ctx))
-        ctx.json(parsed_session_response(ctx, {session: merged, user: session[:user]}))
+        ctx.json({session: Schema.parse_output(ctx.context.options, "session", merged)})
       end
     end
 
     def self.revoke_session
-      Endpoint.new(path: "/revoke-session", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/revoke-session",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "revokeSession",
+            description: "Revoke a session by token",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  token: {type: "string", description: "The session token to revoke"}
+                },
+                required: ["token"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Session revoked", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx, sensitive: true)
         body = normalize_hash(ctx.body)
         token = body["token"].to_s
@@ -58,7 +130,19 @@ module BetterAuth
     end
 
     def self.revoke_sessions
-      Endpoint.new(path: "/revoke-sessions", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/revoke-sessions",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "revokeSessions",
+            description: "Revoke all sessions for the current user",
+            responses: {
+              "200" => OpenAPI.json_response("Sessions revoked", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx, sensitive: true)
         ctx.context.internal_adapter.delete_sessions(session[:user]["id"])
         Cookies.delete_session_cookie(ctx)
@@ -67,7 +151,19 @@ module BetterAuth
     end
 
     def self.revoke_other_sessions
-      Endpoint.new(path: "/revoke-other-sessions", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/revoke-other-sessions",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "revokeOtherSessions",
+            description: "Revoke all sessions except the current one",
+            responses: {
+              "200" => OpenAPI.json_response("Other sessions revoked", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx, sensitive: true)
         current_token = session[:session]["token"]
         sessions = ctx.context.internal_adapter.list_sessions(session[:user]["id"])
@@ -81,11 +177,11 @@ module BetterAuth
       end
     end
 
-    def self.current_session(ctx, allow_nil: false, sensitive: false)
+    def self.current_session(ctx, allow_nil: false, sensitive: false, fresh: false, disable_refresh: false)
       data = Session.find_current(
         ctx,
         disable_cookie_cache: truthy_query?(ctx.query, "disableCookieCache"),
-        disable_refresh: truthy_query?(ctx.query, "disableRefresh"),
+        disable_refresh: disable_refresh || truthy_query?(ctx.query, "disableRefresh"),
         sensitive: sensitive
       )
       return nil if allow_nil && data.nil?
@@ -93,12 +189,21 @@ module BetterAuth
       raise APIError.new("UNAUTHORIZED") unless data
 
       session = stringify_keys(data[:session] || data["session"])
-      ensure_fresh_session!(ctx, session) if sensitive
+      ensure_fresh_session!(ctx, session) if fresh
 
       {
         session: session,
         user: stringify_keys(data[:user] || data["user"])
       }
+    end
+
+    def self.request_only_session(ctx)
+      session = current_session(ctx, allow_nil: true)
+      if !session && (ctx.request || !ctx.headers.empty?)
+        raise APIError.new("UNAUTHORIZED", code: "UNAUTHORIZED", message: "Unauthorized")
+      end
+
+      session
     end
 
     def self.ensure_fresh_session!(ctx, session)
@@ -109,6 +214,16 @@ module BetterAuth
       return unless created_at && Time.now - created_at >= fresh_age
 
       raise APIError.new("FORBIDDEN", code: "SESSION_NOT_FRESH", message: BASE_ERROR_CODES.fetch("SESSION_NOT_FRESH"))
+    end
+
+    def self.session_needs_refresh?(ctx, session)
+      return false if truthy_query?(ctx.query, "disableRefresh") || ctx.context.session_config[:disable_session_refresh]
+
+      update_age = ctx.context.session_config[:update_age].to_i
+      return true if update_age.zero?
+
+      updated_at = normalize_time(session["updatedAt"])
+      updated_at && updated_at + update_age <= Time.now
     end
 
     def self.normalize_time(value)

@@ -16,6 +16,7 @@ module BetterAuth
     "SOCIAL_ACCOUNT_ALREADY_LINKED" => "Social account already linked",
     "PROVIDER_NOT_FOUND" => "Provider not found",
     "INVALID_TOKEN" => "Invalid token",
+    "TOKEN_EXPIRED" => "Token expired",
     "ID_TOKEN_NOT_SUPPORTED" => "id_token not supported",
     "FAILED_TO_GET_USER_INFO" => "Failed to get user info",
     "USER_EMAIL_NOT_FOUND" => "User email not found",
@@ -47,6 +48,12 @@ module BetterAuth
     "FIELD_NOT_ALLOWED" => "Field not allowed to be set",
     "ASYNC_VALIDATION_NOT_SUPPORTED" => "Async validation is not supported",
     "VALIDATION_ERROR" => "Validation Error",
-    "MISSING_FIELD" => "Field is required"
+    "MISSING_FIELD" => "Field is required",
+    "BODY_MUST_BE_AN_OBJECT" => "Body must be an object",
+    "METHOD_NOT_ALLOWED_DEFER_SESSION_REQUIRED" => "POST method requires deferSessionRefresh to be enabled in session config",
+    "PASSWORD_ALREADY_SET" => "User already has a password set",
+    "RESET_PASSWORD_DISABLED" => "Reset password isn't enabled",
+    "EMAIL_PASSWORD_DISABLED" => "Email and password is not enabled",
+    "EMAIL_PASSWORD_SIGN_UP_DISABLED" => "Email and password sign up is not enabled"
   }.freeze
 end

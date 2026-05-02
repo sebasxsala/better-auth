@@ -5,21 +5,16 @@ require "uri"
 module BetterAuth
   class Context
     attr_reader :app_name,
-      :base_url,
       :version,
       :options,
       :social_providers,
-      :cookies,
-      :auth_cookies,
       :adapter,
       :internal_adapter,
       :logger,
       :session_config,
       :rate_limit_config,
-      :trusted_origins,
       :secret,
-      :current_session,
-      :new_session
+      :secret_config
 
     def initialize(configuration)
       @app_name = configuration.app_name
@@ -36,6 +31,7 @@ module BetterAuth
       @rate_limit_config = configuration.rate_limit
       @trusted_origins = configuration.trusted_origins
       @secret = configuration.secret
+      @secret_config = configuration.secret_config
       @current_session = nil
       @new_session = nil
     end
@@ -46,12 +42,36 @@ module BetterAuth
       end
     end
 
+    def base_url
+      runtime_fetch(:base_url, @base_url)
+    end
+
+    def trusted_origins
+      runtime_fetch(:trusted_origins, @trusted_origins)
+    end
+
+    def auth_cookies
+      runtime_fetch(:auth_cookies, @auth_cookies)
+    end
+
+    def cookies
+      runtime_fetch(:cookies, @cookies)
+    end
+
+    def current_session
+      runtime_fetch(:current_session, @current_session)
+    end
+
+    def new_session
+      runtime_fetch(:new_session, @new_session)
+    end
+
     def set_new_session(session)
-      @new_session = session
+      runtime_store(:new_session, session) || @new_session = session
     end
 
     def set_current_session(session)
-      @current_session = session
+      runtime_store(:current_session, session) || @current_session = session
     end
 
     def run_in_background(task)
@@ -61,6 +81,31 @@ module BetterAuth
       elsif task.respond_to?(:call)
         task.call
       end
+    end
+
+    def password
+      config = {
+        min_password_length: options.email_and_password[:min_password_length],
+        max_password_length: options.email_and_password[:max_password_length]
+      }
+      password_config = options.email_and_password[:password] || {}
+
+      {
+        config: config,
+        hash: ->(value) { Password.hash(value, hasher: password_config[:hash], algorithm: options.password_hasher) },
+        verify: lambda do |password:, hash:|
+          Password.verify(
+            password: password,
+            hash: hash,
+            verifier: password_config[:verify],
+            algorithm: options.password_hasher
+          )
+        end,
+        check_password: lambda do |value|
+          length = value.to_s.length
+          length.between?(config[:min_password_length].to_i, config[:max_password_length].to_i)
+        end
+      }
     end
 
     def create_auth_cookie(cookie_name, override_attributes = {})
@@ -87,6 +132,7 @@ module BetterAuth
       @rate_limit_config = options.rate_limit
       @trusted_origins = options.trusted_origins
       @secret = options.secret
+      @secret_config = options.secret_config
     end
 
     def method_missing(name, *arguments, &block)
@@ -101,15 +147,50 @@ module BetterAuth
     end
 
     def prepare_for_request!(request)
-      @current_session = nil
-      @new_session = nil
-      @base_url = inferred_base_url(request) if options.base_url.to_s.empty?
-      @trusted_origins = current_trusted_origins(request)
+      runtime = request_runtime
+      runtime[:current_session] = nil
+      runtime[:new_session] = nil
+      if options.dynamic_base_url?
+        runtime[:base_url] = resolved_dynamic_base_url(request)
+        refresh_cookies!
+      elsif options.base_url.to_s.empty?
+        runtime[:base_url] = inferred_base_url(request)
+      end
+      runtime[:trusted_origins] = current_trusted_origins(request)
+    end
+
+    def prepare_for_api_call!(source)
+      runtime = request_runtime
+      runtime[:current_session] = nil
+      runtime[:new_session] = nil
+      if options.dynamic_base_url?
+        runtime[:base_url] = resolved_dynamic_base_url(source)
+        refresh_cookies!
+      end
+      runtime[:trusted_origins] = current_trusted_origins(request_for_callbacks(source))
     end
 
     def reset_runtime!
+      Thread.current[runtime_key] = nil if request_runtime?
+      options.clear_runtime_base_url! if options.respond_to?(:clear_runtime_base_url!)
       @current_session = nil
       @new_session = nil
+    end
+
+    def clear_runtime!
+      Thread.current[runtime_key] = nil
+      options.clear_runtime_base_url! if options.respond_to?(:clear_runtime_base_url!)
+    end
+
+    def refresh_cookies!
+      cookies = Cookies.get_cookies(options)
+      if request_runtime?
+        runtime_store(:auth_cookies, cookies)
+        runtime_store(:cookies, cookies)
+      else
+        @auth_cookies = cookies
+        @cookies = cookies
+      end
     end
 
     private
@@ -118,6 +199,61 @@ module BetterAuth
       origin = inferred_origin(request)
       path = options.base_path
       path.empty? ? origin : "#{origin}#{path}"
+    end
+
+    def resolved_dynamic_base_url(request)
+      resolved = URLHelpers.resolve_base_url(
+        options.base_url_config,
+        options.base_path,
+        request,
+        load_env: true,
+        trusted_proxy_headers: dynamic_trusted_proxy_headers?
+      )
+      origin = Configuration.origin_for(URI.parse(resolved))
+      options.set_runtime_base_url(origin) if options.respond_to?(:set_runtime_base_url)
+      resolved
+    end
+
+    def dynamic_trusted_proxy_headers?
+      return true unless options.advanced.key?(:trusted_proxy_headers)
+
+      !!options.advanced[:trusted_proxy_headers]
+    end
+
+    def request_for_callbacks(source)
+      return source if source.respond_to?(:get_header)
+
+      DirectAPIRequest.new(source, base_url) if source.is_a?(Hash)
+    end
+
+    def request_runtime
+      Thread.current[runtime_key] ||= {
+        base_url: @base_url,
+        trusted_origins: @trusted_origins,
+        auth_cookies: @auth_cookies,
+        cookies: @cookies,
+        current_session: nil,
+        new_session: nil
+      }
+    end
+
+    def request_runtime?
+      !!Thread.current[runtime_key]
+    end
+
+    def runtime_fetch(key, fallback)
+      request_runtime? ? Thread.current[runtime_key].fetch(key, fallback) : fallback
+    end
+
+    def runtime_store(key, value)
+      return false unless request_runtime?
+
+      Thread.current[runtime_key][key] = value
+      true
+    end
+
+    def runtime_key
+      :"better_auth_context_runtime_#{object_id}"
     end
 
     def inferred_origin(request)
@@ -206,6 +342,23 @@ module BetterAuth
 
     def plugin_context_attribute?(key)
       ![:options, :adapter, :internal_adapter].include?(key)
+    end
+
+    class DirectAPIRequest
+      attr_reader :headers, :url
+
+      def initialize(headers, url)
+        @headers = headers.transform_keys { |key| key.to_s.downcase }
+        @url = url
+      end
+
+      def get_header(key)
+        normalized = key.to_s
+          .sub(/\AHTTP_/, "")
+          .downcase
+          .tr("_", "-")
+        headers[normalized] || headers[key.to_s] || headers[key.to_s.downcase]
+      end
     end
   end
 end

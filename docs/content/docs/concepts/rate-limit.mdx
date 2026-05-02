@@ -1,144 +1,129 @@
 ---
 title: Rate Limit
-description: How to limit the number of requests a user can make to the server in a given time period.
+description: Learn how Better Auth Ruby rate limiting works, including IP handling, IPv6 subnet keys, storage, errors, and schema.
 ---
 
-Better Auth Ruby includes a Rack-level rate limiter. It runs for
-client-initiated HTTP requests that pass through the Better Auth router.
+Better Auth Ruby can rate limit requests before endpoint handlers run.
 
-<Callout type="warning">
-Server-side requests made through `auth.api` are not affected by rate limiting.
-Rate limits apply to HTTP requests handled by the Rack router. If a public
-controller, job, or RPC method calls `auth.api` using user input, rate limit that
-public entry point separately.
-</Callout>
-
-## Defaults
-
-Rate limiting is enabled automatically in production environments and disabled
-by default in development and test.
-
-The Ruby defaults are:
-
-- Window: `10` seconds
-- Max requests: `100`
-- Storage: memory, unless `secondary_storage` is configured
-
-Sensitive core paths get a stricter `3` requests per `10` seconds:
-
-- `/sign-in/*`
-- `/sign-up/*`
-- `/change-password`
-- `/change-email`
-
-## Configure Rate Limit
-
-```ruby title="config/auth.rb"
+```ruby
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   rate_limit: {
-    enabled: true,
-    window: 60,
-    max: 100
+    enabled: true
   }
 )
 ```
 
-Rails apps use the same options in the initializer.
+By default, general routes use `window: 10` and `max: 100`. Auth-sensitive paths such as `/sign-in`, `/sign-up`, `/change-password`, and `/change-email` use stricter upstream-compatible rules.
 
-```ruby title="config/initializers/better_auth.rb"
-BetterAuth::Rails.configure do |config|
-  config.rate_limit = {
-    enabled: true,
-    window: 60,
-    max: 100
-  }
-end
-```
+## Configuring Rate Limit
 
-## IP Address
+### Connecting IP Address
 
-Rate limiting uses the request IP address. Configure trusted proxy headers with
-`advanced.ip_address.ip_address_headers`.
+Rate limiting keys include the client IP and route path. Configure trusted IP headers when your app runs behind a proxy.
 
-```ruby title="config/auth.rb"
+```ruby
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   advanced: {
     ip_address: {
-      ip_address_headers: ["cf-connecting-ip", "x-forwarded-for"],
-      disable_ip_tracking: false
+      ip_address_headers: ["x-forwarded-for"]
     }
   },
   rate_limit: {
-    enabled: true,
-    window: 60,
-    max: 100
+    enabled: true
   }
 )
 ```
 
-## Custom Rules
+Disable IP tracking when another layer handles rate limiting:
 
-Use `custom_rules` to override limits for specific paths.
+```ruby
+advanced: {
+  ip_address: {
+    disable_ip_tracking: true
+  }
+}
+```
 
-```ruby title="config/auth.rb"
+#### IPv6 Address Support
+
+IPv6 addresses are normalized before becoming rate-limit keys. IPv4-mapped IPv6 addresses are normalized back to IPv4.
+
+#### IPv6 Subnet Rate Limiting
+
+Configure IPv6 subnet grouping:
+
+```ruby
+advanced: {
+  ip_address: {
+    ip_address_headers: ["x-forwarded-for"],
+    ipv6_subnet: 64
+  }
+}
+```
+
+Requests from addresses within the same subnet share a rate-limit key.
+
+### Rate Limit Window
+
+Configure a global window and max:
+
+```ruby
+rate_limit: {
+  enabled: true,
+  window: 60,
+  max: 20
+}
+```
+
+Use custom route rules:
+
+```ruby
+rate_limit: {
+  enabled: true,
+  custom_rules: {
+    "/magic-link/*" => {window: 60, max: 5},
+    "/get-session" => false
+  }
+}
+```
+
+Custom rules can also be lambdas:
+
+```ruby
+rate_limit: {
+  enabled: true,
+  custom_rules: {
+    "/admin/*" => lambda do |request, current_rule|
+      current_rule.merge(max: 10)
+    end
+  }
+}
+```
+
+### Storage
+
+By default, rate limit data is stored in memory.
+
+**Using Database**
+
+```ruby
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  database: :memory,
   rate_limit: {
     enabled: true,
-    custom_rules: {
-      "/sign-in/email" => {
-        window: 10,
-        max: 3
-      },
-      "/two-factor/*" => lambda do |_request, current_rule|
-        {
-          window: current_rule[:window],
-          max: 3
-        }
-      end
-    }
+    storage: "database"
   }
 )
 ```
 
-Set a rule to `false`, or return `false` from a rule callable, to disable rate
-limiting for that path.
+Run migrations after enabling database storage so the `rateLimit` table exists.
 
-```ruby title="config/auth.rb"
-auth = BetterAuth.auth(
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  rate_limit: {
-    enabled: true,
-    custom_rules: {
-      "/get-session" => false
-    }
-  }
-)
-```
+**Using Secondary Storage**
 
-Plugins can provide rate limit rules with a `path_matcher`.
-
-```ruby title="config/auth.rb"
-plugin = BetterAuth::Plugin.new(
-  id: "strict-password-reset",
-  rate_limit: [
-    {
-      path_matcher: ->(path) { path == "/request-password-reset" },
-      window: 60,
-      max: 2
-    }
-  ]
-)
-```
-
-## Storage
-
-Memory storage is the default. If `secondary_storage` is configured, counters can
-be stored there.
-
-```ruby title="config/auth.rb"
+```ruby
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   secondary_storage: redis_storage,
@@ -149,16 +134,16 @@ auth = BetterAuth.auth(
 )
 ```
 
-Custom storage is also supported.
+**Custom Storage**
 
-```ruby title="config/auth.rb"
-class RateLimitStore
+```ruby
+class RateLimitStorage
   def get(key)
-    Redis.current.get(key)
+    @store[key]
   end
 
-  def set(key, value, ttl:, update: false)
-    Redis.current.set(key, value.to_json, ex: ttl)
+  def set(key, value, ttl: nil, update: false)
+    @store[key] = value
   end
 end
 
@@ -166,19 +151,35 @@ auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   rate_limit: {
     enabled: true,
-    custom_storage: RateLimitStore.new
+    custom_storage: RateLimitStorage.new
   }
 )
 ```
 
-## Handling Errors
+## Handling Rate Limit Errors
 
-When the limit is exceeded, Better Auth returns HTTP `429`, the
-`x-retry-after` header, and a JSON body with `Too many requests. Please try
-again later.`
+When a request exceeds the limit, Better Auth returns `429` and the `x-retry-after` header.
 
-## Not Supported
+```ruby
+status, headers, body = auth.call(env)
 
-- Database-backed runtime rate limit storage. Use memory, `secondary_storage`,
-  or `custom_storage`.
-- Upstream JavaScript client error handling examples.
+if status == 429
+  retry_after = headers.fetch("x-retry-after").to_i
+  payload = JSON.parse(body.join)
+end
+```
+
+Server-side API calls that execute through Rack observe the same response behavior.
+
+### Schema
+
+When `rate_limit.storage` is `"database"`, the schema includes the `rateLimit` table.
+
+| Field | Type | Purpose |
+| --- | --- | --- |
+| `id` | string | Database ID. |
+| `key` | string | Unique rate-limit key. |
+| `count` | number | Number of requests in the current window. |
+| `lastRequest` | number | Last request timestamp in epoch milliseconds. |
+
+Customize the model name and fields with the `rate_limit` schema options before generating migrations.

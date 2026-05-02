@@ -75,6 +75,7 @@ class BetterAuthRoutesSignInTest < Minitest::Test
     end
 
     assert_equal 400, error.status_code
+    assert_equal "EMAIL_PASSWORD_DISABLED", error.code
     assert_equal "Email and password is not enabled", error.message
   end
 
@@ -107,6 +108,18 @@ class BetterAuthRoutesSignInTest < Minitest::Test
     end
     assert_equal 401, missing_user.status_code
     assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_EMAIL_OR_PASSWORD"], missing_user.message
+  end
+
+  def test_sign_in_email_rejects_missing_required_body_fields_before_credentials_check
+    auth = build_auth
+    auth.api.sign_up_email(body: {email: "missing-password@example.com", password: "password123", name: "Missing Password"})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_in_email(body: {email: "missing-password@example.com"})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["VALIDATION_ERROR"], error.message
   end
 
   def test_sign_in_email_requires_verified_email_when_configured
@@ -175,6 +188,85 @@ class BetterAuthRoutesSignInTest < Minitest::Test
     assert_match(/\A[0-9a-f]{32}\z/, data.fetch("token"))
     assert_equal "form-sign-in@example.com", data.fetch("user").fetch("email")
     assert_includes headers.fetch("set-cookie"), "better-auth.session_token="
+  end
+
+  def test_sign_in_email_allows_same_origin_navigation_and_cors_fetch
+    auth = build_auth(trusted_origins: ["http://localhost:3000"])
+    auth.api.sign_up_email(body: {email: "same-origin-sign-in@example.com", password: "password123", name: "CSRF"})
+
+    same_origin_status, _headers, _body = auth.call(
+      rack_env(
+        "POST",
+        "/api/auth/sign-in/email",
+        body: JSON.generate(email: "same-origin-sign-in@example.com", password: "password123"),
+        extra_headers: {
+          "HTTP_SEC_FETCH_SITE" => "same-origin",
+          "HTTP_SEC_FETCH_MODE" => "navigate",
+          "HTTP_SEC_FETCH_DEST" => "document",
+          "HTTP_ORIGIN" => "http://localhost:3000"
+        }
+      )
+    )
+    cors_status, _headers, _body = auth.call(
+      rack_env(
+        "POST",
+        "/api/auth/sign-in/email",
+        body: JSON.generate(email: "same-origin-sign-in@example.com", password: "password123"),
+        extra_headers: {
+          "HTTP_SEC_FETCH_SITE" => "same-origin",
+          "HTTP_SEC_FETCH_MODE" => "cors",
+          "HTTP_SEC_FETCH_DEST" => "empty",
+          "HTTP_ORIGIN" => "http://localhost:3000"
+        }
+      )
+    )
+
+    assert_equal 200, same_origin_status
+    assert_equal 200, cors_status
+  end
+
+  def test_sign_in_email_uses_origin_validation_when_cookies_exist
+    auth = build_auth(trusted_origins: ["http://localhost:3000"])
+    auth.api.sign_up_email(body: {email: "cookie-origin-sign-in@example.com", password: "password123", name: "CSRF"})
+
+    status, _headers, _body = auth.call(
+      rack_env(
+        "POST",
+        "/api/auth/sign-in/email",
+        body: JSON.generate(email: "cookie-origin-sign-in@example.com", password: "password123"),
+        extra_headers: {
+          "HTTP_COOKIE" => "some_cookie=value",
+          "HTTP_SEC_FETCH_SITE" => "cross-site",
+          "HTTP_SEC_FETCH_MODE" => "navigate",
+          "HTTP_ORIGIN" => "http://localhost:3000"
+        }
+      )
+    )
+
+    assert_equal 200, status
+  end
+
+  def test_sign_in_email_blocks_cross_site_form_navigation
+    auth = build_auth
+
+    status, _headers, body = auth.call(
+      rack_env(
+        "POST",
+        "/api/auth/sign-in/email",
+        body: "email=attacker%40evil.example&password=password123",
+        content_type: "application/x-www-form-urlencoded",
+        extra_headers: {
+          "HTTP_SEC_FETCH_SITE" => "cross-site",
+          "HTTP_SEC_FETCH_MODE" => "navigate",
+          "HTTP_SEC_FETCH_DEST" => "document",
+          "HTTP_ORIGIN" => "https://evil.example"
+        }
+      )
+    )
+    data = JSON.parse(body.join)
+
+    assert_equal 403, status
+    assert_equal BetterAuth::BASE_ERROR_CODES["CROSS_SITE_NAVIGATION_LOGIN_BLOCKED"], data.fetch("message")
   end
 
   def test_sign_in_email_blocks_cross_site_navigation

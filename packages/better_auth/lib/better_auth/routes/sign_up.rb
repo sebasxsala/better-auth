@@ -11,17 +11,52 @@ module BetterAuth
       Endpoint.new(
         path: "/sign-up/email",
         method: "POST",
+        body_schema: request_body_schema(
+          required_strings: %w[name email],
+          required_nonempty_strings: %w[password]
+        ),
         metadata: {
           allowed_media_types: [
             "application/x-www-form-urlencoded",
             "application/json"
-          ]
+          ],
+          openapi: {
+            operationId: "signUpWithEmailAndPassword",
+            description: "Sign up a user using email and password",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  name: {type: "string", description: "The name of the user"},
+                  email: {type: "string", description: "The email of the user"},
+                  password: {type: "string", description: "The password of the user"},
+                  image: {type: "string", description: "The profile image URL of the user"},
+                  callbackURL: {type: "string", description: "The URL to use for email verification callback"},
+                  rememberMe: {type: "boolean", description: "If this is false, the session will not be remembered. Default is `true`."}
+                },
+                required: ["name", "email", "password"]
+              ),
+              required: false
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Successfully created user",
+                OpenAPI.object_schema(
+                  {
+                    token: {type: "string", nullable: true, description: "Authentication token for the session"},
+                    user: {type: "object", "$ref": "#/components/schemas/User"}
+                  },
+                  required: ["user"]
+                )
+              ),
+              "422" => OpenAPI.error_response("Unprocessable Entity. User already exists or failed to create user.")
+            }
+          }
         }
       ) do |ctx|
         options = ctx.context.options
         email_config = options.email_and_password
         if email_config[:enabled] != true || email_config[:disable_sign_up]
-          raise APIError.new("BAD_REQUEST", message: "Email and password sign up is not enabled")
+          raise APIError.new("BAD_REQUEST", code: "EMAIL_PASSWORD_SIGN_UP_DISABLED", message: BASE_ERROR_CODES["EMAIL_PASSWORD_SIGN_UP_DISABLED"])
         end
 
         body = normalize_hash(ctx.body)
@@ -118,7 +153,8 @@ module BetterAuth
           "name" => name,
           "image" => image,
           "emailVerified" => false
-        )
+        ),
+        context: ctx
       )
     rescue APIError
       raise
@@ -151,16 +187,38 @@ module BetterAuth
         "updatedAt" => now
       }
       reserved = %w[email password name image callbackURL callbackUrl callback_url rememberMe remember_me]
-      additional = parse_declared_input(ctx, "user", body.except(*reserved), allowed_base: [])
+      additional = synthetic_additional_user_fields(ctx, body.except(*reserved))
       custom = ctx.context.options.email_and_password[:custom_synthetic_user]
       return core_fields.merge(additional) unless custom.respond_to?(:call)
 
       value = {
         core_fields: core_fields.except("id"),
+        coreFields: core_fields.except("id"),
         additional_fields: additional,
+        additionalFields: additional,
         id: core_fields["id"]
       }
       stringify_synthetic_user(custom.call(value))
+    end
+
+    def self.synthetic_additional_user_fields(ctx, data)
+      additional = parse_declared_input(ctx, "user", data, allowed_base: [])
+      configured = ctx.context.options.user[:additional_fields] || {}
+      configured.each do |field, attributes|
+        storage_field = Schema.storage_key(field)
+        next if additional.key?(storage_field)
+
+        field_attributes = normalize_hash(attributes || {})
+        next unless field_attributes.key?("defaultValue") || field_attributes.key?("default_value")
+
+        default = field_attributes.key?("defaultValue") ? field_attributes["defaultValue"] : field_attributes["default_value"]
+        additional[storage_field] = resolve_default(default)
+      end
+      additional
+    end
+
+    def self.resolve_default(value)
+      value.respond_to?(:call) ? value.call : value
     end
 
     def self.stringify_synthetic_user(value)

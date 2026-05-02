@@ -65,7 +65,38 @@ module BetterAuth
     end
 
     def sign_in_phone_number_endpoint(config)
-      Endpoint.new(path: "/sign-in/phone-number", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/sign-in/phone-number",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "signInPhoneNumber",
+            description: "Sign in with phone number and password",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  phoneNumber: {type: "string"},
+                  password: {type: "string"},
+                  rememberMe: {type: ["boolean", "null"]}
+                },
+                required: ["phoneNumber", "password"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Signed in",
+                OpenAPI.object_schema(
+                  {
+                    token: {type: "string"},
+                    user: {type: "object", "$ref": "#/components/schemas/User"}
+                  },
+                  required: ["token", "user"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         body = normalize_hash(ctx.body)
         phone_number = body[:phone_number].to_s
         password = body[:password].to_s
@@ -101,7 +132,35 @@ module BetterAuth
     end
 
     def send_phone_number_otp_endpoint(config)
-      Endpoint.new(path: "/phone-number/send-otp", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/phone-number/send-otp",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "sendPhoneNumberOTP",
+            description: "Send a phone number OTP",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  phoneNumber: {type: "string"}
+                },
+                required: ["phoneNumber"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "OTP sent",
+                OpenAPI.object_schema(
+                  {
+                    message: {type: "string"}
+                  },
+                  required: ["message"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         sender = config[:send_otp]
         unless sender.respond_to?(:call)
           raise APIError.new("NOT_IMPLEMENTED", message: PHONE_NUMBER_ERROR_CODES["SEND_OTP_NOT_IMPLEMENTED"])
@@ -118,7 +177,40 @@ module BetterAuth
     end
 
     def verify_phone_number_endpoint(config)
-      Endpoint.new(path: "/phone-number/verify", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/phone-number/verify",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "verifyPhoneNumber",
+            description: "Verify a phone number OTP",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  phoneNumber: {type: "string"},
+                  code: {type: "string"},
+                  updatePhoneNumber: {type: ["boolean", "null"]},
+                  disableSession: {type: ["boolean", "null"]}
+                },
+                required: ["phoneNumber", "code"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Phone number verified",
+                OpenAPI.object_schema(
+                  {
+                    status: {type: "boolean"},
+                    token: {type: ["string", "null"]},
+                    user: {type: "object", "$ref": "#/components/schemas/User"}
+                  },
+                  required: ["status", "user"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         body = normalize_hash(ctx.body)
         phone_number = body[:phone_number].to_s
         code = body[:code].to_s
@@ -163,7 +255,27 @@ module BetterAuth
     end
 
     def request_password_reset_phone_number_endpoint(config)
-      Endpoint.new(path: "/phone-number/request-password-reset", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/phone-number/request-password-reset",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "requestPasswordResetPhoneNumber",
+            description: "Request a phone number password reset OTP",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  phoneNumber: {type: "string"}
+                },
+                required: ["phoneNumber"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Password reset OTP requested", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         body = normalize_hash(ctx.body)
         phone_number = body[:phone_number].to_s
         user = ctx.context.adapter.find_one(model: "user", where: [{field: "phoneNumber", value: phone_number}])
@@ -179,7 +291,29 @@ module BetterAuth
     end
 
     def reset_password_phone_number_endpoint(config)
-      Endpoint.new(path: "/phone-number/reset-password", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/phone-number/reset-password",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "resetPasswordPhoneNumber",
+            description: "Reset a password with a phone number OTP",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  phoneNumber: {type: "string"},
+                  otp: {type: "string"},
+                  newPassword: {type: "string"}
+                },
+                required: ["phoneNumber", "otp", "newPassword"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Password reset", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         body = normalize_hash(ctx.body)
         phone_number = body[:phone_number].to_s
         otp = body[:otp].to_s
@@ -225,7 +359,8 @@ module BetterAuth
           "phoneNumber" => phone_number,
           "phoneNumberVerified" => true,
           "emailVerified" => false
-        )
+        ),
+        context: ctx
       )
     end
 

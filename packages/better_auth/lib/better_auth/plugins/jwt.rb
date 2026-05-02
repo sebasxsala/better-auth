@@ -103,7 +103,25 @@ module BetterAuth
     end
 
     def get_jwks_endpoint(config, path)
-      Endpoint.new(path: path, method: "GET") do |ctx|
+      Endpoint.new(
+        path: path,
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "getJSONWebKeySet",
+            description: "Get the JSON Web Key Set",
+            responses: {
+              "200" => OpenAPI.json_response(
+                "JSON Web Key Set retrieved successfully",
+                OpenAPI.object_schema(
+                  {keys: {type: "array", description: "Array of public JSON Web Keys", items: {type: "object"}}},
+                  required: ["keys"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         raise APIError.new("NOT_FOUND") if config.dig(:jwks, :remote_url)
 
         create_jwk(ctx, config) if all_jwks(ctx, config).empty?
@@ -112,7 +130,22 @@ module BetterAuth
     end
 
     def get_token_endpoint(config)
-      Endpoint.new(path: "/token", method: "GET") do |ctx|
+      Endpoint.new(
+        path: "/token",
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "getJSONWebToken",
+            description: "Get a JWT token",
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Success",
+                OpenAPI.object_schema({token: {type: "string"}}, required: ["token"])
+              )
+            }
+          }
+        }
+      ) do |ctx|
         session = Session.find_current(ctx)
         raise APIError.new("UNAUTHORIZED", message: BASE_ERROR_CODES["FAILED_TO_GET_SESSION"]) unless session
 
@@ -306,12 +339,12 @@ module BetterAuth
     def jwk_private_key_for_storage(ctx, private_key, config)
       return private_key if config.dig(:jwks, :disable_private_key_encryption)
 
-      Crypto.symmetric_encrypt(key: ctx.context.secret, data: private_key)
+      Crypto.symmetric_encrypt(key: ctx.context.secret_config, data: private_key)
     end
 
     def jwk_private_key_value(ctx, key, _config)
       value = key["privateKey"]
-      Crypto.symmetric_decrypt(key: ctx.context.secret, data: value) || value
+      Crypto.symmetric_decrypt(key: ctx.context.secret_config, data: value) || value
     end
 
     def jwt_payload_valid?(payload)

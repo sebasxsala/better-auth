@@ -10,6 +10,7 @@ module BetterAuth
       :params_schema,
       :headers_schema,
       :metadata,
+      :options,
       :use,
       :handler
 
@@ -21,6 +22,9 @@ module BetterAuth
       @params_schema = params_schema
       @headers_schema = headers_schema
       @metadata = metadata || {}
+      apply_default_open_api_metadata!
+      apply_open_api_schemas!
+      @options = endpoint_options
       @use = Array(use)
       @handler = handler || ->(_ctx) {}
     end
@@ -45,6 +49,34 @@ module BetterAuth
     end
 
     private
+
+    def endpoint_options
+      {
+        method: (methods.length == 1) ? methods.first : methods,
+        body: body_schema,
+        query: query_schema,
+        params: params_schema,
+        headers: headers_schema,
+        metadata: metadata
+      }.compact
+    end
+
+    def apply_default_open_api_metadata!
+      return unless path
+      return if metadata[:openapi] || metadata[:hide] || metadata[:SERVER_ONLY] || metadata[:server_only]
+      return unless defined?(BetterAuth::OpenAPI)
+
+      metadata[:openapi] = BetterAuth::OpenAPI.default_metadata(path, methods)
+    end
+
+    def apply_open_api_schemas!
+      openapi = fetch_key(metadata, :openapi)
+      return unless openapi.is_a?(Hash)
+
+      @body_schema ||= schema_for_open_api_request_body(openapi)
+      @query_schema ||= schema_for_open_api_parameters(openapi, "query")
+      @headers_schema ||= schema_for_open_api_parameters(openapi, "header")
+    end
 
     def apply_schemas!(context)
       context.body = validate_schema(:body, body_schema, context.body)
@@ -86,6 +118,54 @@ module BetterAuth
       result
     end
 
+    def schema_for_open_api_request_body(openapi)
+      schema = fetch_key(fetch_key(fetch_key(fetch_key(openapi, :requestBody), :content), "application/json"), :schema)
+      required = Array(fetch_key(schema, :required)).map(&:to_s)
+      return nil if required.empty?
+
+      ->(value) { validate_required_open_api_fields(value, required) }
+    end
+
+    def schema_for_open_api_parameters(openapi, location)
+      required = Array(fetch_key(openapi, :parameters))
+        .select { |parameter| parameter.is_a?(Hash) && fetch_key(parameter, :in).to_s == location && fetch_key(parameter, :required) == true }
+        .filter_map { |parameter| fetch_key(parameter, :name) }
+        .map(&:to_s)
+      return nil if required.empty?
+
+      ->(value) { validate_required_open_api_fields(value, required) }
+    end
+
+    def validate_required_open_api_fields(value, required)
+      data = normalize_open_api_input(value)
+      return false unless required.all? { |key| data.key?(open_api_storage_key(key)) && !data[open_api_storage_key(key)].nil? }
+
+      value
+    end
+
+    def normalize_open_api_input(value)
+      return {} unless value.is_a?(Hash)
+
+      value.each_with_object({}) do |(key, object_value), result|
+        result[open_api_storage_key(key)] = object_value
+      end
+    end
+
+    def open_api_storage_key(key)
+      key.to_s
+        .gsub(/([a-z\d])([A-Z])/, "\\1_\\2")
+        .tr("-", "_")
+        .downcase
+        .split("_")
+        .then { |parts| ([parts.first] + parts.drop(1).map(&:capitalize)).join }
+    end
+
+    def fetch_key(hash, key)
+      return nil unless hash.respond_to?(:[])
+
+      hash[key] || hash[key.to_s]
+    end
+
     class Result
       attr_accessor :response, :status, :headers
 
@@ -100,7 +180,7 @@ module BetterAuth
         return value if value.is_a?(self)
 
         if value.is_a?(APIError)
-          return new(response: value, status: value.status_code, headers: value.headers)
+          return new(response: value, status: value.status_code, headers: merge_headers(context.response_headers, value.headers))
         end
 
         if rack_response?(value)
@@ -136,7 +216,11 @@ module BetterAuth
       end
 
       def to_rack_response
-        return @raw_response if raw_response?
+        to_response.to_a
+      end
+
+      def to_response
+        return Response.from_rack(@raw_response) if raw_response?
 
         body = if response.nil?
           [JSON.generate(nil)]
@@ -146,7 +230,7 @@ module BetterAuth
           [JSON.generate(response)]
         end
         response_headers = {"content-type" => "application/json"}.merge(headers)
-        [status, response_headers, body]
+        Response.new(status: status, headers: response_headers, body: body)
       end
 
       private

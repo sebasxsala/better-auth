@@ -168,9 +168,9 @@ auth = BetterAuth.auth(
 )
 ```
 
-The MySQL adapter supports native joins for the core `session -> user`,
-`account -> user`, and `user -> account` relationships. Rails uses ActiveRecord
-associations for the same core relationships.
+The MySQL adapter supports native joins for core relationships and for plugin
+schema relationships declared with `references`. Rails uses generated
+ActiveRecord associations for the same schema-driven relationships.
 
 ## Schema
 

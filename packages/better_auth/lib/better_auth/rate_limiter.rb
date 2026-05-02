@@ -142,6 +142,7 @@ module BetterAuth
 
     def storage_for(context, config)
       return [:custom, config[:custom_storage]] if config[:custom_storage]
+      return [:database, context.internal_adapter.adapter] if config[:storage] == "database"
 
       if config[:storage] == "secondary-storage" && context.options.secondary_storage
         return [:secondary, context.options.secondary_storage]
@@ -151,6 +152,8 @@ module BetterAuth
     end
 
     def read_storage((type, storage), key)
+      return read_database_storage(storage, key) if type == :database
+
       data = storage.get(key)
       data = JSON.parse(data) if type == :secondary && data.is_a?(String)
       normalize_rate_limit_data(symbolize_keys(data))
@@ -159,10 +162,27 @@ module BetterAuth
     end
 
     def write_storage((type, storage), key, data, ttl:, update:)
+      return write_database_storage(storage, key, data) if type == :database
+
       value = (type == :secondary) ? JSON.generate(secondary_storage_data(data)) : data
       return call_secondary_storage_set(storage, key, value, ttl: ttl, update: update) if type == :secondary
 
       call_storage_set(storage, key, value, ttl: ttl, update: update)
+    end
+
+    def read_database_storage(adapter, key)
+      data = adapter.find_one(model: "rateLimit", where: [{field: "key", value: key}])
+      normalize_rate_limit_data(symbolize_keys(data))
+    end
+
+    def write_database_storage(adapter, key, data)
+      value = secondary_storage_data(data)
+      existing = adapter.find_one(model: "rateLimit", where: [{field: "key", value: key}])
+      if existing
+        adapter.update(model: "rateLimit", where: [{field: "key", value: key}], update: value)
+      else
+        adapter.create(model: "rateLimit", data: value)
+      end
     end
 
     def secondary_storage_data(data)

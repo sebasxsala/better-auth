@@ -12,7 +12,7 @@ module BetterAuth
     def create(data, model, custom: nil, context: nil)
       run_before(model, :create, data, context) do |actual_data|
         created = custom ? custom.call(actual_data) : adapter.create(model: model, data: actual_data, force_allow_id: true)
-        run_after(model, :create, created)
+        run_after(model, :create, created, context)
         created
       end
     end
@@ -20,7 +20,7 @@ module BetterAuth
     def update(data, where, model, custom: nil, context: nil)
       run_before(model, :update, data, context) do |actual_data|
         updated = custom ? custom.call(actual_data) : adapter.update(model: model, where: where, update: actual_data)
-        run_after(model, :update, updated) if updated
+        run_after(model, :update, updated, context) if updated
         updated
       end
     end
@@ -28,7 +28,7 @@ module BetterAuth
     def update_many(data, where, model, custom: nil, context: nil)
       run_before(model, :update, data, context) do |actual_data|
         updated = custom ? custom.call(actual_data) : adapter.update_many(model: model, where: where, update: actual_data)
-        run_after(model, :update, updated) if updated
+        run_after(model, :update, updated, context) if updated
         updated
       end
     end
@@ -68,8 +68,8 @@ module BetterAuth
       yield actual_data
     end
 
-    def run_after(model, action, data)
-      after_hooks(model, action).each { |hook| hook.call(data, nil) }
+    def run_after(model, action, data, context)
+      after_hooks(model, action).each { |hook| hook.call(data, context) }
     end
 
     def before_hooks(model, action)

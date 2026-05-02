@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "base64"
+require "logger"
 require "onelogin/ruby-saml"
 require "uri"
 
@@ -23,6 +24,18 @@ module BetterAuth
             parse_response: response_parser(**options)
           }
         }
+      end
+
+      def validate_config_algorithms(config = {}, **options)
+        Algorithms.validate_config(config, **options)
+      end
+
+      def validate_saml_algorithms(xml, **options)
+        Algorithms.validate(xml, **options)
+      end
+
+      def validate_single_assertion(saml_response)
+        Assertions.validate_single_assertion!(saml_response)
       end
 
       def auth_request_url(settings: nil, request_options: {}, **_options)
@@ -69,11 +82,18 @@ module BetterAuth
         settings = overrides || OneLogin::RubySaml::Settings.new
         provider_id = provider.fetch("providerId")
         base_url = context.context.base_url
-        settings.assertion_consumer_service_url = config[:callback_url] || "#{base_url}/sso/saml2/sp/acs/#{provider_id}"
+        idp_metadata = BetterAuth::Plugins.respond_to?(:sso_saml_idp_metadata) ? BetterAuth::Plugins.sso_saml_idp_metadata(config) : {}
+        sso_service = BetterAuth::Plugins.respond_to?(:sso_saml_preferred_service) ? BetterAuth::Plugins.sso_saml_preferred_service(idp_metadata[:single_sign_on_service]) : nil
+        sso_service = BetterAuth::Plugins.normalize_hash(sso_service || {})
+        settings.assertion_consumer_service_url = if BetterAuth::Plugins.respond_to?(:sso_saml_acs_url?) && BetterAuth::Plugins.sso_saml_acs_url?(config[:callback_url])
+          config[:callback_url]
+        else
+          "#{base_url}/sso/saml2/sp/acs/#{URI.encode_www_form_component(provider_id)}"
+        end
         settings.sp_entity_id = config.dig(:sp_metadata, :entity_id) || config[:audience] || "#{base_url}/sso/saml2/sp/metadata?providerId=#{URI.encode_www_form_component(provider_id)}"
-        settings.idp_entity_id = provider["issuer"] || provider[:issuer]
-        settings.idp_sso_service_url = config[:entry_point]
-        settings.idp_cert = config[:cert] unless config[:cert].to_s.empty?
+        settings.idp_entity_id = idp_metadata[:entity_id] || provider["issuer"] || provider[:issuer]
+        settings.idp_sso_service_url = config[:entry_point] || sso_service[:location]
+        settings.idp_cert = config[:cert] || idp_metadata[:cert] unless (config[:cert] || idp_metadata[:cert]).to_s.empty?
         settings.name_identifier_format = config[:identifier_format] unless config[:identifier_format].to_s.empty?
         private_key = config.dig(:sp_metadata, :private_key) || config[:private_key] || config[:sp_private_key]
         authn_requests_signed = config.fetch(:authn_requests_signed, config[:want_authn_requests_signed])

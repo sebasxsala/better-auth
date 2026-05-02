@@ -213,7 +213,19 @@ module BetterAuth
     end
 
     def sign_in_with_oauth2_endpoint(config)
-      Endpoint.new(path: "/sign-in/oauth2", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/sign-in/oauth2",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "signInOAuth2",
+            description: "Sign in with OAuth2",
+            responses: {
+              "200" => OpenAPI.json_response("Sign in with OAuth2", generic_oauth_url_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         body = normalize_hash(ctx.body)
         provider_id = body[:provider_id].to_s
         provider = generic_oauth_provider!(config, provider_id)
@@ -223,7 +235,19 @@ module BetterAuth
     end
 
     def o_auth2_link_account_endpoint(config)
-      Endpoint.new(path: "/oauth2/link", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/oauth2/link",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "linkOAuth2",
+            description: "Link an OAuth2 account to the current user session",
+            responses: {
+              "200" => OpenAPI.json_response("Authorization URL generated successfully for linking an OAuth2 account", generic_oauth_url_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         provider_id = body[:provider_id].to_s
@@ -243,8 +267,20 @@ module BetterAuth
     def o_auth2_callback_endpoint(config)
       Endpoint.new(
         path: "/oauth2/callback/:providerId",
-        method: ["GET", "POST"],
-        metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}
+        method: "GET",
+        metadata: {
+          allowed_media_types: ["application/x-www-form-urlencoded", "application/json"],
+          openapi: {
+            operationId: "oauth2Callback",
+            description: "OAuth2 callback",
+            responses: {
+              "200" => OpenAPI.json_response(
+                "OAuth2 callback",
+                OpenAPI.object_schema({url: {type: "string"}}, required: ["url"])
+              )
+            }
+          }
+        }
       ) do |ctx|
         query = normalize_hash(ctx.query)
         provider_id = (fetch_value(ctx.params, "providerId") || query[:provider_id]).to_s
@@ -304,6 +340,16 @@ module BetterAuth
         Cookies.set_session_cookie(ctx, session_data)
         raise ctx.redirect(existing ? callback_url : (state_data["newUserURL"] || state_data["newUserCallbackURL"] || callback_url))
       end
+    end
+
+    def generic_oauth_url_response_schema
+      OpenAPI.object_schema(
+        {
+          url: {type: "string"},
+          redirect: {type: "boolean"}
+        },
+        required: ["url", "redirect"]
+      )
     end
 
     def generic_oauth_authorization_url(ctx, provider, body, link:)
@@ -368,7 +414,7 @@ module BetterAuth
       state = Crypto.random_string(32)
       if strategy.to_s == "cookie"
         cookie = ctx.context.create_auth_cookie("oauth_state", max_age: 600)
-        encrypted = Crypto.symmetric_encrypt(key: ctx.context.secret, data: JSON.generate(state_data.merge("state" => state)))
+        encrypted = Crypto.symmetric_encrypt(key: ctx.context.secret_config, data: JSON.generate(state_data.merge("state" => state)))
         ctx.set_cookie(cookie.name, encrypted, cookie.attributes)
         return state
       end
@@ -416,7 +462,7 @@ module BetterAuth
         end
 
         begin
-          decrypted = Crypto.symmetric_decrypt(key: ctx.context.secret, data: encrypted)
+          decrypted = Crypto.symmetric_decrypt(key: ctx.context.secret_config, data: encrypted)
           unless decrypted
             Cookies.expire_cookie(ctx, cookie)
             raise ctx.redirect(generic_oauth_error_url(generic_oauth_state_error_url(ctx), "please_restart_the_process"))
@@ -525,7 +571,7 @@ module BetterAuth
       return token if token.to_s.empty?
       return token unless ctx.context.options.account[:encrypt_oauth_tokens]
 
-      Crypto.symmetric_encrypt(key: ctx.context.secret, data: token)
+      Crypto.symmetric_encrypt(key: ctx.context.secret_config, data: token)
     end
 
     def generic_oauth_set_account_cookie(ctx, provider_id, account_id, user_id)

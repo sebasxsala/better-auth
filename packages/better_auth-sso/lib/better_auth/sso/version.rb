@@ -2,6 +2,7 @@
 
 module BetterAuth
   module SSO
-    VERSION = "0.2.0"
+    VERSION = "0.5.0"
+    PACKAGE_VERSION = VERSION
   end
 end

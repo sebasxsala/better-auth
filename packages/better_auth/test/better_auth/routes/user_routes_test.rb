@@ -21,6 +21,19 @@ class BetterAuthRoutesUserTest < Minitest::Test
     assert_equal BetterAuth::BASE_ERROR_CODES["EMAIL_CAN_NOT_BE_UPDATED"], error.message
   end
 
+  def test_update_user_requires_body_object_like_upstream
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "body-object@example.com", password: "password123")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.update_user(headers: {"cookie" => cookie}, body: "not-object")
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal "BODY_MUST_BE_AN_OBJECT", error.code
+    assert_equal BetterAuth::BASE_ERROR_CODES["BODY_MUST_BE_AN_OBJECT"], error.message
+  end
+
   def test_change_password_updates_password_and_can_revoke_other_sessions
     auth = build_auth
     first_cookie = sign_up_cookie(auth, email: "change-password@example.com", password: "password123")
@@ -34,6 +47,35 @@ class BetterAuthRoutesUserTest < Minitest::Test
     assert_match(/\A[0-9a-f]{32}\z/, result[:token])
     assert_nil auth.api.get_session(headers: {"cookie" => first_cookie})
     assert auth.api.sign_in_email(body: {email: "change-password@example.com", password: "new-password"})[:token]
+  end
+
+  def test_change_password_accepts_snake_case_body_aliases
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "change-password-snake@example.com", password: "password123")
+
+    result = auth.api.change_password(
+      headers: {"cookie" => cookie},
+      body: {current_password: "password123", new_password: "new-password"}
+    )
+
+    assert_nil result[:token]
+    assert auth.api.sign_in_email(body: {email: "change-password-snake@example.com", password: "new-password"})[:token]
+  end
+
+  def test_change_password_updates_credential_account_updated_at
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "change-updated-at@example.com", password: "password123")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    account = auth.context.internal_adapter.find_accounts(user_id).find { |entry| entry["providerId"] == "credential" }
+    original_updated_at = account.fetch("updatedAt")
+
+    auth.api.change_password(
+      headers: {"cookie" => cookie},
+      body: {currentPassword: "password123", newPassword: "new-password"}
+    )
+
+    updated_account = auth.context.internal_adapter.find_accounts(user_id).find { |entry| entry["providerId"] == "credential" }
+    assert_operator updated_account.fetch("updatedAt"), :>, original_updated_at
   end
 
   def test_change_password_uses_configured_custom_password_callbacks
@@ -69,6 +111,27 @@ class BetterAuthRoutesUserTest < Minitest::Test
       auth.api.set_password(headers: {"cookie" => cookie}, body: {newPassword: "another-password"})
     end
     assert_equal 400, error.status_code
+    assert_equal "BAD_REQUEST", error.code
+    assert_equal BetterAuth::BASE_ERROR_CODES["PASSWORD_ALREADY_SET"], error.message
+  end
+
+  def test_change_password_allows_stale_sensitive_session
+    auth = build_auth(session: {fresh_age: 1, expires_in: 3600, update_age: 3600})
+    cookie = sign_up_cookie(auth, email: "stale-change-password@example.com", password: "password123")
+    session = auth.api.get_session(headers: {"cookie" => cookie})[:session]
+    auth.context.internal_adapter.update_session(
+      session["token"],
+      "createdAt" => Time.now - 120,
+      "updatedAt" => Time.now - 120
+    )
+
+    result = auth.api.change_password(
+      headers: {"cookie" => cookie},
+      body: {currentPassword: "password123", newPassword: "new-password"}
+    )
+
+    assert_nil result[:token]
+    assert auth.api.sign_in_email(body: {email: "stale-change-password@example.com", password: "new-password"})[:token]
   end
 
   def test_change_email_updates_unverified_user_when_enabled
@@ -77,6 +140,36 @@ class BetterAuthRoutesUserTest < Minitest::Test
 
     assert_equal({status: true}, auth.api.change_email(headers: {"cookie" => cookie}, body: {newEmail: "new-email@example.com"}))
     assert_equal "new-email@example.com", auth.context.internal_adapter.find_user_by_email("new-email@example.com")[:user]["email"]
+  end
+
+  def test_change_email_accepts_snake_case_new_email_alias
+    auth = build_auth(user: {change_email: {enabled: true, update_email_without_verification: true}})
+    cookie = sign_up_cookie(auth, email: "old-snake-email@example.com", password: "password123")
+
+    result = auth.api.change_email(headers: {"cookie" => cookie}, body: {new_email: "new-snake-email@example.com"})
+
+    assert_equal({status: true}, result)
+    assert_equal "new-snake-email@example.com", auth.context.internal_adapter.find_user_by_email("new-snake-email@example.com")[:user]["email"]
+  end
+
+  def test_change_email_update_without_verification_sends_verification_for_new_email
+    sent = []
+    auth = build_auth(
+      user: {change_email: {enabled: true, update_email_without_verification: true}},
+      email_verification: {send_verification_email: ->(data, _request = nil) { sent << data }}
+    )
+    cookie = sign_up_cookie(auth, email: "old-unverified-sender@example.com", password: "password123")
+
+    assert_equal(
+      {status: true},
+      auth.api.change_email(headers: {"cookie" => cookie}, body: {newEmail: "new-unverified-sender@example.com"})
+    )
+
+    assert_equal 1, sent.length
+    assert_equal "new-unverified-sender@example.com", sent.first.fetch(:user).fetch("email")
+    auth.api.verify_email(query: {token: sent.first.fetch(:token)})
+    user = auth.context.internal_adapter.find_user_by_email("new-unverified-sender@example.com")[:user]
+    assert_equal true, user["emailVerified"]
   end
 
   def test_change_email_secure_flow_returns_success_when_target_email_exists
@@ -157,9 +250,49 @@ class BetterAuthRoutesUserTest < Minitest::Test
       auth.api.delete_user(headers: {"cookie" => cookie}, body: {})
     end
 
-    assert_equal 403, error.status_code
-    assert_equal "SESSION_NOT_FRESH", error.code
+    assert_equal 400, error.status_code
+    assert_equal "SESSION_EXPIRED", error.code
+    assert_equal BetterAuth::BASE_ERROR_CODES["SESSION_EXPIRED"], error.message
     assert auth.context.internal_adapter.find_user_by_email("stale-delete@example.com")
+  end
+
+  def test_delete_user_allows_stale_session_when_password_is_valid
+    auth = build_auth(
+      session: {fresh_age: 1, expires_in: 3600, update_age: 3600},
+      user: {delete_user: {enabled: true}}
+    )
+    cookie = sign_up_cookie(auth, email: "stale-password-delete@example.com", password: "password123")
+    session = auth.api.get_session(headers: {"cookie" => cookie})[:session]
+    auth.context.internal_adapter.update_session(
+      session["token"],
+      "createdAt" => Time.now - 120,
+      "updatedAt" => Time.now - 120
+    )
+
+    result = auth.api.delete_user(headers: {"cookie" => cookie}, body: {password: "password123"})
+
+    assert_equal({success: true, message: "User deleted"}, result)
+    assert_nil auth.context.internal_adapter.find_user_by_email("stale-password-delete@example.com")
+  end
+
+  def test_delete_user_sender_receives_callback_url
+    sent = []
+    auth = build_auth(
+      user: {
+        delete_user: {
+          enabled: true,
+          send_delete_account_verification: ->(data, _request = nil) { sent << data }
+        }
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "delete-callback-url@example.com", password: "password123")
+
+    result = auth.api.delete_user(headers: {"cookie" => cookie}, body: {callbackURL: "/deleted"})
+
+    assert_equal({success: true, message: "Verification email sent"}, result)
+    assert_equal 1, sent.length
+    assert_match(%r{/delete-user/callback\?token=[0-9a-f]+&callbackURL=%2Fdeleted}, sent.first.fetch(:url))
+    assert sent.first.fetch(:token)
   end
 
   def test_delete_user_callback_rejects_untrusted_callback_url

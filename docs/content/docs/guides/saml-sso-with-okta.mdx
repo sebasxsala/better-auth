@@ -1,21 +1,13 @@
 ---
 title: SAML SSO with Okta
-description: A guide to integrating SAML Single Sign-On (SSO) with Better Auth, featuring Okta
+description: A guide to integrating SAML Single Sign-On (SSO) with Better Auth Ruby, featuring Okta.
 ---
 
-<Callout type="warn">
-This page is not supported or has not been adapted in the Ruby port yet. The original upstream content is hidden so it does not render as Ruby documentation.
-</Callout>
-
-{/*
-Hidden upstream content for SAML SSO with Okta.
-
-
-<Callout type="warn">
-Ruby port note: this page has not been adapted yet. The upstream upstream documentation is preserved below for reference and may mention packages, framework helpers, adapters, or browser APIs that are not supported by the Ruby port yet.
-</Callout>
-
 This guide walks you through setting up SAML Single Sign-On (SSO) with your Identity Provider (IdP), using Okta as an example. For advanced configuration details and the full API reference, check out the [SSO Plugin Documentation](/docs/plugins/sso).
+
+<Callout type="info">
+SAML SSO requires the `better_auth-sso` gem. Add it to your Gemfile and require it before use.
+</Callout>
 
 ## What is SAML?
 
@@ -24,164 +16,239 @@ SAML (Security Assertion Markup Language) is an XML-based standard for exchangin
 In this setup:
 
 - **IdP (Okta)**: Authenticates users and sends assertions about their identity.
-- **SP (Better Auth)**: Validates assertions and logs the user in.up.
+- **SP (Better Auth)**: Validates assertions and logs the user in.
 
-### Step 1: Create a SAML Application in Okta
+## Step 1: Install the SSO Gem
+
+Add the gem to your Gemfile:
+
+```ruby title="Gemfile"
+gem "better_auth"
+gem "better_auth-sso"
+```
+
+Then install it:
+
+```bash title="Terminal"
+bundle install
+```
+
+Require the SSO plugin in your auth configuration:
+
+```ruby title="config/auth.rb"
+require "better_auth"
+require "better_auth/sso"
+```
+
+## Step 2: Create a SAML Application in Okta
 
 1. Log in to your Okta Admin Console
-2. Navigate to Applications > Applications
-3. Click "Create App Integration"
-4. Select "SAML 2.0" as the Sign-in method
+2. Navigate to **Applications > Applications**
+3. Click **Create App Integration**
+4. Select **SAML 2.0** as the Sign-in method
 5. Configure the following settings:
 
-   - **Single Sign-on URL**: Your Better Auth callback endpoint (e.g., `http://localhost:3000/api/auth/sso/saml2/callback/sso`). Note: `sso` is your `providerId`
+   - **Single Sign-on URL**: Your Better Auth callback endpoint (e.g., `http://localhost:3000/api/auth/sso/saml2/callback/sso`). Note: `sso` is your `provider_id`
    - **Audience URI (SP Entity ID)**: Your Better Auth metadata URL (e.g., `http://localhost:3000/api/auth/sso/saml2/sp/metadata`)
    - **Name ID format**: Email Address or any of your choice.
 
 6. Download the IdP metadata XML file and certificate
 
 <Callout type="info">
-**IdP-Initiated SSO**: If you want users to access your app from the Okta dashboard, make sure the **Single Sign-on URL** points to the callback endpoint (`/api/auth/sso/saml2/callback/{providerId}`). Better Auth automatically handles both SP-initiated and IdP-initiated flows.
+  **IdP-Initiated SSO**: If you want users to access your app from the Okta dashboard, make sure the **Single Sign-on URL** points to the callback endpoint (`/api/auth/sso/saml2/callback/{provider_id}`). Better Auth automatically handles both SP-initiated and IdP-initiated flows.
 </Callout>
 
-### Step 2: Configure Better Auth
+## Step 3: Configure Better Auth
 
-Here’s an example configuration for Okta in a dev environment:
+Register the SAML provider through the API or seed it at boot time. Here's an example of registering a provider after a user is signed in:
 
-```typescript
-const ssoConfig = {
-  defaultSSO: [{
-    domain: "localhost:3000", // Your domain
-    providerId: "sso",
+```ruby title="server.rb"
+# Register a SAML provider (requires an authenticated user)
+auth.api.register_sso_provider(
+  headers: {"cookie" => current_user_cookie},
+  body: {
+    providerId: "okta",
+    issuer: "https://your-domain.okta.com",
+    domain: "your-domain.com",
     samlConfig: {
-      // SP Configuration
-      issuer: "http://localhost:3000/api/auth/sso/saml2/sp/metadata",
-      entryPoint: "https://trial-1076874.okta.com/app/trial-1076874_samltest_1/exktofb0a62hqLAUL697/sso/saml",
-      callbackUrl: "/dashboard", // Redirect after successful authentication
-      
-      // IdP Configuration
+      entryPoint: "https://your-domain.okta.com/app/your-app/sso/saml",
+      callbackUrl: "http://localhost:3000/dashboard",
+      cert: "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----",
       idpMetadata: {
-        entityID: "https://trial-1076874.okta.com/app/exktofb0a62hqLAUL697/sso/saml/metadata",
+        entityID: "https://your-domain.okta.com/app/your-app/sso/saml/metadata",
         singleSignOnService: [{
           Binding: "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect",
-          Location: "https://trial-1076874.okta.com/app/trial-1076874_samltest_1/exktofb0a62hqLAUL697/sso/saml"
-        }],
+          Location: "https://your-domain.okta.com/app/your-app/sso/saml"
+        }]
       },
-      cert: `-----BEGIN CERTIFICATE-----
-MIIDqjCCApKgAwIBAgIGAZhVGMeUMA0GCSqGSIb3DQEBCwUAMIGVMQswCQYDVQQGEwJVUzETMBEG
-...
-[Your Okta Certificate]
-...
------END CERTIFICATE-----`,
-      
-      // SP Metadata
       spMetadata: {
-        metadata: `<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" 
-          entityID="http://localhost:3000/api/sso/saml2/sp/metadata">
-          ...
-          [Your SP Metadata XML]
-          ...
-        </md:EntityDescriptor>`
+        entityId: "http://localhost:3000/api/auth/sso/saml2/sp/metadata"
       }
     }
-  }]
-}
+  }
+)
 ```
 
-### Step 3: Multiple Default Providers (Optional)
+### Auth Config with SSO Plugin
 
-You can configure multiple SAML providers for different domains:
-
-```typescript
-const ssoConfig = {
-  defaultSSO: [
-    {
-      domain: "company.com",
-      providerId: "company-okta",
-      samlConfig: {
-        // Okta SAML configuration for company.com
+```ruby title="config/auth.rb"
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  base_url: ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000"),
+  plugins: [
+    BetterAuth::Plugins.sso(
+      saml: {
+        parse_response: ->(raw_response:, **data) {
+          # Optional: use a real SAML XML parser here (e.g., ruby-saml)
+          # For DummyIDP testing you can return a parsed Hash directly.
+        }
       }
-    },
-    {
-      domain: "partner.com", 
-      providerId: "partner-adfs",
-      samlConfig: {
-        // ADFS SAML configuration for partner.com
-      }
-    },
-    {
-      domain: "contractor.org",
-      providerId: "contractor-azure",
-      samlConfig: {
-        // Azure AD SAML configuration for contractor.org
-      }
-    }
+    )
   ]
-}
+)
+```
+
+## Step 4: Multiple Default Providers (Optional)
+
+You can configure multiple SAML providers for different domains. In Ruby, providers are stored in the database via the adapter, so you can seed them at startup or register them dynamically:
+
+```ruby title="db/seeds.rb"
+# Seed multiple SAML providers
+[
+  {
+    provider_id: "company-okta",
+    domain: "company.com",
+    issuer: "https://company.okta.com",
+    saml_config: { /* Okta SAML configuration for company.com */ }
+  },
+  {
+    provider_id: "partner-adfs",
+    domain: "partner.com",
+    issuer: "https://partner.adfs.com",
+    saml_config: { /* ADFS SAML configuration for partner.com */ }
+  },
+  {
+    provider_id: "contractor-azure",
+    domain: "contractor.org",
+    issuer: "https://contractor.microsoftonline.com",
+    saml_config: { /* Azure AD SAML configuration for contractor.org */ }
+  }
+].each do |config|
+  auth.context.adapter.create(
+    model: "ssoProvider",
+    data: {
+      providerId: config[:provider_id],
+      issuer: config[:issuer],
+      domain: config[:domain],
+      samlConfig: config[:saml_config],
+      userId: admin_user_id
+    }
+  )
+end
 ```
 
 <Callout type="info">
-**Explicit**: Pass providerId directly when signing in.
-**Domain fallback:** Matches based on the user’s email domain. e.g. user@company.com → matches `company-okta` provider.
+  **Explicit**: Pass `providerId` directly when signing in.
+  **Domain fallback:** Matches based on the user's email domain. e.g. `user@company.com` → matches `company-okta` provider.
 </Callout>
 
-
-### Step 4: Initiating Sign-In
+## Step 5: Initiating Sign-In
 
 You can start an SSO flow in three ways:
 
-**1. Explicitly by `providerId` (recommended):**
+### 1. Explicitly by `provider_id` (recommended):
 
-```typescript
-// Explicitly specify which provider to use
-await authClient.signIn.sso({
-  providerId: "company-okta",
-  callbackURL: "/dashboard"
-});
+```ruby title="server.rb"
+# Explicitly specify which provider to use
+result = auth.api.sign_in_sso(
+  body: {
+    providerId: "company-okta",
+    callbackURL: "/dashboard"
+  }
+)
+redirect result.fetch(:url)
 ```
 
-**2. By email domain matching:**
+### 2. By email domain matching:
 
-```typescript
-// Automatically matches provider based on email domain
-await authClient.signIn.sso({
-  email: "user@company.com",
-  callbackURL: "/dashboard"
-});
+```ruby title="server.rb"
+# Automatically matches provider based on email domain
+result = auth.api.sign_in_sso(
+  body: {
+    email: "user@company.com",
+    callbackURL: "/dashboard"
+  }
+)
+redirect result.fetch(:url)
 ```
 
-**3. By specifying domain:**
+### 3. By specifying domain:
 
-```typescript
-// Explicitly specify domain for matching
-await authClient.signIn.sso({
-  domain: "partner.com",
-  callbackURL: "/dashboard"
-});
+```ruby title="server.rb"
+# Explicitly specify domain for matching
+result = auth.api.sign_in_sso(
+  body: {
+    domain: "partner.com",
+    callbackURL: "/dashboard"
+  }
+)
+redirect result.fetch(:url)
 ```
 
 **Important Notes**:
- - DummyIDP should ONLY be used for development and testing
- - Never use these certificates in production
- - The example uses `localhost:3000` - adjust URLs for your environment
- - For production, always use proper IdP providers like Okta, Azure AD, or OneLogin
- - The `callbackUrl` in your SAML config should point to your app's destination (e.g., `/dashboard`), not the callback route itself
 
-### Step 5: Dynamically Registering SAML Providers
+- DummyIDP should ONLY be used for development and testing
+- Never use test certificates in production
+- The example uses `localhost:3000` — adjust URLs for your environment
+- For production, always use proper IdP providers like Okta, Azure AD, or OneLogin
+- `callbackUrl` in your SAML config should point to your app's destination (e.g., `/dashboard`), not the callback route itself
 
-For dynamic registration, you should register SAML providers using the API. See the [SSO Plugin Documentation](/docs/plugins/sso#register-a-saml-provider) for detailed registration instructions.
+## Step 6: Handling the SAML Callback
 
-Example registration:
+Better Auth exposes the ACS endpoint at `POST /api/auth/sso/saml2/sp/acs/:provider_id`. In a Rack app you mount `auth` and the router handles it automatically. If you need to proxy the callback in a Rails controller:
 
-```typescript
-await authClient.sso.register({
-  providerId: "okta-prod",
-  issuer: "https://your-domain.com",
-  domain: "your-domain.com",
-  samlConfig: {
-    // Your production SAML configuration
+```ruby title="app/controllers/saml_callbacks_controller.rb"
+class SamlCallbacksController < ApplicationController
+  skip_before_action :verify_authenticity_token, only: [:acs]
+
+  def acs
+    status, headers, body = auth.api.acs_endpoint(
+      params: {providerId: params[:provider_id]},
+      body: request.request_parameters,
+      as_response: true
+    )
+    render plain: body.join, status: status
+  end
+end
+```
+
+In most cases you do not need a custom controller — just mount the Rack app and let Better Auth handle the SAML POST.
+
+## Step 7: Dynamically Registering SAML Providers
+
+For dynamic registration, use the API:
+
+```ruby title="server.rb"
+auth.api.register_sso_provider(
+  headers: {"cookie" => admin_cookie},
+  body: {
+    providerId: "okta-prod",
+    issuer: "https://your-domain.com",
+    domain: "your-domain.com",
+    samlConfig: {
+      # Your production SAML configuration
+    }
   }
-});
+)
+```
+
+## Service Provider Metadata
+
+Retrieve the Service Provider metadata XML that needs to be configured in your Identity Provider:
+
+```ruby title="server.rb"
+metadata = auth.api.sp_metadata(query: {providerId: "okta"})
+puts metadata.fetch(:metadata)
 ```
 
 ## Additional Resources
@@ -190,4 +257,4 @@ await authClient.sso.register({
 - [Okta SAML Documentation](https://developer.okta.com/docs/concepts/saml/)
 - [SAML 2.0 Specification](https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf)
 
-*/}
+{/* Upstream SAML SSO guide is preserved in upstream/docs/content/docs/guides/saml-sso-with-okta.mdx. */}

@@ -43,12 +43,28 @@ module BetterAuth
     end
 
     def oauth_proxy_endpoint(config)
-      Endpoint.new(path: "/oauth-proxy-callback", method: "GET") do |ctx|
+      Endpoint.new(
+        path: "/oauth-proxy-callback",
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "oauthProxyCallback",
+            description: "OAuth Proxy Callback",
+            parameters: [
+              {in: "query", name: "callbackURL", required: true, schema: {type: "string", format: "uri"}},
+              {in: "query", name: "cookies", required: true, schema: {type: "string"}}
+            ],
+            responses: {
+              "302" => {description: "Redirects to the callback URL"}
+            }
+          }
+        }
+      ) do |ctx|
         query = normalize_hash(ctx.query)
         callback_url = query[:callback_url] || "/"
         oauth_proxy_validate_callback!(ctx, callback_url)
 
-        decrypted = Crypto.symmetric_decrypt(key: ctx.context.secret, data: query[:cookies].to_s)
+        decrypted = Crypto.symmetric_decrypt(key: oauth_proxy_secret(ctx, config), data: query[:cookies].to_s)
         raise ctx.redirect(oauth_proxy_error_url(ctx, "OAuthProxy - Invalid cookies or secret")) unless decrypted
 
         payload = JSON.parse(decrypted)
@@ -83,11 +99,11 @@ module BetterAuth
       nil
     end
 
-    def oauth_proxy_restore_state_package(ctx, _config)
+    def oauth_proxy_restore_state_package(ctx, config)
       state = fetch_value(ctx.query, "state") || fetch_value(ctx.body, "state")
       return if state.to_s.empty?
 
-      decrypted = Crypto.symmetric_decrypt(key: ctx.context.secret, data: state.to_s)
+      decrypted = Crypto.symmetric_decrypt(key: oauth_proxy_secret(ctx, config), data: state.to_s)
       return unless decrypted
 
       package = JSON.parse(decrypted)
@@ -121,7 +137,7 @@ module BetterAuth
       return if state_cookie.to_s.empty?
 
       encrypted_package = Crypto.symmetric_encrypt(
-        key: ctx.context.secret,
+        key: oauth_proxy_secret(ctx, config),
         data: JSON.generate({
           state: original_state,
           stateCookie: state_cookie,
@@ -160,7 +176,7 @@ module BetterAuth
       return if set_cookie.to_s.empty?
 
       encrypted = Crypto.symmetric_encrypt(
-        key: ctx.context.secret,
+        key: oauth_proxy_secret(ctx, config),
         data: JSON.generate({
           cookies: set_cookie,
           timestamp: (Time.now.to_f * 1000).to_i
@@ -178,6 +194,10 @@ module BetterAuth
       parsed = oauth_proxy_parse_set_cookie(ctx.response_headers["set-cookie"])
       exact = parsed.find { |entry| entry[:name] == cookie.name || entry[:name] == Cookies.strip_secure_cookie_prefix(cookie.name) }
       exact && exact[:value]
+    end
+
+    def oauth_proxy_secret(ctx, config)
+      config[:secret] || ctx.context.secret_config
     end
 
     def oauth_proxy_sign_in_path?(path)

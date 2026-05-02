@@ -40,7 +40,7 @@ module BetterAuth
           uri.host unless uri.host.to_s.empty?
         end
       end
-      raise Error, "base_url is required when cross_subdomain_cookies are enabled" if cross_subdomain && domain.to_s.empty?
+      raise Error, "base_url is required when cross_subdomain_cookies are enabled" if cross_subdomain && domain.to_s.empty? && !options.dynamic_base_url?
 
       custom = advanced.dig(:cookies, cookie_name.to_sym) || {}
       prefix = advanced[:cookie_prefix] || "better-auth"
@@ -112,7 +112,9 @@ module BetterAuth
       cookie = ctx.context.auth_cookies[:session_data]
       max_age = dont_remember_me ? nil : cookie.attributes[:max_age]
       data = filtered_cache_data(ctx, session)
-      value = encode_cookie_cache(data, ctx.context.secret, strategy: config[:strategy] || "compact", max_age: max_age || 60 * 5)
+      strategy = config[:strategy] || "compact"
+      secret = (strategy.to_s == "jwe") ? ctx.context.secret_config : ctx.context.secret
+      value = encode_cookie_cache(data, secret, strategy: strategy, max_age: max_age || 60 * 5)
       attributes = cookie.attributes.merge(max_age: max_age)
       store = SessionStore.new(cookie.name, attributes, ctx)
 
@@ -129,7 +131,7 @@ module BetterAuth
 
       cookie = ctx.context.auth_cookies[:account_data]
       attributes = cookie.attributes.merge(max_age: cookie.attributes[:max_age] || 60 * 5)
-      value = Crypto.symmetric_encode_jwt(stringify_keys(account_data), ctx.context.secret, "better-auth-account", expires_in: attributes[:max_age])
+      value = Crypto.symmetric_encode_jwt(stringify_keys(account_data), ctx.context.secret_config, "better-auth-account", expires_in: attributes[:max_age])
       store = SessionStore.new(cookie.name, attributes, ctx)
 
       if value.length > SessionStore::CHUNK_SIZE
@@ -145,7 +147,7 @@ module BetterAuth
       value = SessionStore.get_chunked_cookie(ctx, cookie.name)
       return nil unless value
 
-      Crypto.symmetric_decode_jwt(value, ctx.context.secret, "better-auth-account")
+      Crypto.symmetric_decode_jwt(value, ctx.context.secret_config, "better-auth-account")
     end
 
     def get_cookie_cache(request_or_cookie_header, secret:, strategy: "compact", version: nil, cookie_prefix: "better-auth", cookie_name: "session_data", is_secure: nil)

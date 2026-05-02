@@ -173,8 +173,7 @@ module BetterAuth
       end
 
       def join_select_sql(model, join)
-        join.flat_map do |join_model, _enabled|
-          join_model = join_model.to_s
+        normalized_join(model, join).flat_map do |join_model, _config|
           schema_for(join_model).fetch(:fields).map do |field, attributes|
             column = attributes[:field_name] || physical_name(field)
             "#{quote(join_model)}.#{quote(column)} AS #{quote("#{join_model}__#{column}")}"
@@ -185,17 +184,79 @@ module BetterAuth
       def join_sql(model, join)
         return "" unless join
 
-        join.map do |join_model, _enabled|
-          join_model = join_model.to_s
-          case [model, join_model]
-          when ["session", "user"], ["account", "user"]
-            " LEFT JOIN #{quote(table_for("user"))} AS #{quote("user")} ON #{quote("user")}.#{quote("id")} = #{quote(table_for(model))}.#{quote("user_id")}"
-          when ["user", "account"]
-            " LEFT JOIN #{quote(table_for("account"))} AS #{quote("account")} ON #{quote("account")}.#{quote("user_id")} = #{quote(table_for(model))}.#{quote("id")}"
-          else
-            ""
-          end
+        normalized_join(model, join).map do |join_model, config|
+          local_field = storage_field(model, config.fetch(:from))
+          foreign_field = storage_field(join_model, config.fetch(:to))
+          " LEFT JOIN #{quote(table_for(join_model))} AS #{quote(join_model)} ON #{quote(join_model)}.#{quote(foreign_field)} = #{quote(table_for(model))}.#{quote(local_field)}"
         end.join
+      end
+
+      def normalized_join(model, join)
+        return {} unless join
+
+        join.each_with_object({}) do |(join_model, config), result|
+          join_model = join_model.to_s
+          result[join_model] = normalize_join_config(model.to_s, join_model, config)
+        end
+      end
+
+      def normalize_join_config(model, join_model, config)
+        if config.is_a?(Hash) && (config.key?(:on) || config.key?("on"))
+          on = config[:on] || config["on"]
+          from = storage_key(fetch_key(on, :from))
+          to = storage_key(fetch_key(on, :to))
+          relation = config[:relation] || config["relation"]
+          limit = config[:limit] || config["limit"]
+          return {from: from, to: to, relation: relation, limit: limit, unique: unique_join_field?(join_model, to)}
+        end
+
+        inferred = inferred_join_config(model, join_model)
+        if config.is_a?(Hash)
+          relation = config[:relation] || config["relation"]
+          limit = config[:limit] || config["limit"]
+          inferred = inferred.merge(relation: relation) if relation
+          inferred = inferred.merge(limit: limit) if limit
+        end
+        inferred
+      end
+
+      def inferred_join_config(model, join_model)
+        foreign_keys = schema_for(join_model).fetch(:fields).select do |_field, attributes|
+          reference_model_matches?(attributes, model)
+        end
+        forward_join = true
+
+        if foreign_keys.empty?
+          foreign_keys = schema_for(model).fetch(:fields).select do |_field, attributes|
+            reference_model_matches?(attributes, join_model)
+          end
+          forward_join = false
+        end
+
+        raise Error, "No foreign key found for model #{join_model} and base model #{model} while performing join operation." if foreign_keys.empty?
+        raise Error, "Multiple foreign keys found for model #{join_model} and base model #{model} while performing join operation. Only one foreign key is supported." if foreign_keys.length > 1
+
+        foreign_key, attributes = foreign_keys.first
+        reference = attributes.fetch(:references)
+        if forward_join
+          unique = attributes[:unique] == true
+          {from: reference.fetch(:field).to_s, to: foreign_key, relation: unique ? "one-to-one" : "one-to-many", unique: unique}
+        else
+          {from: foreign_key, to: reference.fetch(:field).to_s, relation: "one-to-one", unique: true}
+        end
+      end
+
+      def reference_model_matches?(attributes, model)
+        reference = attributes[:references]
+        return false unless reference
+
+        reference_model = reference[:model] || reference["model"]
+        reference_model.to_s == model.to_s || reference_model.to_s == table_for(model)
+      end
+
+      def unique_join_field?(model, field)
+        field = storage_key(field)
+        field == "id" || schema_for(model).fetch(:fields).dig(field, :unique) == true
       end
 
       def build_where(model, where, params)
@@ -303,8 +364,7 @@ module BetterAuth
           output[field] = coerce_output_value(fetch_row(row, column), attributes) if row_key?(row, column)
         end
 
-        join&.each_key do |join_model|
-          join_model = join_model.to_s
+        normalized_join(model, join).each_key do |join_model|
           record[join_model] = normalize_joined_record(join_model, row)
         end
 
@@ -320,16 +380,34 @@ module BetterAuth
       end
 
       def collection_join?(model, join)
-        model == "user" && join&.keys&.any? { |join_model| join_model.to_s == "account" }
+        normalized_join(model, join).any? do |_join_model, config|
+          config[:relation] != "one-to-one" && config[:unique] != true
+        end
       end
 
-      def aggregate_collection_joins(_model, records, _join)
+      def aggregate_collection_joins(model, records, join)
+        join_config = normalized_join(model, join)
         grouped = {}
         records.each do |record|
           key = record.fetch("id")
-          grouped[key] ||= record.merge("account" => [])
-          account = record["account"]
-          grouped[key]["account"] << account if account&.values&.any?
+          grouped[key] ||= begin
+            base = record.reject { |field, _value| join_config.key?(field) }
+            join_defaults = join_config.each_with_object({}) do |(join_model, config), defaults|
+              defaults[join_model] = (config[:relation] == "one-to-one" || config[:unique] == true) ? nil : []
+            end
+            base.merge(join_defaults)
+          end
+
+          join_config.each do |join_model, config|
+            joined = record[join_model]
+            next unless joined&.values&.any?
+
+            if config[:relation] == "one-to-one" || config[:unique] == true
+              grouped[key][join_model] = joined
+            else
+              grouped[key][join_model] << joined
+            end
+          end
         end
         grouped.values
       end

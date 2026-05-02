@@ -1,10 +1,5 @@
 # frozen_string_literal: true
 
-require "base64"
-require "json"
-require "uri"
-require "webauthn"
-
 module BetterAuth
   module Plugins
     singleton_class.remove_method(:passkey) if singleton_class.method_defined?(:passkey)
@@ -12,24 +7,8 @@ module BetterAuth
 
     module_function
 
-    PASSKEY_ERROR_CODES = {
-      "CHALLENGE_NOT_FOUND" => "Challenge not found",
-      "YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY" => "You are not allowed to register this passkey",
-      "FAILED_TO_VERIFY_REGISTRATION" => "Failed to verify registration",
-      "PASSKEY_NOT_FOUND" => "Passkey not found",
-      "AUTHENTICATION_FAILED" => "Authentication failed",
-      "UNABLE_TO_CREATE_SESSION" => "Unable to create session",
-      "FAILED_TO_UPDATE_PASSKEY" => "Failed to update passkey",
-      "PREVIOUSLY_REGISTERED" => "Previously registered",
-      "REGISTRATION_CANCELLED" => "Registration cancelled",
-      "AUTH_CANCELLED" => "Auth cancelled",
-      "UNKNOWN_ERROR" => "Unknown error",
-      "SESSION_REQUIRED" => "Passkey registration requires an authenticated session",
-      "RESOLVE_USER_REQUIRED" => "Passkey registration requires either an authenticated session or a resolveUser callback when requireSession is false",
-      "RESOLVED_USER_INVALID" => "Resolved user is invalid"
-    }.freeze
-
-    PASSKEY_CHALLENGE_MAX_AGE = 60 * 5
+    PASSKEY_ERROR_CODES = BetterAuth::Passkey::ErrorCodes::PASSKEY_ERROR_CODES
+    PASSKEY_CHALLENGE_MAX_AGE = BetterAuth::Passkey::Challenges::CHALLENGE_MAX_AGE
 
     def passkey(options = {})
       config = {
@@ -37,7 +16,7 @@ module BetterAuth
         advanced: {
           web_authn_challenge_cookie: "better-auth-passkey"
         }
-      }.merge(normalize_hash(options))
+      }.merge(BetterAuth::Passkey::Utils.normalize_hash(options))
       config[:advanced] = {
         web_authn_challenge_cookie: "better-auth-passkey"
       }.merge(config[:advanced] || {})
@@ -60,476 +39,131 @@ module BetterAuth
     end
 
     def generate_passkey_registration_options_endpoint(config)
-      Endpoint.new(path: "/passkey/generate-register-options", method: "GET") do |ctx|
-        query = normalize_hash(ctx.query)
-        passkey_validate_authenticator_attachment!(query[:authenticator_attachment])
-        user = passkey_resolve_registration_user(config, ctx, query)
-        relying_party = passkey_relying_party(config, ctx)
-        existing = ctx.context.adapter.find_many(model: "passkey", where: [{field: "userId", value: user.fetch("id")}])
-        options = WebAuthn::Credential.options_for_create(
-          user: {
-            id: Crypto.random_string(32).downcase,
-            name: query[:name].to_s.empty? ? (user["email"] || user["name"] || user["id"]) : query[:name].to_s,
-            display_name: user["displayName"] || user["display_name"] || user["email"] || user["name"] || user["id"]
-          },
-          exclude: existing.map { |passkey| passkey_credential_id(passkey) },
-          authenticator_selection: passkey_authenticator_selection(config, query),
-          extensions: passkey_resolve_extensions(config.dig(:registration, :extensions), ctx),
-          relying_party: relying_party
-        )
-        passkey_store_challenge(ctx, config, options.challenge, {
-          id: user.fetch("id"),
-          name: user["name"] || user["email"] || user["id"],
-          displayName: user["displayName"] || user["display_name"]
-        }.compact)
-        ctx.json(options.as_json.merge(attestation: "none", excludeCredentials: existing.map { |passkey| passkey_credential_descriptor(passkey, kind: :exclude) }))
-      end
-    end
-
-    def generate_passkey_authentication_options_endpoint(config)
-      Endpoint.new(path: "/passkey/generate-authenticate-options", method: "GET") do |ctx|
-        session = Routes.current_session(ctx, allow_nil: true)
-        relying_party = passkey_relying_party(config, ctx)
-        passkeys = if session
-          ctx.context.adapter.find_many(model: "passkey", where: [{field: "userId", value: session.fetch(:user).fetch("id")}])
-        else
-          []
-        end
-        get_options = {
-          extensions: passkey_resolve_extensions(config.dig(:authentication, :extensions), ctx),
-          relying_party: relying_party
-        }
-        get_options[:allow] = passkeys.map { |passkey| passkey_credential_id(passkey) } if passkeys.any?
-        options = WebAuthn::Credential.options_for_get(**get_options)
-        passkey_store_challenge(ctx, config, options.challenge, session ? session.fetch(:user).fetch("id") : "")
-        payload = options.as_json.merge(userVerification: "preferred")
-        if passkeys.any?
-          payload[:allowCredentials] = passkeys.map { |passkey| passkey_credential_descriptor(passkey) }
-        else
-          payload.delete(:allowCredentials)
-          payload.delete("allowCredentials")
-        end
-        ctx.json(payload)
-      end
+      BetterAuth::Passkey::Routes::Registration.generate_passkey_registration_options_endpoint(config)
     end
 
     def verify_passkey_registration_endpoint(config)
-      Endpoint.new(path: "/passkey/verify-registration", method: "POST") do |ctx|
-        body = normalize_hash(ctx.body)
-        passkey_require_key!(body, :response)
-        require_session = config.dig(:registration, :require_session) != false
-        session = require_session ? Routes.current_session(ctx, sensitive: true) : Routes.current_session(ctx, allow_nil: true)
-        origin = passkey_origin(config, ctx)
-        raise APIError.new("BAD_REQUEST", message: PASSKEY_ERROR_CODES.fetch("FAILED_TO_VERIFY_REGISTRATION")) if origin.to_s.empty?
+      BetterAuth::Passkey::Routes::Registration.verify_passkey_registration_endpoint(config)
+    end
 
-        verification_token = passkey_challenge_token(ctx, config)
-        raise APIError.new("BAD_REQUEST", message: PASSKEY_ERROR_CODES.fetch("CHALLENGE_NOT_FOUND")) unless verification_token
-
-        challenge = passkey_find_challenge(ctx, verification_token)
-        unless challenge
-          raise APIError.new("BAD_REQUEST", message: PASSKEY_ERROR_CODES.fetch("CHALLENGE_NOT_FOUND"))
-        end
-        if session && challenge.fetch("userData").fetch("id") != session.fetch(:user).fetch("id")
-          raise APIError.new("UNAUTHORIZED", message: PASSKEY_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY"))
-        end
-
-        response = passkey_webauthn_response(body[:response])
-        relying_party = passkey_relying_party(config, ctx, origin: origin)
-        credential = WebAuthn::Credential.from_create(response, relying_party: relying_party)
-        credential.verify(challenge.fetch("expectedChallenge"), user_verification: false)
-        authenticator_data = passkey_authenticator_data(credential)
-        target_user_id = passkey_after_registration_verification_user_id(config, ctx, credential, challenge, response, session)
-        data = ctx.context.adapter.create(
-          model: "passkey",
-          data: {
-            name: body[:name],
-            userId: target_user_id,
-            credentialID: credential.id,
-            publicKey: Base64.strict_encode64(credential.public_key),
-            counter: credential.sign_count,
-            deviceType: authenticator_data&.credential_backup_eligible? ? "multiDevice" : "singleDevice",
-            backedUp: authenticator_data&.credential_backed_up? || false,
-            transports: Array(passkey_attestation_response(credential)&.transports).join(","),
-            createdAt: Time.now,
-            aaguid: passkey_attestation_response(credential)&.aaguid
-          }
-        )
-        ctx.context.internal_adapter.delete_verification_by_identifier(verification_token)
-        ctx.json(passkey_wire(data))
-      rescue WebAuthn::Error => error
-        ctx.context.logger&.error("Failed to verify registration", error)
-        raise APIError.new("INTERNAL_SERVER_ERROR", message: PASSKEY_ERROR_CODES.fetch("FAILED_TO_VERIFY_REGISTRATION"))
-      end
+    def generate_passkey_authentication_options_endpoint(config)
+      BetterAuth::Passkey::Routes::Authentication.generate_passkey_authentication_options_endpoint(config)
     end
 
     def verify_passkey_authentication_endpoint(config)
-      Endpoint.new(path: "/passkey/verify-authentication", method: "POST") do |ctx|
-        body = normalize_hash(ctx.body)
-        passkey_require_key!(body, :response)
-        origin = passkey_origin(config, ctx)
-        raise APIError.new("BAD_REQUEST", message: "origin missing") if origin.to_s.empty?
-
-        verification_token = passkey_challenge_token(ctx, config)
-        raise APIError.new("BAD_REQUEST", message: PASSKEY_ERROR_CODES.fetch("CHALLENGE_NOT_FOUND")) unless verification_token
-
-        challenge = passkey_find_challenge(ctx, verification_token)
-        raise APIError.new("BAD_REQUEST", message: PASSKEY_ERROR_CODES.fetch("CHALLENGE_NOT_FOUND")) unless challenge
-
-        response = passkey_webauthn_response(body[:response])
-        credential_id = response.fetch("id")
-        passkey = ctx.context.adapter.find_one(model: "passkey", where: [{field: "credentialID", value: credential_id}])
-        raise APIError.new("UNAUTHORIZED", message: PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND")) unless passkey
-
-        relying_party = passkey_relying_party(config, ctx, origin: origin)
-        credential = WebAuthn::Credential.from_get(response, relying_party: relying_party)
-        credential.verify(
-          challenge.fetch("expectedChallenge"),
-          public_key: Base64.strict_decode64(passkey.fetch("publicKey")),
-          sign_count: passkey.fetch("counter").to_i,
-          user_verification: false
-        )
-        passkey_call_callback(config.dig(:authentication, :after_verification), {
-          ctx: ctx,
-          verification: credential,
-          client_data: response
-        })
-        ctx.context.adapter.update(
-          model: "passkey",
-          where: [{field: "id", value: passkey.fetch("id")}],
-          update: {counter: credential.sign_count}
-        )
-        session = ctx.context.internal_adapter.create_session(passkey.fetch("userId"))
-        raise APIError.new("INTERNAL_SERVER_ERROR", message: PASSKEY_ERROR_CODES.fetch("UNABLE_TO_CREATE_SESSION")) unless session
-
-        user = ctx.context.internal_adapter.find_user_by_id(passkey.fetch("userId"))
-        raise APIError.new("INTERNAL_SERVER_ERROR", message: "User not found") unless user
-
-        Cookies.set_session_cookie(ctx, {session: session, user: user})
-        ctx.context.internal_adapter.delete_verification_by_identifier(verification_token)
-        ctx.json({session: session, user: user})
-      rescue WebAuthn::Error, ArgumentError => error
-        ctx.context.logger&.error("Failed to verify authentication", error)
-        raise APIError.new("BAD_REQUEST", message: PASSKEY_ERROR_CODES.fetch("AUTHENTICATION_FAILED"))
-      end
+      BetterAuth::Passkey::Routes::Authentication.verify_passkey_authentication_endpoint(config)
     end
 
     def list_passkeys_endpoint
-      Endpoint.new(path: "/passkey/list-user-passkeys", method: "GET") do |ctx|
-        session = Routes.current_session(ctx)
-        passkeys = ctx.context.adapter.find_many(model: "passkey", where: [{field: "userId", value: session.fetch(:user).fetch("id")}])
-        ctx.json(passkeys.map { |passkey| passkey_wire(passkey) })
-      end
+      BetterAuth::Passkey::Routes::Management.list_passkeys_endpoint
     end
 
     def delete_passkey_endpoint
-      Endpoint.new(path: "/passkey/delete-passkey", method: "POST") do |ctx|
-        session = Routes.current_session(ctx)
-        body = normalize_hash(ctx.body)
-        passkey_require_string!(body, :id)
-        passkey = ctx.context.adapter.find_one(model: "passkey", where: [{field: "id", value: body[:id]}])
-        raise APIError.new("NOT_FOUND", message: PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND")) unless passkey
-        unless passkey.fetch("userId") == session.fetch(:user).fetch("id")
-          raise APIError.new("UNAUTHORIZED", message: PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND"))
-        end
-
-        ctx.context.adapter.delete(model: "passkey", where: [{field: "id", value: passkey.fetch("id")}])
-        ctx.json({status: true})
-      end
+      BetterAuth::Passkey::Routes::Management.delete_passkey_endpoint
     end
 
     def update_passkey_endpoint
-      Endpoint.new(path: "/passkey/update-passkey", method: "POST") do |ctx|
-        session = Routes.current_session(ctx)
-        body = normalize_hash(ctx.body)
-        passkey_require_string!(body, :id)
-        unless body.key?(:name) && body[:name].is_a?(String)
-          raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES.fetch("VALIDATION_ERROR"))
-        end
-
-        passkey = ctx.context.adapter.find_one(model: "passkey", where: [{field: "id", value: body[:id]}])
-        raise APIError.new("NOT_FOUND", message: PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND")) unless passkey
-        if passkey.fetch("userId") != session.fetch(:user).fetch("id")
-          raise APIError.new("UNAUTHORIZED", message: PASSKEY_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY"))
-        end
-
-        updated = ctx.context.adapter.update(
-          model: "passkey",
-          where: [{field: "id", value: body[:id]}],
-          update: {name: body[:name].to_s}
-        )
-        raise APIError.new("INTERNAL_SERVER_ERROR", message: PASSKEY_ERROR_CODES.fetch("FAILED_TO_UPDATE_PASSKEY")) unless updated
-
-        ctx.json({passkey: passkey_wire(updated)})
-      end
+      BetterAuth::Passkey::Routes::Management.update_passkey_endpoint
     end
 
     def passkey_schema(custom_schema = nil)
-      base = {
-        passkey: {
-          model_name: "passkeys",
-          fields: {
-            name: {type: "string", required: false},
-            publicKey: {type: "string", required: true},
-            userId: {type: "string", references: {model: "user", field: "id"}, required: true, index: true},
-            credentialID: {type: "string", required: true, index: true},
-            counter: {type: "number", required: true},
-            deviceType: {type: "string", required: true},
-            backedUp: {type: "boolean", required: true},
-            transports: {type: "string", required: false},
-            createdAt: {type: "date", required: false},
-            aaguid: {type: "string", required: false}
-          }
-        }
-      }
-      passkey_deep_merge_hashes(normalize_hash(base), normalize_hash(custom_schema || {}))
+      BetterAuth::Passkey::Schema.passkey_schema(custom_schema)
     end
 
     def passkey_store_challenge(ctx, config, challenge, user_id)
-      user_data = user_id.is_a?(Hash) ? user_id : {id: user_id}
-      verification_token = Crypto.random_string(32)
-      cookie = passkey_challenge_cookie(ctx, config)
-      ctx.set_signed_cookie(cookie.name, verification_token, ctx.context.secret, cookie.attributes.merge(max_age: PASSKEY_CHALLENGE_MAX_AGE))
-      ctx.context.internal_adapter.create_verification_value(
-        identifier: verification_token,
-        value: JSON.generate({
-          expectedChallenge: challenge,
-          userData: user_data,
-          context: normalize_hash(ctx.query)[:context]
-        }),
-        expiresAt: Time.now + PASSKEY_CHALLENGE_MAX_AGE
-      )
+      BetterAuth::Passkey::Challenges.store_challenge(ctx, config, challenge, user_id)
     end
 
     def passkey_find_challenge(ctx, verification_token)
-      verification = ctx.context.internal_adapter.find_verification_value(verification_token)
-      return nil unless verification && !Routes.expired_time?(verification["expiresAt"])
-
-      JSON.parse(verification.fetch("value"))
-    rescue JSON::ParserError
-      nil
+      BetterAuth::Passkey::Challenges.find_challenge(ctx, verification_token)
     end
 
     def passkey_challenge_token(ctx, config)
-      ctx.get_signed_cookie(passkey_challenge_cookie(ctx, config).name, ctx.context.secret)
+      BetterAuth::Passkey::Challenges.challenge_token(ctx, config)
     end
 
     def passkey_challenge_cookie(ctx, config)
-      ctx.context.create_auth_cookie(config.dig(:advanced, :web_authn_challenge_cookie), max_age: PASSKEY_CHALLENGE_MAX_AGE)
+      BetterAuth::Passkey::Challenges.challenge_cookie(ctx, config)
     end
 
     def passkey_relying_party(config, ctx, origin: nil)
-      WebAuthn::RelyingParty.new(
-        id: passkey_rp_id(config, ctx),
-        name: config[:rp_name] || ctx.context.app_name,
-        allowed_origins: passkey_allowed_origins(config, ctx, origin: origin)
-      )
+      BetterAuth::Passkey::Utils.relying_party(config, ctx, origin: origin)
     end
 
     def passkey_origin(config, ctx)
-      config[:origin] || ctx.headers["origin"]
+      BetterAuth::Passkey::Utils.origin(config, ctx)
     end
 
     def passkey_allowed_origins(config, ctx, origin: nil)
-      Array(origin || config[:origin] || ctx.context.options.base_url).compact
+      BetterAuth::Passkey::Utils.allowed_origins(config, ctx, origin: origin)
     end
 
     def passkey_rp_id(config, ctx)
-      return config[:rp_id] if config[:rp_id]
-
-      base_url = ctx.context.options.base_url.to_s
-      return "localhost" if base_url.empty?
-
-      URI.parse(base_url).host || "localhost"
-    rescue URI::InvalidURIError
-      "localhost"
+      BetterAuth::Passkey::Utils.rp_id(config, ctx)
     end
 
     def passkey_authenticator_selection(config, query)
-      selection = normalize_hash(config[:authenticator_selection] || {})
-      attachment = query[:authenticator_attachment]
-      selection[:authenticator_attachment] = attachment if attachment
-      {
-        resident_key: selection[:resident_key] || "preferred",
-        user_verification: selection[:user_verification] || "preferred",
-        authenticator_attachment: selection[:authenticator_attachment]
-      }.compact
+      BetterAuth::Passkey::Utils.authenticator_selection(config, query)
     end
 
     def passkey_validate_authenticator_attachment!(value)
-      return if value.nil? || ["platform", "cross-platform"].include?(value)
-
-      raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES.fetch("VALIDATION_ERROR"))
+      BetterAuth::Passkey::Utils.validate_authenticator_attachment!(value)
     end
 
     def passkey_require_key!(body, key)
-      return if body.key?(key)
-
-      raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES.fetch("VALIDATION_ERROR"))
+      BetterAuth::Passkey::Utils.require_key!(body, key)
     end
 
     def passkey_require_string!(body, key)
-      passkey_require_key!(body, key)
-      return if body[key].is_a?(String)
-
-      raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES.fetch("VALIDATION_ERROR"))
+      BetterAuth::Passkey::Utils.require_string!(body, key)
     end
 
     def passkey_resolve_registration_user(config, ctx, query)
-      require_session = config.dig(:registration, :require_session) != false
-      if require_session
-        session = Routes.current_session(ctx, sensitive: true)
-        user = session.fetch(:user)
-        return passkey_registration_user_data(
-          id: user.fetch("id"),
-          name: user["email"] || user["id"],
-          display_name: user["email"] || user["id"],
-          email: user["email"]
-        )
-      end
-
-      session = Routes.current_session(ctx, allow_nil: true)
-      if session
-        user = session.fetch(:user)
-        return passkey_registration_user_data(
-          id: user.fetch("id"),
-          name: user["email"] || user["id"],
-          display_name: user["email"] || user["id"],
-          email: user["email"]
-        )
-      end
-
-      resolver = config.dig(:registration, :resolve_user)
-      unless resolver.respond_to?(:call)
-        raise APIError.new("BAD_REQUEST", message: PASSKEY_ERROR_CODES.fetch("RESOLVE_USER_REQUIRED"))
-      end
-
-      resolved = normalize_hash(passkey_call_callback(resolver, {ctx: ctx, context: query[:context]}) || {})
-      unless resolved[:id].to_s != "" && resolved[:name].to_s != ""
-        raise APIError.new("BAD_REQUEST", message: PASSKEY_ERROR_CODES.fetch("RESOLVED_USER_INVALID"))
-      end
-
-      passkey_registration_user_data(
-        id: resolved[:id],
-        name: resolved[:name],
-        display_name: resolved[:display_name],
-        email: resolved[:email]
-      )
+      BetterAuth::Passkey::Utils.resolve_registration_user(config, ctx, query)
     end
 
     def passkey_registration_user_data(id:, name:, display_name: nil, email: nil)
-      {
-        "id" => id,
-        "name" => name,
-        "displayName" => display_name,
-        "email" => email
-      }.compact
+      BetterAuth::Passkey::Utils.registration_user_data(id: id, name: name, display_name: display_name, email: email)
     end
 
     def passkey_resolve_extensions(extensions, ctx)
-      return nil unless extensions
-
-      normalize_hash(extensions.respond_to?(:call) ? passkey_call_callback(extensions, {ctx: ctx}) : extensions)
+      BetterAuth::Passkey::Utils.resolve_extensions(extensions, ctx)
     end
 
     def passkey_after_registration_verification_user_id(config, ctx, credential, challenge, response, session)
-      user_data = challenge.fetch("userData")
-      target_user_id = user_data.fetch("id")
-      callback = config.dig(:registration, :after_verification)
-      return target_user_id unless callback.respond_to?(:call)
-
-      result = normalize_hash(passkey_call_callback(callback, {
-        ctx: ctx,
-        verification: credential,
-        user: {
-          id: user_data.fetch("id"),
-          name: user_data["name"] || user_data.fetch("id"),
-          display_name: user_data["displayName"] || user_data["display_name"]
-        },
-        client_data: response,
-        context: challenge["context"]
-      }) || {})
-      returned_user_id = result[:user_id]
-      return target_user_id if returned_user_id.nil? || returned_user_id == ""
-
-      unless returned_user_id.is_a?(String) && returned_user_id.length.positive?
-        raise APIError.new("BAD_REQUEST", message: PASSKEY_ERROR_CODES.fetch("RESOLVED_USER_INVALID"))
-      end
-
-      if session && returned_user_id != session.fetch(:user).fetch("id")
-        raise APIError.new("UNAUTHORIZED", message: PASSKEY_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY"))
-      end
-
-      returned_user_id
+      BetterAuth::Passkey::Utils.after_registration_verification_user_id(config, ctx, credential, challenge, response, session)
     end
 
     def passkey_call_callback(callback, data)
-      return nil unless callback.respond_to?(:call)
-
-      if callback.parameters.any? { |kind, _name| [:key, :keyreq, :keyrest].include?(kind) }
-        callback.call(**data)
-      else
-        callback.call(data)
-      end
+      BetterAuth::Passkey::Utils.call_callback(callback, data)
     end
 
     def passkey_webauthn_response(value)
-      data = normalize_hash(value || {})
-      response = normalize_hash(data[:response] || {})
-      webauthn = {
-        "type" => data[:type],
-        "id" => data[:id],
-        "rawId" => data[:raw_id],
-        "authenticatorAttachment" => data[:authenticator_attachment],
-        "clientExtensionResults" => data[:client_extension_results] || {},
-        "response" => {
-          "attestationObject" => response[:attestation_object],
-          "clientDataJSON" => response[:client_data_json],
-          "transports" => response[:transports],
-          "authenticatorData" => response[:authenticator_data],
-          "signature" => response[:signature],
-          "userHandle" => response[:user_handle]
-        }.compact
-      }.compact
-      webauthn["rawId"] ||= webauthn["id"]
-      webauthn
+      BetterAuth::Passkey::Credentials.webauthn_response(value)
     end
 
     def passkey_attestation_response(credential)
-      credential.instance_variable_get(:@response)
+      BetterAuth::Passkey::Credentials.attestation_response(credential)
     end
 
     def passkey_authenticator_data(credential)
-      passkey_attestation_response(credential)&.authenticator_data
+      BetterAuth::Passkey::Credentials.authenticator_data(credential)
     end
 
     def passkey_wire(record)
-      return record unless record.is_a?(Hash)
-
-      output = record.dup
-      output["credentialID"] = output.delete("credentialId") if output.key?("credentialId")
-      output
+      BetterAuth::Passkey::Credentials.wire(record)
     end
 
     def passkey_credential_id(record)
-      record["credentialID"] || record["credentialId"] || record[:credentialID] || record[:credential_id]
+      BetterAuth::Passkey::Credentials.credential_id(record)
     end
 
     def passkey_credential_descriptor(record, kind: :allow)
-      descriptor = {id: passkey_credential_id(record)}
-      descriptor[:type] = "public-key" if kind == :allow
-      transports = (record["transports"] || record[:transports]).to_s.split(",").map(&:strip).reject(&:empty?)
-      descriptor[:transports] = transports if transports.any?
-      descriptor
+      BetterAuth::Passkey::Credentials.credential_descriptor(record, kind: kind)
     end
 
     def passkey_deep_merge_hashes(base, override)
-      base.merge(override) do |_key, old_value, new_value|
-        if old_value.is_a?(Hash) && new_value.is_a?(Hash)
-          passkey_deep_merge_hashes(old_value, new_value)
-        else
-          new_value
-        end
-      end
+      BetterAuth::Passkey::Schema.deep_merge_hashes(base, override)
     end
   end
 end

@@ -4,6 +4,7 @@
   "pages": [
     "introduction",
     "supported-features",
+    "comparison",
     "installation",
     "basic-usage",
     "integrations/rack",
@@ -12,6 +13,7 @@
     "email-password/sign-in-and-sign-up",
     "email-password/password-reset",
     "email-password/configuration",
-    "social-sign-on/apple"
+    "social-sign-on/apple",
+    "ai-resources"
   ]
 }

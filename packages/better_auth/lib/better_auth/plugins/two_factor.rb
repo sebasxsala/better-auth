@@ -79,13 +79,13 @@ module BetterAuth
     end
 
     def two_factor_enable_endpoint(config)
-      Endpoint.new(path: "/two-factor/enable", method: "POST") do |ctx|
-        session = Routes.current_session(ctx, sensitive: true)
+      Endpoint.new(path: "/two-factor/enable", method: "POST", metadata: two_factor_openapi("enableTwoFactor", "Enable two factor authentication", two_factor_enable_response_schema)) do |ctx|
+        session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         two_factor_check_password!(ctx, session[:user]["id"], body[:password], allow_passwordless: config[:allow_passwordless])
 
         secret = two_factor_generate_secret
-        backup = two_factor_generate_backup_codes(ctx.context.secret, config[:backup_code_options])
+        backup = two_factor_generate_backup_codes(ctx.context.secret_config, config[:backup_code_options])
         if config[:skip_verification_on_enable]
           updated_user = ctx.context.internal_adapter.update_user(session[:user]["id"], twoFactorEnabled: true)
           new_session = ctx.context.internal_adapter.create_session(updated_user["id"], false)
@@ -99,7 +99,7 @@ module BetterAuth
         ctx.context.adapter.create(
           model: TWO_FACTOR_MODEL,
           data: {
-            secret: Crypto.symmetric_encrypt(key: ctx.context.secret, data: secret),
+            secret: Crypto.symmetric_encrypt(key: ctx.context.secret_config, data: secret),
             backupCodes: backup[:stored],
             userId: session[:user]["id"],
             verified: verified
@@ -115,8 +115,8 @@ module BetterAuth
     end
 
     def two_factor_disable_endpoint(config)
-      Endpoint.new(path: "/two-factor/disable", method: "POST") do |ctx|
-        session = Routes.current_session(ctx, sensitive: true)
+      Endpoint.new(path: "/two-factor/disable", method: "POST", metadata: two_factor_openapi("disableTwoFactor", "Disable two factor authentication", OpenAPI.status_response_schema)) do |ctx|
+        session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         two_factor_check_password!(ctx, session[:user]["id"], body[:password], allow_passwordless: config[:allow_passwordless])
 
@@ -138,7 +138,7 @@ module BetterAuth
     end
 
     def two_factor_generate_totp_endpoint(config)
-      Endpoint.new(path: "/totp/generate", method: "POST") do |ctx|
+      Endpoint.new(path: "/totp/generate", method: "POST", metadata: two_factor_openapi("generateTOTP", "Generate a TOTP code", OpenAPI.object_schema({code: {type: "string"}}, required: ["code"]))) do |ctx|
         two_factor_totp_enabled!(config)
         body = normalize_hash(ctx.body)
         ctx.json({code: two_factor_totp(body[:secret], options: config[:totp_options])})
@@ -146,20 +146,20 @@ module BetterAuth
     end
 
     def two_factor_get_totp_uri_endpoint(config)
-      Endpoint.new(path: "/two-factor/get-totp-uri", method: "POST") do |ctx|
+      Endpoint.new(path: "/two-factor/get-totp-uri", method: "POST", metadata: two_factor_openapi("getTOTPURI", "Get the TOTP URI", OpenAPI.object_schema({totpURI: {type: "string"}}, required: ["totpURI"]))) do |ctx|
         two_factor_totp_enabled!(config)
-        session = Routes.current_session(ctx, sensitive: true)
+        session = Routes.current_session(ctx)
         two_factor_check_password!(ctx, session[:user]["id"], normalize_hash(ctx.body)[:password], allow_passwordless: config[:totp_options][:allow_passwordless])
         record = two_factor_record(ctx, config, session[:user]["id"])
         raise APIError.new("BAD_REQUEST", message: TWO_FACTOR_ERROR_CODES["TOTP_NOT_ENABLED"]) unless record
 
-        secret = Crypto.symmetric_decrypt(key: ctx.context.secret, data: record["secret"])
+        secret = Crypto.symmetric_decrypt(key: ctx.context.secret_config, data: record["secret"])
         ctx.json({totpURI: two_factor_totp_uri(secret, issuer: config[:issuer] || ctx.context.app_name, account: session[:user]["email"], options: config[:totp_options])})
       end
     end
 
     def two_factor_verify_totp_endpoint(config)
-      Endpoint.new(path: "/two-factor/verify-totp", method: "POST") do |ctx|
+      Endpoint.new(path: "/two-factor/verify-totp", method: "POST", metadata: two_factor_openapi("verifyTOTP", "Verify a TOTP code", two_factor_verification_response_schema)) do |ctx|
         two_factor_totp_enabled!(config)
         body = normalize_hash(ctx.body)
         data = two_factor_verification_context(ctx, config)
@@ -169,7 +169,7 @@ module BetterAuth
           raise APIError.new("BAD_REQUEST", message: TWO_FACTOR_ERROR_CODES["TOTP_NOT_ENABLED"])
         end
 
-        secret = Crypto.symmetric_decrypt(key: ctx.context.secret, data: record["secret"])
+        secret = Crypto.symmetric_decrypt(key: ctx.context.secret_config, data: record["secret"])
         raise APIError.new("UNAUTHORIZED", message: TWO_FACTOR_ERROR_CODES["INVALID_CODE"]) unless two_factor_totp_valid?(secret, body[:code], options: config[:totp_options])
 
         if record["verified"] != true
@@ -191,7 +191,7 @@ module BetterAuth
     end
 
     def two_factor_send_otp_endpoint(config)
-      Endpoint.new(path: "/two-factor/send-otp", method: "POST") do |ctx|
+      Endpoint.new(path: "/two-factor/send-otp", method: "POST", metadata: two_factor_openapi("sendTwoFactorOTP", "Send a two factor OTP", OpenAPI.status_response_schema)) do |ctx|
         otp_config = config[:otp_options]
         sender = otp_config[:send_otp]
         unless sender.respond_to?(:call)
@@ -212,7 +212,7 @@ module BetterAuth
     end
 
     def two_factor_verify_otp_endpoint(config)
-      Endpoint.new(path: "/two-factor/verify-otp", method: "POST") do |ctx|
+      Endpoint.new(path: "/two-factor/verify-otp", method: "POST", metadata: two_factor_openapi("verifyTwoFactorOTP", "Verify a two factor OTP", two_factor_verification_response_schema)) do |ctx|
         body = normalize_hash(ctx.body)
         data = two_factor_verification_context(ctx, config)
         verification = ctx.context.internal_adapter.find_verification_value("2fa-otp-#{data[:key]}")
@@ -246,19 +246,19 @@ module BetterAuth
     end
 
     def two_factor_verify_backup_code_endpoint(config)
-      Endpoint.new(path: "/two-factor/verify-backup-code", method: "POST") do |ctx|
+      Endpoint.new(path: "/two-factor/verify-backup-code", method: "POST", metadata: two_factor_openapi("verifyBackupCode", "Verify a two factor backup code", two_factor_verification_response_schema)) do |ctx|
         body = normalize_hash(ctx.body)
         data = two_factor_verification_context(ctx, config)
         record = two_factor_record(ctx, config, data[:session][:user]["id"])
         raise APIError.new("BAD_REQUEST", message: TWO_FACTOR_ERROR_CODES["BACKUP_CODES_NOT_ENABLED"]) unless record
 
-        codes = two_factor_read_backup_codes(ctx.context.secret, record["backupCodes"], config[:backup_code_options])
+        codes = two_factor_read_backup_codes(ctx.context.secret_config, record["backupCodes"], config[:backup_code_options])
         unless codes.include?(body[:code].to_s)
           raise APIError.new("UNAUTHORIZED", message: TWO_FACTOR_ERROR_CODES["INVALID_BACKUP_CODE"])
         end
 
         remaining = codes.reject { |code| code == body[:code].to_s }
-        stored = two_factor_store_backup_codes(ctx.context.secret, remaining, config[:backup_code_options])
+        stored = two_factor_store_backup_codes(ctx.context.secret_config, remaining, config[:backup_code_options])
         updated = ctx.context.adapter.update(
           model: TWO_FACTOR_MODEL,
           where: [{field: "id", value: record["id"]}, {field: "backupCodes", value: record["backupCodes"]}],
@@ -271,15 +271,15 @@ module BetterAuth
     end
 
     def two_factor_generate_backup_codes_endpoint(config)
-      Endpoint.new(path: "/two-factor/generate-backup-codes", method: "POST") do |ctx|
-        session = Routes.current_session(ctx, sensitive: true)
+      Endpoint.new(path: "/two-factor/generate-backup-codes", method: "POST", metadata: two_factor_openapi("generateBackupCodes", "Generate two factor backup codes", two_factor_backup_codes_response_schema)) do |ctx|
+        session = Routes.current_session(ctx)
         raise APIError.new("BAD_REQUEST", message: TWO_FACTOR_ERROR_CODES["TWO_FACTOR_NOT_ENABLED"]) unless session[:user]["twoFactorEnabled"]
 
         two_factor_check_password!(ctx, session[:user]["id"], normalize_hash(ctx.body)[:password], allow_passwordless: config[:backup_code_options][:allow_passwordless])
         record = two_factor_record(ctx, config, session[:user]["id"])
         raise APIError.new("BAD_REQUEST", message: TWO_FACTOR_ERROR_CODES["TWO_FACTOR_NOT_ENABLED"]) unless record
 
-        backup = two_factor_generate_backup_codes(ctx.context.secret, config[:backup_code_options])
+        backup = two_factor_generate_backup_codes(ctx.context.secret_config, config[:backup_code_options])
         ctx.context.adapter.update(model: TWO_FACTOR_MODEL, where: [{field: "id", value: record["id"]}], update: {backupCodes: backup[:stored]})
         ctx.json({status: true, backupCodes: backup[:codes]})
       end
@@ -291,8 +291,50 @@ module BetterAuth
         record = two_factor_record(ctx, config, body[:user_id])
         raise APIError.new("BAD_REQUEST", message: TWO_FACTOR_ERROR_CODES["BACKUP_CODES_NOT_ENABLED"]) unless record
 
-        ctx.json({status: true, backupCodes: two_factor_read_backup_codes(ctx.context.secret, record["backupCodes"], config[:backup_code_options])})
+        ctx.json({status: true, backupCodes: two_factor_read_backup_codes(ctx.context.secret_config, record["backupCodes"], config[:backup_code_options])})
       end
+    end
+
+    def two_factor_openapi(operation_id, description, response_schema)
+      {
+        openapi: {
+          operationId: operation_id,
+          description: description,
+          responses: {
+            "200" => OpenAPI.json_response("Success", response_schema)
+          }
+        }
+      }
+    end
+
+    def two_factor_enable_response_schema
+      OpenAPI.object_schema(
+        {
+          totpURI: {type: "string"},
+          backupCodes: {type: "array", items: {type: "string"}}
+        },
+        required: ["totpURI", "backupCodes"]
+      )
+    end
+
+    def two_factor_verification_response_schema
+      OpenAPI.object_schema(
+        {
+          token: {type: ["string", "null"]},
+          user: {type: ["object", "null"], "$ref": "#/components/schemas/User"},
+          status: {type: ["boolean", "null"]}
+        }
+      )
+    end
+
+    def two_factor_backup_codes_response_schema
+      OpenAPI.object_schema(
+        {
+          status: {type: "boolean"},
+          backupCodes: {type: "array", items: {type: "string"}}
+        },
+        required: ["status", "backupCodes"]
+      )
     end
 
     def two_factor_schema(config = {})
@@ -507,7 +549,7 @@ module BetterAuth
       if storage == "hashed"
         Crypto.sha256(code, encoding: :base64url)
       elsif storage == "encrypted"
-        Crypto.symmetric_encrypt(key: ctx.context.secret, data: code)
+        Crypto.symmetric_encrypt(key: ctx.context.secret_config, data: code)
       elsif storage.is_a?(Hash) && storage[:hash].respond_to?(:call)
         storage[:hash].call(code)
       elsif storage.is_a?(Hash) && storage[:encrypt].respond_to?(:call)
@@ -522,7 +564,7 @@ module BetterAuth
       expected, actual = if storage == "hashed"
         [stored, Crypto.sha256(input, encoding: :base64url)]
       elsif storage == "encrypted"
-        [Crypto.symmetric_decrypt(key: ctx.context.secret, data: stored), input]
+        [Crypto.symmetric_decrypt(key: ctx.context.secret_config, data: stored), input]
       elsif storage.is_a?(Hash) && storage[:hash].respond_to?(:call)
         [stored, storage[:hash].call(input)]
       elsif storage.is_a?(Hash) && storage[:decrypt].respond_to?(:call)

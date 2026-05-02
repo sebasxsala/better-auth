@@ -52,28 +52,33 @@ class BetterAuthAuthTest < Minitest::Test
   end
 
   def test_inferred_base_url_uses_valid_trusted_proxy_headers
+    captured = []
     auth = BetterAuth.auth(
       secret: SECRET,
-      advanced: {trusted_proxy_headers: true}
+      advanced: {trusted_proxy_headers: true},
+      plugins: [capture_base_url_plugin(captured)]
     )
 
-    status, = auth.call(rack_env("GET", "/api/auth/ok", headers: {
+    status, = auth.call(rack_env("GET", "/api/auth/capture-base-url", headers: {
       "HTTP_X_FORWARDED_HOST" => "preview.example.com:8443",
       "HTTP_X_FORWARDED_PROTO" => "https",
       "HTTP_HOST" => "localhost:3000"
     }))
 
     assert_equal 200, status
-    assert_equal "https://preview.example.com:8443/api/auth", auth.context.base_url
+    assert_equal "https://preview.example.com:8443/api/auth", captured.first
+    assert_equal "", auth.context.base_url
   end
 
   def test_inferred_base_url_rejects_malicious_forwarded_and_host_headers
+    captured = []
     auth = BetterAuth.auth(
       secret: SECRET,
-      advanced: {trusted_proxy_headers: true}
+      advanced: {trusted_proxy_headers: true},
+      plugins: [capture_base_url_plugin(captured)]
     )
 
-    status, = auth.call(rack_env("GET", "/api/auth/ok", headers: {
+    status, = auth.call(rack_env("GET", "/api/auth/capture-base-url", headers: {
       "HTTP_X_FORWARDED_HOST" => "../../../etc/passwd",
       "HTTP_X_FORWARDED_PROTO" => "https",
       "HTTP_HOST" => "<script>alert('xss')</script>",
@@ -82,10 +87,23 @@ class BetterAuthAuthTest < Minitest::Test
     }))
 
     assert_equal 200, status
-    assert_equal "http://localhost:3000/api/auth", auth.context.base_url
+    assert_equal "http://localhost:3000/api/auth", captured.first
+    assert_equal "", auth.context.base_url
   end
 
   private
+
+  def capture_base_url_plugin(captured)
+    {
+      id: "capture-base-url",
+      endpoints: {
+        capture_base_url: BetterAuth::Endpoint.new(path: "/capture-base-url", method: "GET") do |ctx|
+          captured << ctx.context.base_url
+          ctx.json({ok: true})
+        end
+      }
+    }
+  end
 
   def rack_env(method, path, headers: {})
     {

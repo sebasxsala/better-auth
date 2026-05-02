@@ -74,13 +74,11 @@ bin/rails generate better_auth:install
 bin/rails db:migrate
 ```
 
-The generated initializer wires Better Auth to ActiveRecord:
+Rails uses ActiveRecord by default:
 
 ```ruby title="config/initializers/better_auth.rb"
 BetterAuth::Rails.configure do |config|
-  config.database = ->(options) {
-    BetterAuth::Rails::ActiveRecordAdapter.new(options)
-  }
+  config.database_adapter = :active_record
 end
 ```
 
@@ -166,9 +164,9 @@ auth = BetterAuth.auth(
 )
 ```
 
-The PostgreSQL adapter supports native joins for the core `session -> user`,
-`account -> user`, and `user -> account` relationships. Rails uses
-ActiveRecord associations for the same core relationships.
+The PostgreSQL adapter supports native joins for core relationships and for
+plugin schema relationships declared with `references`. Rails uses generated
+ActiveRecord associations for the same schema-driven relationships.
 
 ## Schema
 

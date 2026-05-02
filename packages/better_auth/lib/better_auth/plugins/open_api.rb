@@ -1,6 +1,165 @@
 # frozen_string_literal: true
 
 module BetterAuth
+  module OpenAPI
+    module_function
+
+    def object_schema(properties, required: [])
+      {
+        type: "object",
+        properties: properties,
+        required: required
+      }
+    end
+
+    def json_request_body(schema, required: true)
+      request = {
+        content: {
+          "application/json" => {
+            schema: schema
+          }
+        }
+      }
+      request[:required] = true if required
+      request
+    end
+
+    def json_response(description, schema)
+      {
+        description: description,
+        content: {
+          "application/json" => {
+            schema: schema
+          }
+        }
+      }
+    end
+
+    def session_response_schema(description:, nullable_url: false)
+      object_schema(
+        {
+          redirect: {type: "boolean", enum: [false]},
+          token: {type: "string", description: "Session token"},
+          url: nullable_url ? {type: "string", nullable: true} : {type: "string"},
+          user: {type: "object", "$ref": "#/components/schemas/User"}
+        },
+        required: ["redirect", "token", "user"]
+      ).merge(description: description)
+    end
+
+    def user_response_schema
+      object_schema(
+        {
+          id: {type: "string", description: "The unique identifier of the user"},
+          email: {type: "string", format: "email", description: "The email address of the user"},
+          name: {type: "string", description: "The name of the user"},
+          image: {type: "string", format: "uri", nullable: true, description: "The profile image URL of the user"},
+          emailVerified: {type: "boolean", description: "Whether the email has been verified"},
+          createdAt: {type: "string", format: "date-time", description: "When the user was created"},
+          updatedAt: {type: "string", format: "date-time", description: "When the user was last updated"}
+        },
+        required: ["id", "email", "name", "emailVerified", "createdAt", "updatedAt"]
+      )
+    end
+
+    def session_response_schema_pair
+      object_schema(
+        {
+          session: {type: "object", "$ref": "#/components/schemas/Session"},
+          user: {type: "object", "$ref": "#/components/schemas/User"}
+        },
+        required: ["session", "user"]
+      )
+    end
+
+    def status_response_schema(extra_properties = {}, required: ["status"])
+      object_schema(
+        {
+          status: {type: "boolean"}
+        }.merge(extra_properties),
+        required: required
+      )
+    end
+
+    def success_response_schema
+      object_schema(
+        {
+          success: {type: "boolean"}
+        },
+        required: ["success"]
+      )
+    end
+
+    def empty_request_body
+      {
+        content: {
+          "application/json" => {
+            schema: {
+              type: "object",
+              properties: {}
+            }
+          }
+        }
+      }
+    end
+
+    def responses(responses = nil)
+      {"200" => success_response}.merge(default_error_responses).merge(responses || {})
+    end
+
+    def success_response
+      json_response(
+        "Success",
+        {
+          type: "object",
+          properties: {}
+        }
+      )
+    end
+
+    def default_error_responses
+      {
+        "400" => error_response("Bad Request. Usually due to missing parameters, or invalid parameters.", required: true),
+        "401" => error_response("Unauthorized. Due to missing or invalid authentication.", required: true),
+        "403" => error_response("Forbidden. You do not have permission to access this resource or to perform this action."),
+        "404" => error_response("Not Found. The requested resource was not found."),
+        "429" => error_response("Too Many Requests. You have exceeded the rate limit. Try again later."),
+        "500" => error_response("Internal Server Error. This is a problem with the server that you cannot fix.")
+      }
+    end
+
+    def error_response(description, required: false)
+      schema = {
+        type: "object",
+        properties: {
+          message: {
+            type: "string"
+          }
+        }
+      }
+      schema[:required] = ["message"] if required
+      json_response(description, schema)
+    end
+
+    def default_metadata(path, methods)
+      method = Array(methods).reject { |value| value.to_s == "*" }.first.to_s.upcase
+      {
+        operationId: operation_id(path, method),
+        description: "#{method} #{path}"
+      }
+    end
+
+    def operation_id(path, method)
+      parts = path.to_s.split("/").reject(&:empty?).map do |part|
+        part.delete_prefix(":").gsub(/[^a-zA-Z0-9]+/, " ").split.map(&:capitalize).join
+      end
+      base = parts.join
+      return method.downcase if base.empty?
+
+      "#{method.to_s.downcase}#{base}"
+    end
+  end
+
   module Plugins
     module_function
 
@@ -105,336 +264,22 @@ module BetterAuth
       metadata = endpoint.metadata[:openapi] || {}
       operation = {
         tags: Array(metadata[:tags] || [tag]),
-        description: metadata[:description] || route_description(endpoint.path, method),
-        operationId: metadata.key?(:operationId) ? metadata[:operationId] : route_operation_id(endpoint.path, method),
+        description: metadata[:description],
+        operationId: metadata[:operationId],
         security: [
           {
             bearerAuth: []
           }
         ],
         parameters: metadata[:parameters] || [],
-        responses: open_api_responses(metadata[:responses] || route_responses(endpoint.path, method))
+        responses: OpenAPI.responses(metadata[:responses])
       }
 
       if %w[POST PATCH PUT].include?(method)
-        operation[:requestBody] = metadata[:requestBody] || route_request_body(endpoint.path, method) || empty_request_body
+        operation[:requestBody] = metadata[:requestBody] || OpenAPI.empty_request_body
       end
 
       operation
-    end
-
-    def route_description(path, method)
-      route_open_api_metadata(path, method)[:description]
-    end
-
-    def route_operation_id(path, method)
-      route_open_api_metadata(path, method)[:operationId]
-    end
-
-    def route_request_body(path, method)
-      route_open_api_metadata(path, method)[:requestBody]
-    end
-
-    def route_responses(path, method)
-      route_open_api_metadata(path, method)[:responses]
-    end
-
-    def route_open_api_metadata(path, method)
-      case [path, method.to_s.upcase]
-      when ["/change-email", "POST"]
-        {
-          operationId: "changeEmail",
-          requestBody: {
-            required: true,
-            content: {
-              "application/json" => {
-                schema: object_schema(
-                  {
-                    callbackURL: {type: ["string", "null"], description: "The URL to redirect to after email verification"},
-                    newEmail: {type: "string", description: "The new email address to set must be a valid email address"}
-                  },
-                  required: ["newEmail"]
-                )
-              }
-            }
-          },
-          responses: {
-            "200" => {
-              description: "Email change request processed successfully",
-              content: {
-                "application/json" => {
-                  schema: object_schema(
-                    {
-                      message: {
-                        type: "string",
-                        nullable: true,
-                        enum: ["Email updated", "Verification email sent"],
-                        description: "Status message of the email change process"
-                      },
-                      status: {type: "boolean", description: "Indicates if the request was successful"},
-                      user: {type: "object", "$ref": "#/components/schemas/User"}
-                    },
-                    required: ["status"]
-                  )
-                }
-              }
-            },
-            "422" => error_response("Unprocessable Entity. Email already exists")
-          }
-        }
-      when ["/change-password", "POST"]
-        {
-          description: "Change the password of the user",
-          operationId: "changePassword",
-          requestBody: {
-            required: true,
-            content: {
-              "application/json" => {
-                schema: object_schema(
-                  {
-                    newPassword: {type: "string", description: "The new password to set"},
-                    currentPassword: {type: "string", description: "The current password is required"},
-                    revokeOtherSessions: {type: ["boolean", "null"], description: "Must be a boolean value"}
-                  },
-                  required: ["newPassword", "currentPassword"]
-                )
-              }
-            }
-          },
-          responses: {
-            "200" => {
-              description: "Password successfully changed",
-              content: {
-                "application/json" => {
-                  schema: object_schema(
-                    {
-                      token: {type: "string", nullable: true, description: "New session token if other sessions were revoked"},
-                      user: open_api_user_response_schema
-                    },
-                    required: ["user"]
-                  )
-                }
-              }
-            }
-          }
-        }
-      when ["/sign-in/email", "POST"]
-        {
-          description: "Sign in with email and password",
-          operationId: "signInEmail",
-          requestBody: {
-            required: true,
-            content: {
-              "application/json" => {
-                schema: object_schema(
-                  {
-                    email: {type: "string", description: "Email of the user"},
-                    password: {type: "string", description: "Password of the user"},
-                    callbackURL: {type: ["string", "null"], description: "Callback URL to use as a redirect for email verification"},
-                    rememberMe: {type: ["boolean", "null"], default: true, description: "If this is false, the session will not be remembered. Default is `true`."}
-                  },
-                  required: ["email", "password"]
-                )
-              }
-            }
-          },
-          responses: {
-            "200" => {
-              description: "Success - Returns either session details or redirect URL",
-              content: {
-                "application/json" => {
-                  schema: session_response_schema(description: "Session response when idToken is provided", nullable_url: true)
-                }
-              }
-            }
-          }
-        }
-      when ["/sign-in/social", "POST"]
-        {
-          description: "Sign in with a social provider",
-          operationId: "socialSignIn",
-          requestBody: {
-            required: true,
-            content: {
-              "application/json" => {
-                schema: object_schema(
-                  {
-                    provider: {type: "string"},
-                    callbackURL: {type: ["string", "null"], description: "Callback URL to redirect to after the user has signed in"},
-                    errorCallbackURL: {type: ["string", "null"], description: "Callback URL to redirect to if an error happens"},
-                    newUserCallbackURL: {type: ["string", "null"]},
-                    disableRedirect: {type: ["boolean", "null"], description: "Disable automatic redirection to the provider. Useful for handling the redirection yourself"},
-                    requestSignUp: {type: ["boolean", "null"], description: "Explicitly request sign-up. Useful when disableImplicitSignUp is true for this provider"},
-                    loginHint: {type: ["string", "null"], description: "The login hint to use for the authorization code request"},
-                    additionalData: {type: ["string", "null"]},
-                    scopes: {type: ["array", "null"], description: "Array of scopes to request from the provider. This will override the default scopes passed."},
-                    idToken: {
-                      type: ["object", "null"],
-                      properties: {
-                        token: {type: "string", description: "ID token from the provider"},
-                        accessToken: {type: ["string", "null"], description: "Access token from the provider"},
-                        refreshToken: {type: ["string", "null"], description: "Refresh token from the provider"},
-                        expiresAt: {type: ["number", "null"], description: "Expiry date of the token"},
-                        nonce: {type: ["string", "null"], description: "Nonce used to generate the token"}
-                      },
-                      required: ["token"]
-                    }
-                  },
-                  required: ["provider"]
-                )
-              }
-            }
-          },
-          responses: {
-            "200" => {
-              description: "Success - Returns either session details or redirect URL",
-              content: {
-                "application/json" => {
-                  schema: session_response_schema(description: "Session response when idToken is provided")
-                }
-              }
-            }
-          }
-        }
-      when ["/sign-up/email", "POST"]
-        {
-          description: "Sign up a user using email and password",
-          operationId: "signUpWithEmailAndPassword",
-          requestBody: {
-            content: {
-              "application/json" => {
-                schema: object_schema(
-                  {
-                    name: {type: "string", description: "The name of the user"},
-                    email: {type: "string", description: "The email of the user"},
-                    password: {type: "string", description: "The password of the user"},
-                    image: {type: "string", description: "The profile image URL of the user"},
-                    callbackURL: {type: "string", description: "The URL to use for email verification callback"},
-                    rememberMe: {type: "boolean", description: "If this is false, the session will not be remembered. Default is `true`."}
-                  },
-                  required: ["name", "email", "password"]
-                )
-              }
-            }
-          },
-          responses: {
-            "200" => {
-              description: "Successfully created user",
-              content: {
-                "application/json" => {
-                  schema: object_schema(
-                    {
-                      token: {type: "string", nullable: true, description: "Authentication token for the session"},
-                      user: {type: "object", "$ref": "#/components/schemas/User"}
-                    },
-                    required: ["user"]
-                  )
-                }
-              }
-            },
-            "422" => error_response("Unprocessable Entity. User already exists or failed to create user.")
-          }
-        }
-      else
-        {}
-      end
-    end
-
-    def object_schema(properties, required: [])
-      {
-        type: "object",
-        properties: properties,
-        required: required
-      }
-    end
-
-    def session_response_schema(description:, nullable_url: false)
-      object_schema(
-        {
-          redirect: {type: "boolean", enum: [false]},
-          token: {type: "string", description: "Session token"},
-          url: nullable_url ? {type: "string", nullable: true} : {type: "string"},
-          user: {type: "object", "$ref": "#/components/schemas/User"}
-        },
-        required: ["redirect", "token", "user"]
-      ).merge(description: description)
-    end
-
-    def open_api_user_response_schema
-      object_schema(
-        {
-          id: {type: "string", description: "The unique identifier of the user"},
-          email: {type: "string", format: "email", description: "The email address of the user"},
-          name: {type: "string", description: "The name of the user"},
-          image: {type: "string", format: "uri", nullable: true, description: "The profile image URL of the user"},
-          emailVerified: {type: "boolean", description: "Whether the email has been verified"},
-          createdAt: {type: "string", format: "date-time", description: "When the user was created"},
-          updatedAt: {type: "string", format: "date-time", description: "When the user was last updated"}
-        },
-        required: ["id", "email", "name", "emailVerified", "createdAt", "updatedAt"]
-      )
-    end
-
-    def empty_request_body
-      {
-        content: {
-          "application/json" => {
-            schema: {
-              type: "object",
-              properties: {}
-            }
-          }
-        }
-      }
-    end
-
-    def open_api_responses(responses = nil)
-      {"200" => success_response}.merge(default_error_responses).merge(responses || {})
-    end
-
-    def success_response
-      {
-        description: "Success",
-        content: {
-          "application/json" => {
-            schema: {
-              type: "object",
-              properties: {}
-            }
-          }
-        }
-      }
-    end
-
-    def default_error_responses
-      {
-        "400" => error_response("Bad Request. Usually due to missing parameters, or invalid parameters.", required: true),
-        "401" => error_response("Unauthorized. Due to missing or invalid authentication.", required: true),
-        "403" => error_response("Forbidden. You do not have permission to access this resource or to perform this action."),
-        "404" => error_response("Not Found. The requested resource was not found."),
-        "429" => error_response("Too Many Requests. You have exceeded the rate limit. Try again later."),
-        "500" => error_response("Internal Server Error. This is a problem with the server that you cannot fix.")
-      }
-    end
-
-    def error_response(description, required: false)
-      schema = {
-        type: "object",
-        properties: {
-          message: {
-            type: "string"
-          }
-        }
-      }
-      schema[:required] = ["message"] if required
-      {
-        description: description,
-        content: {
-          "application/json" => {
-            schema: schema
-          }
-        }
-      }
     end
 
     def open_api_components(options)

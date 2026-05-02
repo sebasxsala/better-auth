@@ -17,17 +17,18 @@ RSpec.describe BetterAuth::Generators::InstallGenerator do
 
     initializer = File.join(@destination, "config/initializers/better_auth.rb")
     migrations = Dir[File.join(@destination, "db/migrate/*_create_better_auth_tables.rb")]
+    initializer_contents = File.read(initializer)
 
-    expect(File.read(initializer)).to include("BetterAuth::Rails.configure")
-    expect(File.read(initializer)).to include("ActiveRecordAdapter")
-    expect(File.read(initializer)).to include("config.trusted_origins")
-    expect(File.read(initializer)).to include("config.session")
-    expect(File.read(initializer)).to include("strategy: \"jwe\"")
-    expect(File.read(initializer)).to include("config.advanced")
-    expect(File.read(initializer)).to include("config.experimental")
-    expect(File.read(initializer)).to include("config.social_providers")
-    expect(File.read(initializer)).to include("config.plugins")
-    expect(File.read(initializer)).to include("config.hooks")
+    expect(initializer_contents).to include("BetterAuth::Rails.configure")
+    expect(initializer_contents).not_to include("config.database = ->")
+    expect(initializer_contents).to include("config.trusted_origins")
+    expect(initializer_contents).to include("config.session do |session|")
+    expect(initializer_contents).to include("cookie.strategy = \"jwe\"")
+    expect(initializer_contents).to include("config.advanced do |advanced|")
+    expect(initializer_contents).to include("config.experimental do |experimental|")
+    expect(initializer_contents).to include("config.social_providers do |providers|")
+    expect(initializer_contents).to include("config.plugins")
+    expect(initializer_contents).to include("config.hooks do |hooks|")
     expect(migrations.length).to eq(1)
     expect(File.read(migrations.first)).to include("create_table :users, id: false")
   end

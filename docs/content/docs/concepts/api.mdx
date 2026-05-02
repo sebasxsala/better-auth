@@ -1,111 +1,131 @@
 ---
 title: API
-description: Better Auth Ruby API.
+description: Learn how to call Better Auth Ruby endpoints from Ruby, Rack, and Rails.
 ---
 
-When you create a Better Auth Ruby instance, it exposes two entry points:
-
-- `auth.handler` / `auth.call(env)` for Rack requests.
-- `auth.api` for server-side calls to the same endpoint implementations.
-
-Every core endpoint and plugin endpoint is exposed through `auth.api` using a
-Ruby `snake_case` method name.
+Better Auth Ruby exposes the same endpoint handlers through Rack and through a server-side Ruby API object.
 
 ```ruby title="config/auth.rb"
 require "better_auth"
 
 auth = BetterAuth.auth(
-  base_url: "http://localhost:3000",
+  base_url: "http://localhost:3000/api/auth",
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  email_and_password: {
-    enabled: true
+  email_and_password: {enabled: true}
+)
+```
+
+## Calling API Endpoints On The Server
+
+Every endpoint is available on `auth.api` with a Ruby `snake_case` method name.
+
+```ruby
+result = auth.api.sign_in_email(
+  body: {
+    email: "john@example.com",
+    password: "password123"
+  }
+)
+
+session_token = result[:token]
+```
+
+Plugin endpoints are exposed the same way after the plugin is configured.
+
+```ruby
+auth = BetterAuth.auth(
+  secret: ENV.fetch("BETTER_AUTH_SECRET"),
+  plugins: [BetterAuth::Plugins.magic_link]
+)
+
+auth.api.sign_in_magic_link(
+  body: {
+    email: "john@example.com",
+    callbackURL: "/dashboard"
   }
 )
 ```
 
-## Server-Side Calls
+### Body, Headers, Query
 
-Call endpoints with `body`, `headers`, `query`, and `params` keys.
+Use `body:` for request bodies, `query:` for URL query parameters, `params:` for path parameters, and `headers:` for request headers.
 
-```ruby title="app/services/auth_examples.rb"
-session = auth.api.get_session(
+```ruby
+auth.api.send_verification_email(
+  body: {
+    email: "john@example.com",
+    callbackURL: "/dashboard"
+  }
+)
+
+auth.api.verify_email(
+  query: {
+    token: params[:token],
+    callbackURL: "/dashboard"
+  }
+)
+
+auth.api.get_session(
   headers: {
     "cookie" => request.get_header("HTTP_COOKIE").to_s
   }
 )
+```
 
-sign_in = auth.api.sign_in_email(
+Request bodies accept the upstream camelCase keys and the Ruby snake_case aliases where the route supports both.
+
+```ruby
+auth.api.change_password(
+  headers: {"cookie" => cookie_header},
+  body: {
+    current_password: "old-password",
+    new_password: "new-password",
+    revoke_other_sessions: true
+  }
+)
+```
+
+### Getting `headers` And Rack `Response` Object
+
+#### Getting `headers`
+
+Use `return_headers: true` when you want the endpoint payload and response headers.
+
+```ruby
+result = auth.api.sign_in_email(
   body: {
     email: "john@example.com",
     password: "password123"
   },
-  headers: {
-    "user-agent" => request.user_agent.to_s,
-    "x-forwarded-for" => request.ip.to_s
-  }
+  return_headers: true
 )
 
-verified = auth.api.verify_email(
-  query: {
-    token: params.fetch(:token)
-  }
-)
+cookie = result[:headers].fetch("set-cookie")
 ```
 
-| Endpoint key | Ruby API method | HTTP path |
-| --- | --- | --- |
-| `sign_up_email` | `auth.api.sign_up_email` | `/api/auth/sign-up/email` |
-| `sign_in_email` | `auth.api.sign_in_email` | `/api/auth/sign-in/email` |
-| `get_session` | `auth.api.get_session` | `/api/auth/get-session` |
-| `link_social` | `auth.api.link_social` | `/api/auth/link-social` |
-| `get_access_token` | `auth.api.get_access_token` | `/api/auth/get-access-token` |
+#### Getting `Response` Object
 
-## Headers And Rack Responses
+Use `as_response: true` when you need the raw Rack tuple.
 
-By default, `auth.api` returns the endpoint response object directly.
-
-Use `return_headers: true` when you need response headers such as
-`set-cookie`.
-
-```ruby title="app/services/create_user.rb"
-result = auth.api.sign_up_email(
-  return_headers: true,
-  return_status: true,
-  body: {
-    email: "john@example.com",
-    password: "password123",
-    name: "John Doe"
-  }
-)
-
-status = result[:status]
-headers = result[:headers]
-body = result[:response]
-session_cookie = headers["set-cookie"]
-```
-
-Use `as_response: true` when you need the Rack response tuple.
-
-```ruby title="app/controllers/sessions_controller.rb"
+```ruby
 status, headers, body = auth.api.sign_in_email(
-  as_response: true,
   body: {
     email: "john@example.com",
     password: "password123"
-  }
+  },
+  as_response: true
 )
 
-response.status = status
-headers.each { |name, value| response.set_header(name, value) }
-response.write(body.join)
+json = JSON.parse(body.join)
 ```
 
-## Error Handling
+This is useful for tests, controller integration, and flows that need to forward `Set-Cookie` headers.
 
-Server-side API calls raise `BetterAuth::APIError` unless `as_response: true` is
-used.
+### Error Handling
 
-```ruby title="app/services/sign_in.rb"
+Server-side calls raise `BetterAuth::APIError` for endpoint errors.
+
+```ruby
 begin
   auth.api.sign_in_email(
     body: {
@@ -115,50 +135,30 @@ begin
   )
 rescue BetterAuth::APIError => error
   Rails.logger.info(
-    "Better Auth failed: #{error.status_code} #{error.message}"
+    status: error.status_code,
+    code: error.code,
+    message: error.message
   )
 end
 ```
 
-## Rack Requests
+For Rack calls, Better Auth serializes errors as JSON responses.
 
-The same auth object is a Rack app.
+```ruby
+status, headers, body = auth.call(env)
 
-```ruby title="config.ru"
-require "better_auth"
-
-auth = BetterAuth.auth(
-  base_url: "http://localhost:9292",
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  email_and_password: {
-    enabled: true
-  }
-)
-
-map "/api/auth" do
-  run auth
+if status == 401
+  payload = JSON.parse(body.join)
+  warn payload.fetch("message", payload["error"])
 end
 ```
 
-Rails apps normally mount the adapter instead:
+Rate limit responses use status `429` and include `x-retry-after`.
 
-```ruby title="config/routes.rb"
-Rails.application.routes.draw do
-  better_auth
+```ruby
+status, headers, = auth.call(env)
+
+if status == 429
+  retry_after = headers["x-retry-after"].to_i
 end
 ```
-
-## Rate Limit Boundary
-
-Rate limiting runs in the Rack router. Direct `auth.api` calls are server-side
-function calls and are not rate limited.
-
-If an external user can trigger a server action, controller action, job, or RPC
-method that calls `auth.api`, rate limit that public entry point separately.
-
-## Not Supported
-
-- JavaScript `Headers` or `Response` objects. Ruby uses hashes and Rack response
-  tuples.
-- TypeScript endpoint inference. Ruby endpoint methods are generated at runtime.
-- The upstream `better-call` API surface as a public Ruby dependency.

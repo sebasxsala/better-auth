@@ -109,6 +109,40 @@ class BetterAuthCookiesTest < Minitest::Test
     end
   end
 
+  def test_jwe_cookie_cache_and_account_cookie_survive_secret_rotation
+    old_auth = BetterAuth.auth(
+      secret: "legacy-secret-that-is-long-enough-for-cookies",
+      secrets: [{version: 1, value: "old-secret-that-is-long-enough-for-cookies"}],
+      session: {cookie_cache: {enabled: true, strategy: "jwe"}},
+      account: {store_account_cookie: true}
+    )
+    old_ctx = endpoint_context(old_auth)
+
+    BetterAuth::Cookies.set_cookie_cache(old_ctx, {
+      session: {"id" => "session-1", "token" => "token-1", "userId" => "user-1"},
+      user: {"id" => "user-1", "email" => "ada@example.com"}
+    }, false)
+    BetterAuth::Cookies.set_account_cookie(old_ctx, {"providerId" => "github", "accountId" => "account-1"})
+
+    header = old_ctx.response_headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")
+    new_auth = BetterAuth.auth(
+      secret: "legacy-secret-that-is-long-enough-for-cookies",
+      secrets: [
+        {version: 2, value: "new-secret-that-is-long-enough-for-cookies"},
+        {version: 1, value: "old-secret-that-is-long-enough-for-cookies"}
+      ],
+      session: {cookie_cache: {enabled: true, strategy: "jwe"}},
+      account: {store_account_cookie: true}
+    )
+    new_ctx = endpoint_context(new_auth, cookie: header)
+
+    session_cookie = BetterAuth::SessionStore.get_chunked_cookie(new_ctx, new_auth.context.auth_cookies[:session_data].name)
+    session_payload = BetterAuth::Cookies.decode_cookie_cache(session_cookie, new_auth.context.secret_config, strategy: "jwe")
+
+    assert_equal "token-1", session_payload.fetch("session").fetch("token")
+    assert_equal "account-1", BetterAuth::Cookies.get_account_cookie(new_ctx).fetch("accountId")
+  end
+
   def test_cookie_cache_filters_fields_marked_returned_false
     auth = BetterAuth.auth(
       secret: SECRET,

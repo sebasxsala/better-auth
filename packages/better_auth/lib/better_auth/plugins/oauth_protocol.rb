@@ -788,7 +788,7 @@ module BetterAuth
       def store_client_secret_value(ctx, secret, mode)
         mode = normalize_secret_storage_mode(mode)
         return Crypto.sha256(secret, encoding: :base64url) if mode == "hashed"
-        return Crypto.symmetric_encrypt(key: ctx.context.secret, data: secret) if mode == "encrypted"
+        return Crypto.symmetric_encrypt(key: ctx.context.secret_config, data: secret) if mode == "encrypted"
 
         if mode.is_a?(Hash)
           return mode[:hash].call(secret) if mode[:hash].respond_to?(:call)
@@ -801,7 +801,7 @@ module BetterAuth
       def verify_client_secret(ctx, stored_secret, provided_secret, mode)
         mode = normalize_secret_storage_mode(mode)
         return Crypto.constant_time_compare(Crypto.sha256(provided_secret, encoding: :base64url), stored_secret.to_s) if mode == "hashed"
-        return Crypto.symmetric_decrypt(key: ctx.context.secret, data: stored_secret) == provided_secret.to_s if mode == "encrypted"
+        return Crypto.symmetric_decrypt(key: ctx.context.secret_config, data: stored_secret) == provided_secret.to_s if mode == "encrypted"
 
         if mode.is_a?(Hash)
           return mode[:hash].call(provided_secret).to_s == stored_secret.to_s if mode[:hash].respond_to?(:call)

@@ -4,29 +4,24 @@
 
 Before making changes in this repository, read the relevant agent instructions:
 
-- Core gem instructions: `packages/better_auth/AGENTS.md` when editing `packages/better_auth/`
-- Rails adapter instructions: `packages/better_auth-rails/AGENTS.md` when editing `packages/better_auth-rails/`
-- Read how upstream tests are written
+- Read `AGENTS.md`.
+- When editing a package, check for a package-level `AGENTS.md` and follow it if present.
 - Read how upstream related implementations are written
 
 ## Plans
 
-Long-running implementation plans live in `.docs/plans/`.
-
-Current master plan:
-
-All future implementation plans should be created in `.docs/plans/` using the filename format `YYYY-MM-DD-short-name.md`.
+All future implementation plans should be created in `.docs/plans/` using the filename format `YYYY-MM-DD-HHMM--short-name.md`.
 
 Plans should use checkbox steps so agents can mark progress as work is completed. When an agent completes a phase, discovers a meaningful difference from upstream, or chooses a Ruby-specific adaptation, it should update the relevant plan.
 
 ## Upstream source of truth
 
-The `upstream/` submodule is the source of truth for Better Auth behavior. Before porting or modifying a feature, inspect the matching upstream source and tests, then adapt that behavior into Ruby.
+Use the `upstream/` submodule as the source of truth for Better Auth behavior.
+Before porting or changing a feature, review matching upstream source and tests,
+then adapt to Ruby.
 
-When working from a git worktree, `upstream/` may exist but be empty because
-submodules are not initialized automatically. Only initialize it when the task
-requires reading upstream source or tests. The current upstream target is
-Better Auth `v1.6.9`:
+In git worktrees, `upstream/` can be empty until submodules are initialized.
+Only initialize it when needed. Target upstream version: `v1.6.9`.
 
 ```bash
 git submodule update --init --recursive upstream
@@ -36,32 +31,27 @@ git checkout v1.6.9
 cd ..
 ```
 
-If the checkout changes the recorded submodule pointer, treat that as an
-intentional repo change and include it in the relevant plan or PR.
+If this changes the recorded submodule pointer, treat it as an intentional repo
+change and include it in the related plan or PR.
 
 ## Testing
 
 - Avoid mocks unless the real dependency is truly impractical
 - Test actual behavior, not implementation details
-- Check upstream tests (`upstream/packages/better-auth/src/**/*.test.ts`) for test case ideas
+- Check upstream tests (`upstream/**/*.test.ts`) for test case ideas
 - Database tests are preferred over in-memory tests
 
 ## Versioning and releases
 
-Ruby package versions are independent per gem. Do not bump every package just because
-one package changed, and do not bump versions for ordinary unreleased commits.
+Version each gem independently.
 
-When preparing a publishable release, update only the package version files for the
-gems being released. Choose the version bump from that package's public behavior:
+- Only bump versions for gems you are releasing.
+- Do not bump versions for normal unreleased commits.
 
-- Patch (`0.1.0` -> `0.1.1`) for compatible bug fixes, documentation or metadata
-  corrections, CI/release fixes, and internal changes that do not add public API.
-- Minor (`0.1.1` -> `0.2.0`) for new public behavior, new options, new endpoints,
-  new package capabilities, or breaking public API changes while the package is
-  still pre-`1.0`.
-- Major (`1.2.3` -> `2.0.0`) only after a package has reached `1.0` and a release
-  intentionally breaks its public API.
+Choose bump type by public impact:
 
-Use prerelease versions such as `0.2.0.beta.1` when a feature should be published
-for validation before a stable release. The release tag must match the target
-package version exactly.
+- Patch (`0.1.0` -> `0.1.1`): backward-compatible fixes and internal/docs/CI updates.
+- Minor (`0.1.1` -> `0.2.0`): new public behavior/options/endpoints, and breaking public changes while still pre-`1.0`.
+- Major (`1.2.3` -> `2.0.0`): breaking public API changes after `1.0`.
+
+Use prerelease versions (for example, `0.2.0.beta.1`) for validation before stable release. Release tag must exactly match the package version.

@@ -1,195 +1,273 @@
 ---
 title: Plugins
-description: Learn how to use plugins with Better Auth Ruby.
+description: Learn how to use and create Better Auth Ruby plugins with endpoints, schema, hooks, middleware, request handlers, response handlers, rate limits, and trusted origins.
 ---
 
-Plugins extend Better Auth with endpoints, schema, hooks, middleware, rate
-limits, and request/response handlers.
+Plugins extend the server by adding endpoints, schema, hooks, middleware, rate limits, and context defaults.
 
 ## Using A Plugin
 
-```ruby title="config/auth.rb"
+```ruby
 auth = BetterAuth.auth(
   secret: ENV.fetch("BETTER_AUTH_SECRET"),
   plugins: [
-    BetterAuth::Plugins.admin,
-    BetterAuth::Plugins.api_key
+    BetterAuth::Plugins.magic_link(
+      send_magic_link: ->(data, _request) { AuthMailer.magic_link(data).deliver_later }
+    ),
+    BetterAuth::Plugins.open_api
   ]
 )
 ```
 
-Rails apps configure plugins in the initializer.
+Plugin endpoints become available on `auth.api` and through Rack.
 
-```ruby title="config/initializers/better_auth.rb"
-BetterAuth::Rails.configure do |config|
-  config.plugins = [
-    BetterAuth::Plugins.admin,
-    BetterAuth::Plugins.api_key
-  ]
-end
+```ruby
+auth.api.sign_in_magic_link(
+  body: {
+    email: "john@example.com",
+    callbackURL: "/dashboard"
+  }
+)
 ```
 
-Plugin schemas are included when Rails migrations are generated.
+## Creating A Plugin
 
-```bash title="Terminal"
-bin/rails generate better_auth:migration
+```ruby
+my_plugin = BetterAuth::Plugin.new(
+  id: "my-plugin"
+)
 ```
 
-## Custom Plugin
+### What Can A Plugin Do?
 
-```ruby title="config/auth.rb"
+A plugin can add endpoints, schema, migrations, hooks, middleware, request and response handlers, rate-limit rules, trusted origins, context defaults, client metadata, and error codes.
+
+## Create A Server Plugin
+
+```ruby
 hello_plugin = BetterAuth::Plugin.new(
   id: "hello",
   endpoints: {
-    say_hello: BetterAuth::Endpoint.new(
-      path: "/hello",
-      method: "GET"
-    ) do |ctx|
-      ctx.json(
-        message: "Hello from #{ctx.context.options.app_name}"
-      )
+    hello: BetterAuth::Endpoint.new(path: "/hello", method: "GET") do |ctx|
+      ctx.json({message: "hello"})
     end
   }
 )
-
-auth = BetterAuth.auth(
-  app_name: "Example App",
-  secret: ENV.fetch("BETTER_AUTH_SECRET"),
-  plugins: [hello_plugin]
-)
 ```
 
-The endpoint is available over HTTP and through `auth.api`.
+### Endpoints
 
-```ruby title="app/services/hello.rb"
-auth.api.say_hello
+Define endpoints with `BetterAuth::Endpoint.new`.
+
+```ruby
+BetterAuth::Endpoint.new(path: "/profile", method: "GET") do |ctx|
+  session = BetterAuth::Routes.current_session(ctx)
+  ctx.json({user: session[:user]})
+end
 ```
 
-## Plugin Schema
+Endpoint methods are normalized to API method names:
 
-```ruby title="config/auth.rb"
-invites_plugin = BetterAuth::Plugin.new(
-  id: "invites",
+```ruby
+auth.api.hello
+```
+
+### Schema
+
+Add fields or tables through plugin schema.
+
+```ruby
+audit_plugin = BetterAuth::Plugin.new(
+  id: "audit",
   schema: {
-    invite: {
-      model_name: "invites",
+    auditEvent: {
       fields: {
-        email: {
-          type: "string",
-          required: true
-        },
-        invitedBy: {
-          type: "string",
-          required: true,
-          field_name: "invited_by"
-        }
+        userId: {type: "string", required: true},
+        action: {type: "string", required: true}
+      }
+    },
+    session: {
+      fields: {
+        activeAuditId: {type: "string", required: false}
       }
     }
   }
 )
 ```
 
-Schema keys stay Better Auth-compatible. SQL adapters can map physical names
-with `field_name`.
+The migration generator and SQL helpers include plugin schema.
 
-## Plugin Hooks
+### Hooks
 
-```ruby title="config/auth.rb"
-audit_plugin = BetterAuth::Plugin.new(
-  id: "audit",
+Plugins can add before and after hooks.
+
+```ruby
+BetterAuth::Plugin.new(
+  id: "company-email",
   hooks: {
-    after: [
+    before: [
       {
-        matcher: ->(ctx) { ctx.path == "/sign-in/email" },
-        handler: ->(ctx) {
-          AuditLog.create!(event: "sign_in_email", payload: ctx.returned)
-          nil
-        }
+        matcher: ->(ctx) { ctx.path == "/sign-up/email" },
+        handler: lambda do |ctx|
+          next if ctx.body["email"].to_s.end_with?("@company.com")
+
+          ctx.error("BAD_REQUEST", message: "Use your company email")
+        end
       }
     ]
   }
 )
 ```
 
-## Plugin Middleware
+### Middleware
 
-Middleware can intercept matching Better Auth paths before the endpoint runs.
+Plugin middleware runs before route-level request handlers.
 
-```ruby title="config/auth.rb"
-internal_plugin = BetterAuth::Plugin.new(
-  id: "internal-auth",
+```ruby
+BetterAuth::Plugin.new(
+  id: "header",
   middlewares: [
     {
-      path: "/internal/**",
+      path: "/hello",
       middleware: lambda do |ctx|
-        next if ctx.headers["x-internal-token"] == ENV["INTERNAL_AUTH_TOKEN"]
-
-        [
-          403,
-          {"content-type" => "application/json"},
-          [{error: "Forbidden"}.to_json]
-        ]
+        ctx.headers["x-plugin"] = "header"
+        nil
       end
     }
   ]
 )
 ```
 
-## Request And Response Handlers
+Return a value to short-circuit the endpoint.
 
-```ruby title="config/auth.rb"
-headers_plugin = BetterAuth::Plugin.new(
-  id: "headers",
-  on_response: lambda do |response, _context|
-    status, headers, body = response
-    headers["x-powered-by"] = "better-auth-ruby"
+### On Request & On Response
 
-    {
-      response: [status, headers, body]
-    }
+#### On Request
+
+`on_request` receives the Rack request and auth context.
+
+```ruby
+BetterAuth::Plugin.new(
+  id: "request-id",
+  on_request: lambda do |request, context|
+    request.env["HTTP_X_REQUEST_ID"] ||= SecureRandom.uuid
+    {request: request}
   end
 )
 ```
 
-## Plugin Rate Limits
+Return `{response: [status, headers, body]}` to stop request processing.
 
-```ruby title="config/auth.rb"
-limited_plugin = BetterAuth::Plugin.new(
-  id: "limited",
+#### On Response
+
+`on_response` receives the Rack response tuple.
+
+```ruby
+BetterAuth::Plugin.new(
+  id: "response-header",
+  on_response: lambda do |response, context|
+    response[1]["x-auth-plugin"] = "response-header"
+    {response: response}
+  end
+)
+```
+
+### Rate Limit
+
+Plugins can contribute rate-limit rules.
+
+```ruby
+BetterAuth::Plugin.new(
+  id: "limited-plugin",
   rate_limit: [
     {
       path_matcher: ->(path) { path == "/hello" },
       window: 60,
-      max: 10
+      max: 5
     }
   ]
 )
 ```
 
-## Plugin Defaults
+### Trusted Origins
 
-Plugins can define `init` to merge default options into the auth configuration.
+Plugins can return option defaults from `init`.
 
-```ruby title="config/auth.rb"
-defaults_plugin = BetterAuth::Plugin.new(
-  id: "defaults",
+```ruby
+BetterAuth::Plugin.new(
+  id: "trusted-origin-plugin",
   init: lambda do |_context|
     {
       options: {
-        session: {
-          cookie_cache: {
-            enabled: true,
-            max_age: 5 * 60
-          }
-        }
+        trusted_origins: ["https://plugin.example.com"]
       }
     }
   end
 )
 ```
 
-## Not Supported
+### Server-Plugin Helper Functions
 
-- Client plugins, client atoms, and framework hooks from upstream JavaScript
-  packages.
-- TypeScript plugin inference helpers.
+#### `getSessionFromCtx`
+
+Use `BetterAuth::Routes.current_session(ctx)`.
+
+```ruby
+session = BetterAuth::Routes.current_session(ctx)
+```
+
+#### `sessionMiddleware`
+
+Use endpoint `use:` middleware or plugin middleware.
+
+```ruby
+require_session = lambda do |ctx|
+  BetterAuth::Routes.current_session(ctx)
+  nil
+end
+
+BetterAuth::Endpoint.new(path: "/private", method: "GET", use: [require_session]) do |ctx|
+  ctx.json({status: true})
+end
+```
+
+#### `requireResourceOwnership`
+
+Check ownership inside an endpoint or middleware.
+
+```ruby
+owner = resource.user_id == BetterAuth::Routes.current_session(ctx)[:user]["id"]
+return ctx.error("FORBIDDEN") unless owner
+```
+
+#### `requireOrgRole`
+
+Organization-specific role checks should use the organization plugin APIs and then return `ctx.error("FORBIDDEN")` when the current user lacks access.
+
+## Creating A Client Plugin
+
+Ruby plugins are server plugins. Client-specific behavior should be implemented in the frontend that calls the HTTP routes.
+
+### Endpoint Interface
+
+Expose server plugin endpoints over HTTP and document the request and response shape your frontend calls.
+
+### Get Actions
+
+Frontend actions are regular HTTP calls to the mounted Ruby auth routes.
+
+### Get Atoms
+
+State atoms belong in your frontend framework or state library.
+
+### Path Methods
+
+Use the endpoint path and method declared by `BetterAuth::Endpoint.new`.
+
+### Fetch Plugins
+
+Fetch middleware belongs in the frontend HTTP client.
+
+### Atom Listeners
+
+Listen to frontend state changes in your frontend app and refetch Better Auth HTTP endpoints when needed.

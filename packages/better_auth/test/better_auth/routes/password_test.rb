@@ -35,6 +35,21 @@ class BetterAuthRoutesPasswordTest < Minitest::Test
     assert auth.api.sign_in_email(body: {email: "reset@example.com", password: "new-password"})[:token]
   end
 
+  def test_reset_password_updates_credential_account_updated_at
+    sent = []
+    auth = build_auth(email_and_password: {send_reset_password: ->(data, _request = nil) { sent << data }})
+    cookie = sign_up_cookie(auth, email: "reset-updated-at@example.com", password: "old-password")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    account = auth.context.internal_adapter.find_accounts(user_id).find { |entry| entry["providerId"] == "credential" }
+    original_updated_at = account.fetch("updatedAt")
+
+    auth.api.request_password_reset(body: {email: "reset-updated-at@example.com"})
+    auth.api.reset_password(body: {token: sent.first.fetch(:token), newPassword: "new-password"})
+
+    updated_account = auth.context.internal_adapter.find_accounts(user_id).find { |entry| entry["providerId"] == "credential" }
+    assert_operator updated_account.fetch("updatedAt"), :>, original_updated_at
+  end
+
   def test_request_password_reset_does_not_leak_missing_users
     sent = []
     auth = build_auth(email_and_password: {send_reset_password: ->(data, _request = nil) { sent << data }})
@@ -54,8 +69,52 @@ class BetterAuthRoutesPasswordTest < Minitest::Test
       auth.api.request_password_reset(body: {email: "unsafe-redirect@example.com", redirectTo: "https://evil.example/reset"})
     end
 
+    assert_equal 403, error.status_code
+    assert_equal "FORBIDDEN", error.code
+    assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_REDIRECT_URL"], error.message
+    assert_empty sent
+  end
+
+  def test_request_password_reset_uses_upstream_disabled_error_code
+    auth = build_auth
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.request_password_reset(body: {email: "reset-disabled@example.com"})
+    end
+
     assert_equal 400, error.status_code
-    assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_CALLBACK_URL"], error.message
+    assert_equal "RESET_PASSWORD_DISABLED", error.code
+    assert_equal "Reset password isn't enabled", error.message
+  end
+
+  def test_request_password_reset_hides_sender_errors
+    auth = build_auth(
+      email_and_password: {
+        send_reset_password: ->(_data, _request = nil) { raise "smtp down" }
+      }
+    )
+    auth.api.sign_up_email(body: {email: "sender-error@example.com", password: "password123", name: "Reset"})
+
+    response = auth.api.request_password_reset(body: {email: "sender-error@example.com", redirectTo: "/reset"})
+
+    assert_equal({status: true, message: "If this email exists in our system, check your email for the reset link"}, response)
+  end
+
+  def test_request_password_reset_rejects_missing_or_invalid_email
+    sent = []
+    auth = build_auth(email_and_password: {send_reset_password: ->(data, _request = nil) { sent << data }})
+
+    missing = assert_raises(BetterAuth::APIError) do
+      auth.api.request_password_reset(body: {})
+    end
+    assert_equal 400, missing.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["VALIDATION_ERROR"], missing.message
+
+    invalid = assert_raises(BetterAuth::APIError) do
+      auth.api.request_password_reset(body: {email: "not-an-email"})
+    end
+    assert_equal 400, invalid.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["VALIDATION_ERROR"], invalid.message
     assert_empty sent
   end
 
@@ -103,6 +162,21 @@ class BetterAuthRoutesPasswordTest < Minitest::Test
     assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_CALLBACK_URL"], error.message
   end
 
+  def test_reset_password_callback_requires_callback_url
+    auth = build_auth(email_and_password: {send_reset_password: ->(_data, _request = nil) {}})
+    auth.api.sign_up_email(body: {email: "missing-callback-reset@example.com", password: "old-password", name: "Reset"})
+    auth.api.request_password_reset(body: {email: "missing-callback-reset@example.com", redirectTo: "/reset"})
+    verification = auth.context.adapter.find_many(model: "verification").first
+    token = verification["identifier"].delete_prefix("reset-password:")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.request_password_reset_callback(params: {token: token})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["VALIDATION_ERROR"], error.message
+  end
+
   def test_reset_password_rejects_invalid_password_and_cannot_reuse_token
     sent = []
     auth = build_auth(email_and_password: {send_reset_password: ->(data, _request = nil) { sent << data }})
@@ -122,6 +196,20 @@ class BetterAuthRoutesPasswordTest < Minitest::Test
     end
     assert_equal 400, reused.status_code
     assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_TOKEN"], reused.message
+  end
+
+  def test_reset_password_rejects_missing_new_password_before_token_lookup
+    sent = []
+    auth = build_auth(email_and_password: {send_reset_password: ->(data, _request = nil) { sent << data }})
+    auth.api.sign_up_email(body: {email: "missing-new-password@example.com", password: "old-password", name: "Reset"})
+    auth.api.request_password_reset(body: {email: "missing-new-password@example.com"})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.reset_password(body: {token: sent.first.fetch(:token)})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["VALIDATION_ERROR"], error.message
   end
 
   def test_reset_password_does_not_revoke_sessions_by_default

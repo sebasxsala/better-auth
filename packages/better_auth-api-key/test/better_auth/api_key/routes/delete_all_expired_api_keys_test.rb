@@ -1,0 +1,13 @@
+# frozen_string_literal: true
+
+require_relative "../test_support"
+
+class BetterAuthAPIKeyDeleteAllExpiredRouteTest < Minitest::Test
+  include APIKeyTestSupport
+
+  def test_delete_all_expired_route_returns_upstream_payload_shape
+    auth = build_api_key_auth(default_key_length: 12)
+
+    assert_equal({success: true, error: nil}, auth.api.delete_all_expired_api_keys)
+  end
+end

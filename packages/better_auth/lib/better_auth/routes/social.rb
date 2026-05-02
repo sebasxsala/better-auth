@@ -7,7 +7,49 @@ require "securerandom"
 module BetterAuth
   module Routes
     def self.sign_in_social
-      Endpoint.new(path: "/sign-in/social", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/sign-in/social",
+        method: "POST",
+        metadata: {
+          openapi: {
+            description: "Sign in with a social provider",
+            operationId: "socialSignIn",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  provider: {type: "string"},
+                  callbackURL: {type: ["string", "null"], description: "Callback URL to redirect to after the user has signed in"},
+                  errorCallbackURL: {type: ["string", "null"], description: "Callback URL to redirect to if an error happens"},
+                  newUserCallbackURL: {type: ["string", "null"]},
+                  disableRedirect: {type: ["boolean", "null"], description: "Disable automatic redirection to the provider. Useful for handling the redirection yourself"},
+                  requestSignUp: {type: ["boolean", "null"], description: "Explicitly request sign-up. Useful when disableImplicitSignUp is true for this provider"},
+                  loginHint: {type: ["string", "null"], description: "The login hint to use for the authorization code request"},
+                  additionalData: {type: ["string", "null"]},
+                  scopes: {type: ["array", "null"], description: "Array of scopes to request from the provider. This will override the default scopes passed."},
+                  idToken: {
+                    type: ["object", "null"],
+                    properties: {
+                      token: {type: "string", description: "ID token from the provider"},
+                      accessToken: {type: ["string", "null"], description: "Access token from the provider"},
+                      refreshToken: {type: ["string", "null"], description: "Refresh token from the provider"},
+                      expiresAt: {type: ["number", "null"], description: "Expiry date of the token"},
+                      nonce: {type: ["string", "null"], description: "Nonce used to generate the token"}
+                    },
+                    required: ["token"]
+                  }
+                },
+                required: ["provider"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Success - Returns either session details or redirect URL",
+                OpenAPI.session_response_schema(description: "Session response when idToken is provided")
+              )
+            }
+          }
+        }
+      ) do |ctx|
         body = normalize_hash(ctx.body)
         provider_id = body["provider"].to_s
         provider = social_provider(ctx.context, provider_id)
@@ -66,21 +108,38 @@ module BetterAuth
 
     def self.callback_oauth
       Endpoint.new(
-        path: "/callback/:providerId",
+        path: "/callback/:id",
         method: ["GET", "POST"],
-        metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}
+        metadata: {
+          allowed_media_types: ["application/x-www-form-urlencoded", "application/json"],
+          openapi: {
+            operationId: "callbackOAuth",
+            description: "Handle an OAuth provider callback",
+            parameters: [
+              {
+                name: "id",
+                in: "path",
+                required: true,
+                schema: {type: "string"}
+              }
+            ],
+            responses: {
+              "302" => {description: "Redirects to the configured callback URL"}
+            }
+          }
+        }
       ) do |ctx|
+        provider_id = (fetch_value(ctx.params, "id") || fetch_value(ctx.params, "providerId")).to_s
         if ctx.method == "POST"
           merged = normalize_hash(ctx.query).merge(normalize_hash(ctx.body))
           query = URI.encode_www_form(merged.reject { |_key, value| value.nil? || value.to_s.empty? })
-          target = "#{ctx.context.base_url}/callback/#{fetch_value(ctx.params, "providerId")}"
+          target = "#{ctx.context.base_url}/callback/#{provider_id}"
           target = "#{target}?#{query}" unless query.empty?
           raise ctx.redirect(target)
         end
 
         source = ctx.query
         data = normalize_hash(source)
-        provider_id = fetch_value(ctx.params, "providerId").to_s
         provider = social_provider(ctx.context, provider_id)
         state = data["state"].to_s
         state_data = state.empty? ? nil : Crypto.verify_jwt(state, ctx.context.secret)
@@ -132,7 +191,42 @@ module BetterAuth
     end
 
     def self.link_social
-      Endpoint.new(path: "/link-social", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/link-social",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "linkSocialAccount",
+            description: "Link a social account to the current user",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  provider: {type: "string"},
+                  callbackURL: {type: ["string", "null"]},
+                  errorCallbackURL: {type: ["string", "null"]},
+                  disableRedirect: {type: ["boolean", "null"]},
+                  scopes: {type: ["array", "null"], items: {type: "string"}},
+                  idToken: {type: ["object", "null"]}
+                },
+                required: ["provider"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Social account link started or completed",
+                OpenAPI.object_schema(
+                  {
+                    url: {type: "string"},
+                    redirect: {type: "boolean"},
+                    status: {type: ["boolean", "null"]}
+                  },
+                  required: ["url", "redirect"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         session = current_session(ctx)
         body = normalize_hash(ctx.body)
         provider_id = body["provider"].to_s
@@ -254,7 +348,8 @@ module BetterAuth
             image: fetch_value(user_info, "image"),
             emailVerified: !!fetch_value(user_info, "emailVerified")
           },
-          account_info.merge("providerId" => provider_id, "accountId" => account_id)
+          account_info.merge("providerId" => provider_id, "accountId" => account_id),
+          context: ctx
         )
         user = created[:user]
         new_user = true

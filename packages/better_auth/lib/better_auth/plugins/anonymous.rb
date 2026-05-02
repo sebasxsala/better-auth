@@ -40,7 +40,28 @@ module BetterAuth
     end
 
     def sign_in_anonymous_endpoint(config)
-      Endpoint.new(path: "/sign-in/anonymous", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/sign-in/anonymous",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "signInAnonymous",
+            description: "Sign in anonymously",
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Anonymous session created",
+                OpenAPI.object_schema(
+                  {
+                    token: {type: "string"},
+                    user: {type: "object", "$ref": "#/components/schemas/User"}
+                  },
+                  required: ["token", "user"]
+                )
+              )
+            }
+          }
+        }
+      ) do |ctx|
         existing_session = Session.find_current(ctx, disable_refresh: true)
         if existing_session&.dig(:user, "isAnonymous")
           raise APIError.new("BAD_REQUEST", message: ANONYMOUS_ERROR_CODES["ANONYMOUS_USERS_CANNOT_SIGN_IN_AGAIN_ANONYMOUSLY"])
@@ -54,7 +75,8 @@ module BetterAuth
           isAnonymous: true,
           name: name,
           createdAt: Time.now,
-          updatedAt: Time.now
+          updatedAt: Time.now,
+          context: ctx
         )
         raise APIError.new("INTERNAL_SERVER_ERROR", message: ANONYMOUS_ERROR_CODES["FAILED_TO_CREATE_USER"]) unless user
 
@@ -67,7 +89,19 @@ module BetterAuth
     end
 
     def delete_anonymous_user_endpoint(config)
-      Endpoint.new(path: "/delete-anonymous-user", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/delete-anonymous-user",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "deleteAnonymousUser",
+            description: "Delete the current anonymous user",
+            responses: {
+              "200" => OpenAPI.json_response("Anonymous user deleted", OpenAPI.success_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         session = Routes.current_session(ctx, sensitive: true)
 
         if config[:disable_delete_anonymous_user]

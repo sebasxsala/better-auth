@@ -37,6 +37,7 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
     end
 
     assert_equal 400, error.status_code
+    assert_equal "EMAIL_PASSWORD_SIGN_UP_DISABLED", error.code
     assert_equal "Email and password sign up is not enabled", error.message
   end
 
@@ -240,6 +241,18 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
     assert_equal BetterAuth::BASE_ERROR_CODES["PASSWORD_TOO_SHORT"], short_password.message
   end
 
+  def test_sign_up_email_rejects_missing_required_body_fields_before_creating_user
+    auth = build_auth
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_up_email(body: {email: "missing-name@example.com", password: "password123"})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["VALIDATION_ERROR"], error.message
+    assert_nil auth.context.internal_adapter.find_user_by_email("missing-name@example.com")
+  end
+
   def test_sign_up_email_rejects_duplicate_email
     auth = build_auth
 
@@ -273,6 +286,69 @@ class BetterAuthRoutesSignUpTest < Minitest::Test
     refute_equal original[:user]["id"], duplicate[:user]["id"]
     assert_equal 1, callbacks.length
     assert_equal "existing-verify@example.com", callbacks.first[:user]["email"]
+  end
+
+  def test_sign_up_duplicate_with_required_verification_returns_same_user_keys_in_same_order
+    auth = build_auth(
+      email_and_password: {require_email_verification: true},
+      email_verification: {send_on_sign_up: false},
+      user: {
+        additional_fields: {
+          displayName: {type: "string", required: false},
+          isAdmin: {type: "boolean", default_value: false, input: false}
+        }
+      }
+    )
+
+    first = auth.api.sign_up_email(body: {
+      email: "indistinguishable@example.com",
+      password: "password123",
+      name: "First User",
+      displayName: "FirstDisplay"
+    })
+    second = auth.api.sign_up_email(body: {
+      email: "indistinguishable@example.com",
+      password: "password456",
+      name: "Second Attempt",
+      displayName: "SecondDisplay"
+    })
+
+    assert_equal first.keys, second.keys
+    assert_equal first[:user].keys, second[:user].keys
+    assert_nil second[:token]
+    assert_equal "Second Attempt", second[:user]["name"]
+    assert_equal "SecondDisplay", second[:user]["displayName"]
+    assert_equal false, second[:user]["isAdmin"]
+    refute_equal first[:user]["id"], second[:user]["id"]
+  end
+
+  def test_sign_up_duplicate_custom_synthetic_user_can_return_admin_plugin_fields
+    auth = build_auth(
+      email_and_password: {
+        require_email_verification: true,
+        customSyntheticUser: lambda do |data|
+          core_fields = data[:coreFields]
+          additional_fields = data[:additionalFields]
+          core_fields.merge(
+            "role" => "user",
+            "banned" => false,
+            "banReason" => nil,
+            "banExpires" => nil
+          ).merge(additional_fields).merge("id" => data[:id])
+        end
+      },
+      email_verification: {send_on_sign_up: false},
+      plugins: [BetterAuth::Plugins.admin]
+    )
+
+    first = auth.api.sign_up_email(body: {email: "admin-enum@example.com", password: "password123", name: "First"})
+    second = auth.api.sign_up_email(body: {email: "admin-enum@example.com", password: "password456", name: "Second"})
+
+    assert_equal first[:user].keys, second[:user].keys
+    assert_equal "user", second[:user]["role"]
+    assert_equal false, second[:user]["banned"]
+    assert_nil second[:user]["banReason"]
+    assert_nil second[:user]["banExpires"]
   end
 
   def test_sign_up_existing_email_with_auto_sign_in_false_still_raises_without_verification

@@ -88,6 +88,8 @@ module BetterAuth
       error_response(error)
     rescue JSON::ParserError
       error_response(APIError.new("BAD_REQUEST", message: "Invalid JSON body"))
+    ensure
+      context.clear_runtime! if context.respond_to?(:clear_runtime!)
     end
 
     def self.conflicting_methods(entries)
@@ -360,7 +362,11 @@ module BetterAuth
     end
 
     def server_only?(endpoint)
-      endpoint.metadata[:server_only] || endpoint.metadata[:SERVER_ONLY] || endpoint.metadata["SERVER_ONLY"]
+      endpoint.metadata[:server_only] ||
+        endpoint.metadata[:SERVER_ONLY] ||
+        endpoint.metadata["SERVER_ONLY"] ||
+        endpoint.metadata[:scope].to_s == "server" ||
+        endpoint.metadata["scope"].to_s == "server"
     end
 
     def error_response(error, headers: {})

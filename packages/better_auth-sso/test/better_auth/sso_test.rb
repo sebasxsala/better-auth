@@ -158,7 +158,7 @@ class BetterAuthPluginsSSOTest < Minitest::Test
       }
     )
     cookie = sign_up_cookie(auth)
-    auth.api.register_sso_provider(
+    registered = auth.api.register_sso_provider(
       headers: {"cookie" => cookie},
       body: {
         providerId: "acme",
@@ -167,10 +167,11 @@ class BetterAuthPluginsSSOTest < Minitest::Test
         oidcConfig: {clientId: "client-id", clientSecret: "client-secret", skipDiscovery: true, authorizationEndpoint: "https://idp.acme.test/authorize"}
       }
     )
+    token = registered.fetch(:domainVerificationToken)
 
     requested = auth.api.request_domain_verification(headers: {"cookie" => cookie}, body: {providerId: "acme"})
-    assert_equal "acme", verification_requests.first.first
-    token = requested.fetch(:domainVerificationToken)
+    assert_empty verification_requests
+    assert_equal token, requested.fetch(:domainVerificationToken)
     assert_equal 24, token.length
 
     verified = auth.api.verify_domain(headers: {"cookie" => cookie}, body: {providerId: "acme"}, return_status: true)

@@ -8,17 +8,39 @@ module BetterAuth
       Endpoint.new(
         path: "/sign-in/email",
         method: "POST",
+        body_schema: request_body_schema(required_strings: %w[email password]),
         metadata: {
           allowed_media_types: [
             "application/x-www-form-urlencoded",
             "application/json"
-          ]
+          ],
+          openapi: {
+            operationId: "signInEmail",
+            description: "Sign in with email and password",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  email: {type: "string", description: "Email of the user"},
+                  password: {type: "string", description: "Password of the user"},
+                  callbackURL: {type: ["string", "null"], description: "Callback URL to use as a redirect for email verification"},
+                  rememberMe: {type: ["boolean", "null"], default: true, description: "If this is false, the session will not be remembered. Default is `true`."}
+                },
+                required: ["email", "password"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Success - Returns either session details or redirect URL",
+                OpenAPI.session_response_schema(description: "Session response when idToken is provided", nullable_url: true)
+              )
+            }
+          }
         }
       ) do |ctx|
         options = ctx.context.options
         email_config = options.email_and_password
         if email_config[:enabled] != true
-          raise APIError.new("BAD_REQUEST", message: "Email and password is not enabled")
+          raise APIError.new("BAD_REQUEST", code: "EMAIL_PASSWORD_DISABLED", message: BASE_ERROR_CODES["EMAIL_PASSWORD_DISABLED"])
         end
 
         body = normalize_hash(ctx.body)

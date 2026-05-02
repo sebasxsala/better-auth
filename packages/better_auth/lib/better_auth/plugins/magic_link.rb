@@ -28,7 +28,32 @@ module BetterAuth
     end
 
     def sign_in_magic_link_endpoint(config)
-      Endpoint.new(path: "/sign-in/magic-link", method: "POST") do |ctx|
+      Endpoint.new(
+        path: "/sign-in/magic-link",
+        method: "POST",
+        metadata: {
+          openapi: {
+            operationId: "signInMagicLink",
+            description: "Send a magic sign-in link",
+            requestBody: OpenAPI.json_request_body(
+              OpenAPI.object_schema(
+                {
+                  email: {type: "string", description: "The email address to sign in"},
+                  name: {type: ["string", "null"], description: "The user name to use when creating a new user"},
+                  callbackURL: {type: ["string", "null"]},
+                  errorCallbackURL: {type: ["string", "null"]},
+                  newUserCallbackURL: {type: ["string", "null"]},
+                  metadata: {type: ["object", "null"]}
+                },
+                required: ["email"]
+              )
+            ),
+            responses: {
+              "200" => OpenAPI.json_response("Magic link sent", OpenAPI.status_response_schema)
+            }
+          }
+        }
+      ) do |ctx|
         body = normalize_hash(ctx.body)
         email = body[:email].to_s.downcase
         raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["INVALID_EMAIL"]) unless Routes::EMAIL_PATTERN.match?(email)
@@ -51,7 +76,44 @@ module BetterAuth
     end
 
     def magic_link_verify_endpoint(config)
-      Endpoint.new(path: "/magic-link/verify", method: "GET") do |ctx|
+      Endpoint.new(
+        path: "/magic-link/verify",
+        method: "GET",
+        metadata: {
+          openapi: {
+            operationId: "magicLinkVerify",
+            description: "Verify a magic link token",
+            parameters: [
+              {
+                name: "token",
+                in: "query",
+                required: true,
+                schema: {type: "string"}
+              },
+              {
+                name: "callbackURL",
+                in: "query",
+                required: false,
+                schema: {type: "string"}
+              }
+            ],
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Magic link verified",
+                OpenAPI.object_schema(
+                  {
+                    token: {type: "string"},
+                    user: {type: "object", "$ref": "#/components/schemas/User"},
+                    session: {type: "object", "$ref": "#/components/schemas/Session"}
+                  },
+                  required: ["token", "user", "session"]
+                )
+              ),
+              "302" => {description: "Redirects to callback URL when callbackURL is provided"}
+            }
+          }
+        }
+      ) do |ctx|
         query = normalize_hash(ctx.query)
         token = query[:token].to_s
         callback_url = query[:callback_url] || "/"
@@ -97,7 +159,8 @@ module BetterAuth
           user = ctx.context.internal_adapter.create_user(
             email: email,
             emailVerified: true,
-            name: name || ""
+            name: name || "",
+            context: ctx
           )
           new_user = true
           redirect_with_error.call("failed_to_create_user") unless user

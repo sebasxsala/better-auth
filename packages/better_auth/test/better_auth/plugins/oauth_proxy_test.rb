@@ -71,6 +71,24 @@ class BetterAuthPluginsOAuthProxyTest < Minitest::Test
     assert_includes headers.fetch("set-cookie"), "state=statevalue"
   end
 
+  def test_oauth_proxy_uses_dedicated_secret_override
+    proxy_secret = "proxy-secret-that-is-long-enough-for-override"
+    auth = build_auth(plugins: [BetterAuth::Plugins.oauth_proxy(max_age: 60, secret: proxy_secret)])
+    payload = {
+      cookies: "sessionid=override-secret; Path=/; HttpOnly",
+      timestamp: (Time.now.to_f * 1000).to_i
+    }
+    encrypted = BetterAuth::Crypto.symmetric_encrypt(key: proxy_secret, data: JSON.generate(payload))
+
+    status, headers, _body = auth.api.o_auth_proxy(
+      query: {callbackURL: "/dashboard", cookies: encrypted},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_includes headers.fetch("set-cookie"), "sessionid=override-secret"
+  end
+
   def test_oauth_proxy_callback_rejects_expired_or_invalid_payloads
     auth = build_auth(plugins: [BetterAuth::Plugins.oauth_proxy(max_age: 5)])
     expired = BetterAuth::Crypto.symmetric_encrypt(

@@ -3,6 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import {
 	Binoculars,
 	Book,
+	Bot,
 	CircleHelp,
 	Database,
 	FlaskConical,
@@ -14,7 +15,9 @@ import {
 	Mailbox,
 	Phone,
 	ScanFace,
+	ScrollText,
 	ShieldCheck,
+	Sparkles,
 	TriangleAlertIcon,
 	UserCircle,
 	UserSquare2,
@@ -1331,12 +1334,12 @@ C0.7,239.6,62.1,0.5,62.2,0.4c0,0,54,13.8,119.9,30.8S302.1,62,302.2,62c0.2,0,0.2,
 		},
 		{
 			title: "Sinatra",
-			icon: Book,
+			icon: Icons.sinatra,
 			href: "/docs/integrations/sinatra",
 		},
 		{
 			title: "Hanami",
-			icon: Database,
+			icon: Icons.hanami,
 			href: "/docs/integrations/hanami",
 		},
 	],
@@ -1549,24 +1552,6 @@ C0.7,239.6,62.1,0.5,62.2,0.4c0,0,54,13.8,119.9,30.8S302.1,62,302.2,62c0.2,0,0.2,
 				group: true,
 				href: "",
 				icon: () => <LucideAArrowDown className="w-4 h-4" />,
-			},
-			{
-				title: "OIDC Provider",
-				href: "/docs/plugins/oidc-provider",
-				icon: () => (
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						width="1.2em"
-						height="1.2em"
-						viewBox="0 0 32 32"
-					>
-						<path
-							fill="currentColor"
-							d="M16 2a8 8 0 1 0 8 8a8.01 8.01 0 0 0-8-8m5.91 7h-2.438a15.3 15.3 0 0 0-.791-4.36A6.01 6.01 0 0 1 21.91 9m-5.888 6.999h-.008c-.38-.12-1.309-1.821-1.479-4.999h2.93c-.17 3.176-1.094 4.877-1.443 4.999M14.535 9c.17-3.176 1.094-4.877 1.443-4.999h.008c.38.12 1.309 1.821 1.479 4.999zM13.32 4.64A15.3 15.3 0 0 0 12.528 9H10.09a6.01 6.01 0 0 1 3.23-4.36M10.09 11h2.437a15.3 15.3 0 0 0 .792 4.36A6.01 6.01 0 0 1 10.09 11m8.59 4.36a15.3 15.3 0 0 0 .792-4.36h2.438a6.01 6.01 0 0 1-3.23 4.36M28 30H4a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h24a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2M4 22v6h24v-6z"
-						></path>
-						<circle cx="7" cy="25" r="1" fill="currentColor"></circle>
-					</svg>
-				),
 			},
 			{
 				title: "OAuth Provider",
@@ -1839,6 +1824,49 @@ C0.7,239.6,62.1,0.5,62.2,0.4c0,0,54,13.8,119.9,30.8S302.1,62,302.2,62c0.2,0,0.2,
 					</svg>
 				),
 			},
+			{
+				title: "Others",
+				group: true,
+				href: "",
+				icon: () => <LucideAArrowDown className="w-4 h-4" />,
+			},
+			{
+				title: "Dub",
+				href: "/docs/plugins/dub",
+				icon: () => (
+					<svg
+						width="1.2em"
+						height="1.2em"
+						viewBox="0 0 65 64"
+						fill="none"
+						xmlns="http://www.w3.org/2000/svg"
+					>
+						<path
+							fillRule="evenodd"
+							clipRule="evenodd"
+							d="M32.5 64C50.1731 64 64.5 49.6731 64.5 32C64.5 20.1555 58.0648 9.81393 48.5 4.28099V31.9999V47.9998H40.5V45.8594C38.1466 47.2207 35.4143 47.9999 32.5 47.9999C23.6634 47.9999 16.5 40.8364 16.5 31.9999C16.5 23.1633 23.6634 15.9999 32.5 15.9999C35.4143 15.9999 38.1466 16.779 40.5 18.1404V1.00812C37.943 0.350018 35.2624 0 32.5 0C14.8269 0 0.500038 14.3269 0.500038 32C0.500038 49.6731 14.8269 64 32.5 64Z"
+							fill="currentColor"
+						/>
+					</svg>
+				),
+				isNew: true,
+			},
+		],
+	},
+	{
+		title: "AI Resources",
+		Icon: () => <Sparkles className="w-4 h-4 text-current" />,
+		list: [
+			{
+				title: "Skills",
+				href: "/docs/ai-resources/skills",
+				icon: () => <Bot className="w-4 h-4 text-current" />,
+			},
+			{
+				title: "LLMs.txt",
+				href: "/llms.txt",
+				icon: () => <ScrollText className="w-4 h-4 text-current" />,
+			},
 		],
 	},
 	{
@@ -2008,6 +2036,53 @@ C0.7,239.6,62.1,0.5,62.2,0.4c0,0,54,13.8,119.9,30.8S302.1,62,302.2,62c0.2,0,0.2,
 				title: "FAQ",
 				href: "/docs/reference/faq",
 				icon: () => <CircleHelp className="w-4 h-4 text-current" />,
+			},
+		],
+	},
+	{
+		title: "Guides",
+		Icon: () => (
+			<svg
+				xmlns="http://www.w3.org/2000/svg"
+				width="1.4em"
+				height="1.4em"
+				viewBox="0 0 24 24"
+			>
+				<path
+					fill="currentColor"
+					fillRule="evenodd"
+					d="M4.172 3.172C3 4.343 3 6.229 3 10v4c0 3.771 0 5.657 1.172 6.828C5.343 22 7.229 22 11 22h2c3.771 0 5.657 0 6.828-1.172C21 19.657 21 17.771 21 14v-4c0-3.771 0-5.657-1.172-6.828C18.657 2 16.771 2 13 2h-2C7.229 2 5.343 2 4.172 3.172M8 9a1 1 0 0 1 1-1h6a1 1 0 1 1 0 2H9a1 1 0 0 1-1-1m0 4a1 1 0 0 1 1-1h6a1 1 0 1 1 0 2H9a1 1 0 0 1-1-1"
+					clipRule="evenodd"
+				/>
+			</svg>
+		),
+		list: [
+			{
+				title: "Optimizing for Performance",
+				href: "/docs/guides/optimizing-for-performance",
+				icon: () => <Gauge className="w-4 h-4" />,
+			},
+			{
+				title: "Dynamic Base URL",
+				href: "/docs/guides/dynamic-base-url",
+				icon: () => (
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						width="1.2em"
+						height="1.2em"
+						viewBox="0 0 24 24"
+					>
+						<path
+							fill="currentColor"
+							d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1M8 13h8v-2H8zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5"
+						/>
+					</svg>
+				),
+			},
+			{
+				title: "SAML SSO with Okta",
+				href: "/docs/guides/saml-sso-with-okta",
+				icon: () => <ShieldCheck className="w-4 h-4" />,
 			},
 		],
 	},
