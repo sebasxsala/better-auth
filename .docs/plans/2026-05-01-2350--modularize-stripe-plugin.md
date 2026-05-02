@@ -773,7 +773,7 @@ rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/organization_ho
 
 Expected: all moved organization hook tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/better_auth-stripe/lib/better_auth/stripe/organization_hooks.rb packages/better_auth-stripe/lib/better_auth/plugins/stripe.rb packages/better_auth-stripe/test/better_auth/stripe/organization_hooks_test.rb packages/better_auth-stripe/test/better_auth/plugins/stripe_organization_test.rb .docs/plans/2026-05-01-2350--modularize-stripe-plugin.md
