@@ -4,10 +4,11 @@ module BetterAuth
   module SSO
     module OIDC
       class DiscoveryError < StandardError
-        attr_reader :code
+        attr_reader :code, :details
 
-        def initialize(code, message)
+        def initialize(code, message, details: {})
           @code = code
+          @details = details
           super(message)
         end
       end

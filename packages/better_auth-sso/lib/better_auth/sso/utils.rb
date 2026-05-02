@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "openssl"
 
 module BetterAuth
   module SSO
@@ -25,7 +26,21 @@ module BetterAuth
       end
 
       def parse_certificate(cert)
-        BetterAuth::Plugins.sso_parse_certificate(cert)
+        value = cert.to_s
+        normalized = if value.include?("-----BEGIN")
+          value
+        else
+          body = value.delete("\n\r\t ")
+          "-----BEGIN CERTIFICATE-----\n#{body.scan(/.{1,64}/).join("\n")}\n-----END CERTIFICATE-----"
+        end
+        certificate = OpenSSL::X509::Certificate.new(normalized)
+        fingerprint = OpenSSL::Digest::SHA256.hexdigest(certificate.to_der).upcase.scan(/../).join(":")
+        {
+          fingerprint_sha256: fingerprint,
+          not_before: certificate.not_before,
+          not_after: certificate.not_after,
+          public_key_algorithm: certificate.public_key.class.name.split("::").last.upcase
+        }
       end
 
       def hostname_from_domain(domain)

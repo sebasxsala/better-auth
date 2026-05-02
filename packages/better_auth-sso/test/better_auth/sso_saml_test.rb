@@ -1075,6 +1075,182 @@ class BetterAuthPluginsSSOSAMLTest < Minitest::Test
     assert_equal "http://localhost:3000/api/auth", headers.fetch("location")
   end
 
+  def test_saml_relay_state_is_opaque_and_stored_in_verification
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    auth.api.register_sso_provider(
+      headers: {"cookie" => cookie},
+      body: {
+        providerId: "saml",
+        issuer: "https://idp.example.com",
+        domain: "example.com",
+        samlConfig: {entryPoint: "https://idp.example.com/sso", cert: "test-cert", audience: "better-auth-ruby"}
+      }
+    )
+
+    sign_in = auth.api.sign_in_sso(body: {providerId: "saml", callbackURL: "/dashboard"})
+    relay_state = Rack::Utils.parse_query(URI.parse(sign_in.fetch(:url)).query).fetch("RelayState")
+    stored = auth.context.internal_adapter.find_verification_value("saml-relay-state:#{relay_state}")
+    state = JSON.parse(stored.fetch("value"))
+
+    assert_match(/\A[a-zA-Z0-9_-]{24,}\z/, relay_state)
+    assert_equal "/dashboard", state.fetch("callbackURL")
+    assert_nil BetterAuth::Plugins.sso_verify_state(relay_state, SECRET)
+  end
+
+  def test_saml_existing_email_requires_trusted_provider_for_account_linking
+    auth = build_auth(
+      account: {account_linking: {enabled: true, trusted_providers: []}},
+      plugins: [
+        BetterAuth::Plugins.sso(
+          saml: {
+            parse_response: ->(**_data) {
+              {email: "existing-saml@example.com", name: "Existing SAML", id: "saml-existing-id"}
+            }
+          }
+        )
+      ]
+    )
+    sign_up_cookie(auth, email: "existing-saml@example.com")
+    owner_cookie = sign_up_cookie(auth, email: "owner-linking@example.com")
+    auth.api.register_sso_provider(
+      headers: {"cookie" => owner_cookie},
+      body: {
+        providerId: "saml-link",
+        issuer: "https://idp.example.com",
+        domain: "example.com",
+        samlConfig: {entryPoint: "https://idp.example.com/sso", cert: "test-cert", audience: "better-auth-ruby"}
+      }
+    )
+
+    status, headers, _body = auth.api.acs_endpoint(
+      params: {providerId: "saml-link"},
+      body: {SAMLResponse: Base64.strict_encode64(JSON.generate({ignored: true}))},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_equal "/?error=account_not_linked", headers.fetch("location")
+    user = auth.context.internal_adapter.find_user_by_email("existing-saml@example.com").fetch(:user)
+    refute auth.context.internal_adapter.find_accounts(user.fetch("id")).any? { |account| account["providerId"] == "saml-link" }
+  end
+
+  def test_saml_trusted_provider_links_existing_email_with_upstream_provider_id
+    auth = build_auth(
+      account: {account_linking: {enabled: true, trusted_providers: ["saml-link"]}},
+      plugins: [
+        BetterAuth::Plugins.sso(
+          saml: {
+            parse_response: ->(**_data) {
+              {email: "trusted-saml@example.com", name: "Trusted SAML", id: "trusted-saml-id"}
+            }
+          }
+        )
+      ]
+    )
+    sign_up_cookie(auth, email: "trusted-saml@example.com")
+    owner_cookie = sign_up_cookie(auth, email: "owner-trusted@example.com")
+    auth.api.register_sso_provider(
+      headers: {"cookie" => owner_cookie},
+      body: {
+        providerId: "saml-link",
+        issuer: "https://idp.example.com",
+        domain: "example.com",
+        samlConfig: {entryPoint: "https://idp.example.com/sso", cert: "test-cert", audience: "better-auth-ruby"}
+      }
+    )
+
+    status, headers, _body = auth.api.acs_endpoint(
+      params: {providerId: "saml-link"},
+      body: {SAMLResponse: Base64.strict_encode64(JSON.generate({ignored: true}))},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_equal "/", headers.fetch("location")
+    user = auth.context.internal_adapter.find_user_by_email("trusted-saml@example.com").fetch(:user)
+    account = auth.context.internal_adapter.find_account_by_provider_id("trusted-saml-id", "saml-link")
+    assert_equal user.fetch("id"), account.fetch("userId")
+  end
+
+  def test_saml_sign_in_uses_idp_metadata_sso_fallbacks_and_entity_id
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    auth.api.register_sso_provider(
+      headers: {"cookie" => cookie},
+      body: {
+        providerId: "saml-metadata",
+        issuer: "https://fallback.example.com/issuer",
+        domain: "example.com",
+        samlConfig: {
+          cert: "fallback-cert",
+          audience: "better-auth-ruby",
+          idpMetadata: {
+            metadata: <<~XML
+              <md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://idp.example.com/entity">
+                <md:IDPSSODescriptor>
+                  <md:KeyDescriptor use="signing"><ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:X509Data><ds:X509Certificate>metadata-cert</ds:X509Certificate></ds:X509Data></ds:KeyInfo></md:KeyDescriptor>
+                  <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://idp.example.com/redirect"/>
+                  <md:SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://idp.example.com/logout"/>
+                </md:IDPSSODescriptor>
+              </md:EntityDescriptor>
+            XML
+          }
+        }
+      }
+    )
+
+    provider = auth.context.adapter.find_one(model: "ssoProvider", where: [{field: "providerId", value: "saml-metadata"}])
+    sign_in = auth.api.sign_in_sso(body: {providerId: "saml-metadata", callbackURL: "/dashboard"})
+
+    assert_match %r{\Ahttps://idp\.example\.com/redirect\?}, sign_in.fetch(:url)
+    assert_equal "https://idp.example.com/entity", BetterAuth::Plugins.sso_saml_idp_metadata(provider)[:entity_id]
+    assert_equal "https://idp.example.com/logout", BetterAuth::Plugins.sso_saml_logout_destination(provider)
+  end
+
+  def test_saml_slo_redirects_include_signature_when_signing_flags_are_enabled
+    private_key = saml_sp_private_key
+    auth = build_auth(plugins: [BetterAuth::Plugins.sso(saml: {enable_single_logout: true, want_logout_request_signed: true, want_logout_response_signed: true})])
+    cookie = sign_up_cookie(auth)
+    auth.api.register_sso_provider(
+      headers: {"cookie" => cookie},
+      body: {
+        providerId: "saml-signed-slo",
+        issuer: "https://idp.example.com",
+        domain: "example.com",
+        samlConfig: {
+          entryPoint: "https://idp.example.com/sso",
+          singleLogoutService: "https://idp.example.com/slo",
+          cert: "test-cert",
+          audience: "better-auth-ruby",
+          privateKey: private_key.to_pem
+        }
+      }
+    )
+
+    status, initiated_headers, _body = auth.api.initiate_slo(
+      headers: {"cookie" => cookie},
+      params: {providerId: "saml-signed-slo"},
+      body: {callbackURL: "/after-logout"},
+      as_response: true
+    )
+    assert_equal 302, status
+    request_params = Rack::Utils.parse_query(URI.parse(initiated_headers.fetch("location")).query)
+    assert_equal XMLSecurity::Document::RSA_SHA256, request_params.fetch("SigAlg")
+    assert request_params.fetch("Signature")
+
+    logout_request = saml_logout_request(name_id: "name-id", session_index: "session-index")
+    status, response_headers, _body = auth.api.slo_endpoint(
+      params: {providerId: "saml-signed-slo"},
+      query: {SAMLRequest: logout_request, RelayState: "/signed-out"},
+      as_response: true
+    )
+    assert_equal 302, status
+    response_params = Rack::Utils.parse_query(URI.parse(response_headers.fetch("location")).query)
+    assert_equal XMLSecurity::Document::RSA_SHA256, response_params.fetch("SigAlg")
+    assert response_params.fetch("Signature")
+  end
+
   def test_saml_sign_in_stores_authn_request_for_in_response_to_validation
     auth = build_auth
     cookie = sign_up_cookie(auth)
