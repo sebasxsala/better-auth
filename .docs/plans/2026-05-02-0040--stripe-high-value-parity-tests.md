@@ -29,7 +29,7 @@
 
 ## Scope
 
-- [ ] Add 21 new tests.
+- [x] Add 21 new tests.
 - [x] Do not port all upstream tests 1:1.
 - [x] Prefer database-backed Better Auth behavior over isolated mocks.
 - [x] Use existing fake Stripe helpers instead of introducing a new fake client.
@@ -783,7 +783,7 @@ git commit -m "test(stripe): cover seat billing edge cases"
 **Files:**
 - Modify: `.docs/plans/2026-05-02-0040--stripe-high-value-parity-tests.md`
 
-- [ ] **Step 1: Run full package suite**
+- [x] **Step 1: Run full package suite**
 
 Run:
 
@@ -794,7 +794,7 @@ rbenv exec bundle exec rake test
 
 Expected: all tests pass. The suite should have 120 tests after this plan.
 
-- [ ] **Step 2: Run style check**
+- [x] **Step 2: Run style check**
 
 Run:
 
@@ -805,7 +805,7 @@ rbenv exec bundle exec standardrb
 
 Expected: exits with status 0.
 
-- [ ] **Step 3: Run root smoke**
+- [x] **Step 3: Run root smoke**
 
 Run:
 
@@ -815,11 +815,34 @@ rbenv exec bundle exec ruby -Ipackages/better_auth-stripe/lib -e 'require "bette
 
 Expected: prints `stripe`.
 
-- [ ] **Step 4: Update this plan with final counts**
+- [x] **Step 4: Update this plan with final counts**
 
 Append the exact final verification output below this step after running the commands. The expected final test count is 120 because this plan adds 21 tests to the current 99-test suite.
 
-- [ ] **Step 5: Commit**
+Final verification output:
+
+```text
+$ cd packages/better_auth-stripe
+$ rbenv exec bundle exec rake test
+Run options: --seed 3912
+
+# Running:
+
+........................................................................................................................
+
+Finished in 5.176764s, 23.1805 runs/s, 99.4830 assertions/s.
+
+120 runs, 515 assertions, 0 failures, 0 errors, 0 skips
+
+$ rbenv exec bundle exec standardrb
+# exited 0, no output
+
+$ cd ../..
+$ rbenv exec bundle exec ruby -Ipackages/better_auth-stripe/lib -e 'require "better_auth/stripe"; plugin = BetterAuth::Plugins.stripe(subscription: {enabled: true, plans: []}); puts plugin.id'
+stripe
+```
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add .docs/plans/2026-05-02-0040--stripe-high-value-parity-tests.md
