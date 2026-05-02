@@ -1,75 +1,6 @@
 # frozen_string_literal: true
 
 require "securerandom"
-require "stripe"
-
-module BetterAuth
-  module Stripe
-    class ClientAdapter
-      attr_reader :customers, :checkout, :billing_portal, :subscriptions, :prices, :subscription_schedules, :webhooks
-
-      def initialize(api_key)
-        client = ::Stripe::StripeClient.new(api_key)
-        @customers = ResourceAdapter.new(client.v1.customers)
-        @checkout = NamespaceAdapter.new(sessions: ResourceAdapter.new(client.v1.checkout.sessions))
-        @billing_portal = NamespaceAdapter.new(sessions: ResourceAdapter.new(client.v1.billing_portal.sessions))
-        @subscriptions = ResourceAdapter.new(client.v1.subscriptions)
-        @prices = ResourceAdapter.new(client.v1.prices)
-        @subscription_schedules = ResourceAdapter.new(client.v1.subscription_schedules)
-        @webhooks = WebhooksAdapter.new
-      end
-    end
-
-    class NamespaceAdapter
-      def initialize(resources)
-        resources.each do |name, resource|
-          instance_variable_set(:"@#{name}", resource)
-          self.class.attr_reader(name) unless respond_to?(name)
-        end
-      end
-    end
-
-    class ResourceAdapter
-      def initialize(resource)
-        @resource = resource
-      end
-
-      def create(params = {}, options = nil)
-        options ? @resource.create(params || {}, options) : @resource.create(params || {})
-      end
-
-      def list(params = {})
-        @resource.list(params || {})
-      end
-
-      def search(params = {})
-        @resource.search(params || {})
-      end
-
-      def retrieve(id)
-        @resource.retrieve(id)
-      end
-
-      def update(id, params = {})
-        @resource.update(id, params || {})
-      end
-
-      def release(id)
-        @resource.release(id)
-      end
-    end
-
-    class WebhooksAdapter
-      def construct_event(payload, signature, secret)
-        ::Stripe::Webhook.construct_event(payload, signature, secret)
-      end
-
-      def construct_event_async(payload, signature, secret)
-        construct_event(payload, signature, secret)
-      end
-    end
-  end
-end
 
 module BetterAuth
   module Plugins
@@ -79,30 +10,7 @@ module BetterAuth
 
     module_function
 
-    STRIPE_ERROR_CODES = {
-      "UNAUTHORIZED" => "Unauthorized access",
-      "EMAIL_VERIFICATION_REQUIRED" => "Email verification required",
-      "SUBSCRIPTION_NOT_FOUND" => "Subscription not found",
-      "SUBSCRIPTION_PLAN_NOT_FOUND" => "Subscription plan not found",
-      "ALREADY_SUBSCRIBED_PLAN" => "You're already subscribed to this plan",
-      "REFERENCE_ID_NOT_ALLOWED" => "Reference id is not allowed",
-      "CUSTOMER_NOT_FOUND" => "Stripe customer not found for this user",
-      "UNABLE_TO_CREATE_CUSTOMER" => "Unable to create customer",
-      "UNABLE_TO_CREATE_BILLING_PORTAL" => "Unable to create billing portal session",
-      "ORGANIZATION_NOT_FOUND" => "Organization not found",
-      "ORGANIZATION_SUBSCRIPTION_NOT_ENABLED" => "Organization subscription is not enabled",
-      "AUTHORIZE_REFERENCE_REQUIRED" => "Organization subscriptions require authorizeReference callback to be configured",
-      "ORGANIZATION_HAS_ACTIVE_SUBSCRIPTION" => "Cannot delete organization with active subscription",
-      "ORGANIZATION_REFERENCE_ID_REQUIRED" => "Reference ID is required. Provide referenceId or set activeOrganizationId in session",
-      "SUBSCRIPTION_NOT_ACTIVE" => "Subscription is not active",
-      "SUBSCRIPTION_NOT_SCHEDULED_FOR_CANCELLATION" => "Subscription is not scheduled for cancellation",
-      "STRIPE_SIGNATURE_NOT_FOUND" => "Stripe signature not found",
-      "STRIPE_WEBHOOK_SECRET_NOT_FOUND" => "Stripe webhook secret not found",
-      "FAILED_TO_CONSTRUCT_STRIPE_EVENT" => "Failed to construct Stripe event",
-      "STRIPE_WEBHOOK_ERROR" => "Stripe webhook error",
-      "INVALID_CUSTOMER_TYPE" => "Customer type must be either user or organization",
-      "INVALID_REQUEST_BODY" => "Invalid request body"
-    }.freeze
+    STRIPE_ERROR_CODES = BetterAuth::Stripe::ERROR_CODES
     STRIPE_UNSAFE_METADATA_KEYS = %w[__proto__ constructor prototype].freeze
 
     def stripe(options = {})

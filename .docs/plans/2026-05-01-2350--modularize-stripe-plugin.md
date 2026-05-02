@@ -185,7 +185,7 @@ rbenv exec bundle exec ruby -Ipackages/better_auth-stripe/lib -e 'require "bette
 
 Expected: prints the gem version and exits with status 0.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/better_auth-stripe/lib/better_auth/stripe.rb packages/better_auth-stripe/lib/better_auth/stripe packages/better_auth-stripe/lib/better_auth/plugins/stripe.rb .docs/plans/2026-05-01-2350--modularize-stripe-plugin.md
@@ -200,7 +200,7 @@ git commit -m "refactor(stripe): add modular file skeleton"
 - Modify: `packages/better_auth-stripe/lib/better_auth/stripe/error_codes.rb`
 - Test: `packages/better_auth-stripe/test/better_auth/stripe/client_adapter_test.rb`
 
-- [ ] **Step 1: Move Stripe SDK adapter classes**
+- [x] **Step 1: Move Stripe SDK adapter classes**
 
 Move these classes verbatim from `plugins/stripe.rb` to `client_adapter.rb`:
 
@@ -213,7 +213,7 @@ BetterAuth::Stripe::WebhooksAdapter
 
 `client_adapter.rb` must require `stripe` and `securerandom` only if the moved code still needs them in that file.
 
-- [ ] **Step 2: Move error constants**
+- [x] **Step 2: Move error constants**
 
 Move `STRIPE_ERROR_CODES` to `BetterAuth::Stripe::ERROR_CODES` in `error_codes.rb`, preserving every key and message currently in `plugins/stripe.rb`.
 
@@ -229,7 +229,7 @@ end
 
 inside the facade so existing tests and users can still reference `BetterAuth::Plugins::STRIPE_ERROR_CODES`.
 
-- [ ] **Step 3: Add adapter smoke tests**
+- [x] **Step 3: Add adapter smoke tests**
 
 Create `client_adapter_test.rb` with:
 
@@ -253,7 +253,7 @@ class BetterAuthStripeClientAdapterTest < Minitest::Test
 end
 ```
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run:
 
