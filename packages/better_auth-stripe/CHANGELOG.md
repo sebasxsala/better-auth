@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-02
+
+- Modularized the Stripe plugin into upstream-aligned client, schema, middleware, hooks, route, metadata, type, and utility modules while keeping the existing public facade.
+- Added high-value parity coverage for schema merging, plugin version metadata, reference authorization, subscription routes, webhook edge cases, and seat-based billing.
+- Preserved custom schema field names and exposed plugin version metadata for closer upstream Better Auth parity.
+
 ## [0.2.1] - 2026-04-30
 
 - Fixed Stripe checkout and subscription parity edge cases for reused customer IDs, plugin-owned schedule releases, missing checkout sessions, plan limits, and organization reference validation.
