@@ -706,7 +706,7 @@ rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/hooks_test.rb
 
 Expected: all moved hook tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/better_auth-stripe/lib/better_auth/stripe/hooks.rb packages/better_auth-stripe/lib/better_auth/plugins/stripe.rb packages/better_auth-stripe/test/better_auth/stripe/hooks_test.rb packages/better_auth-stripe/test/better_auth/plugins/stripe_test.rb .docs/plans/2026-05-01-2350--modularize-stripe-plugin.md
@@ -720,7 +720,7 @@ git commit -m "refactor(stripe): extract webhook hooks"
 - Modify: `packages/better_auth-stripe/lib/better_auth/stripe/organization_hooks.rb`
 - Test: `packages/better_auth-stripe/test/better_auth/stripe/organization_hooks_test.rb`
 
-- [ ] **Step 1: Move organization hook factory**
+- [x] **Step 1: Move organization hook factory**
 
 Move these methods to `BetterAuth::Stripe::OrganizationHooks`:
 
@@ -736,7 +736,7 @@ def self.hooks(config)
 def self.sync_seats(config, data, ctx)
 ```
 
-- [ ] **Step 2: Preserve upstream hook names through Ruby adapter names**
+- [x] **Step 2: Preserve upstream hook names through Ruby adapter names**
 
 The returned hash must continue to use current Ruby organization hook keys:
 
@@ -750,9 +750,11 @@ The returned hash must continue to use current Ruby organization hook keys:
 
 Document in this plan that upstream camelCase hook names are adapted to Ruby snake_case because the Ruby organization plugin expects snake_case.
 
-- [ ] **Step 3: Add organization hook tests**
+- [x] **Step 3: Add organization hook tests**
 
-Move these existing tests from `stripe_organization_test.rb` into `organization_hooks_test.rb`:
+Ruby adaptation: added modular API tests in `packages/better_auth-stripe/test/better_auth/stripe/organization_hooks_test.rb`; the behavior-heavy organization integration tests below stay in `stripe_organization_test.rb` until route extraction reduces shared setup duplication.
+
+Move these existing tests from `stripe_organization_test.rb` into `organization_hooks_test.rb` after route extraction:
 
 ```ruby
 test_organization_member_removal_syncs_seat_quantity
@@ -761,7 +763,7 @@ test_organization_webhooks_and_delete_guard
 test_organization_name_sync_and_deletion_without_active_subscription
 ```
 
-- [ ] **Step 4: Run organization hook tests**
+- [x] **Step 4: Run organization hook tests**
 
 Run:
 

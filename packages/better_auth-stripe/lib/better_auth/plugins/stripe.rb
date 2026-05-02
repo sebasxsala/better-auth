@@ -78,35 +78,7 @@ module BetterAuth
     end
 
     def stripe_organization_hooks(config)
-      return {} unless config.dig(:organization, :enabled)
-
-      {
-        after_update_organization: lambda do |data, _ctx|
-          organization = data[:organization] || data["organization"]
-          next unless organization && organization["stripeCustomerId"]
-
-          customer = stripe_client(config).customers.retrieve(organization["stripeCustomerId"])
-          next if stripe_fetch(customer, "deleted")
-          next if stripe_fetch(customer, "name") == organization["name"]
-
-          stripe_client(config).customers.update(organization["stripeCustomerId"], name: organization["name"])
-        rescue
-          nil
-        end,
-        before_delete_organization: lambda do |data, _ctx|
-          organization = data[:organization] || data["organization"]
-          next unless organization && organization["stripeCustomerId"]
-
-          subscriptions = stripe_client(config).subscriptions.list(customer: organization["stripeCustomerId"], status: "all", limit: 100)
-          active = Array(stripe_fetch(subscriptions, "data")).any? do |subscription|
-            !%w[canceled incomplete incomplete_expired].include?(stripe_fetch(subscription, "status").to_s)
-          end
-          raise APIError.new("BAD_REQUEST", message: STRIPE_ERROR_CODES.fetch("ORGANIZATION_HAS_ACTIVE_SUBSCRIPTION")) if active
-        end,
-        after_add_member: ->(data, ctx) { stripe_sync_organization_seats(config, data, ctx) },
-        after_remove_member: ->(data, ctx) { stripe_sync_organization_seats(config, data, ctx) },
-        after_accept_invitation: ->(data, ctx) { stripe_sync_organization_seats(config, data, ctx) }
-      }
+      BetterAuth::Stripe::OrganizationHooks.hooks(config)
     end
 
     def stripe_upgrade_subscription_endpoint(config)
@@ -803,35 +775,7 @@ module BetterAuth
     end
 
     def stripe_sync_organization_seats(config, data, ctx)
-      organization = data[:organization] || data["organization"]
-      return unless config.dig(:subscription, :enabled) && organization && organization["stripeCustomerId"]
-
-      member_count = ctx.context.adapter.count(model: "member", where: [{field: "organizationId", value: organization.fetch("id")}])
-      seat_plans = stripe_plans(config).select { |plan| plan[:seat_price_id] }
-      return if seat_plans.empty?
-
-      subscription = ctx.context.adapter.find_many(model: "subscription", where: [{field: "referenceId", value: organization.fetch("id")}]).find { |entry| stripe_active_or_trialing?(entry) }
-      return unless subscription && subscription["stripeSubscriptionId"]
-
-      plan = seat_plans.find { |entry| entry[:name].to_s.downcase == subscription["plan"].to_s.downcase }
-      return unless plan
-
-      stripe_subscription = stripe_client(config).subscriptions.retrieve(subscription["stripeSubscriptionId"])
-      return unless stripe_active_or_trialing?(stripe_subscription)
-
-      items = Array(stripe_fetch(stripe_fetch(stripe_subscription, "items") || {}, "data"))
-      seat_item = items.find { |item| stripe_fetch(stripe_fetch(item, "price") || {}, "id") == plan[:seat_price_id] }
-      return if seat_item && stripe_fetch(seat_item, "quantity").to_i == member_count.to_i
-
-      update_items = if seat_item
-        [{id: stripe_fetch(seat_item, "id"), quantity: member_count}]
-      else
-        [{price: plan[:seat_price_id], quantity: member_count}]
-      end
-      stripe_client(config).subscriptions.update(subscription["stripeSubscriptionId"], items: update_items, proration_behavior: plan[:proration_behavior] || "create_prorations")
-      ctx.context.adapter.update(model: "subscription", where: [{field: "id", value: subscription.fetch("id")}], update: {seats: member_count})
-    rescue
-      nil
+      BetterAuth::Stripe::OrganizationHooks.sync_seats(config, data, ctx)
     end
 
     def stripe_metered_price?(config, price_id, lookup_key = nil)
