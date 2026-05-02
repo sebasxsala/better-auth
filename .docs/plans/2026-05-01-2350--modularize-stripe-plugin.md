@@ -567,7 +567,7 @@ rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/utils_test.rb
 
 Expected: 3 runs, 0 failures.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/better_auth-stripe/lib/better_auth/stripe/utils.rb packages/better_auth-stripe/lib/better_auth/stripe/types.rb packages/better_auth-stripe/lib/better_auth/plugins/stripe.rb packages/better_auth-stripe/test/better_auth/stripe/utils_test.rb .docs/plans/2026-05-01-2350--modularize-stripe-plugin.md
@@ -581,7 +581,7 @@ git commit -m "refactor(stripe): extract utility helpers"
 - Modify: `packages/better_auth-stripe/lib/better_auth/stripe/middleware.rb`
 - Test: `packages/better_auth-stripe/test/better_auth/stripe/routes/upgrade_subscription_test.rb`
 
-- [ ] **Step 1: Move reference and customer type helpers**
+- [x] **Step 1: Move reference and customer type helpers**
 
 Move these methods to `BetterAuth::Stripe::Middleware`:
 
@@ -594,7 +594,7 @@ stripe_reference_by_customer
 
 Keep facade delegators for existing test access.
 
-- [ ] **Step 2: Preserve Ruby request key compatibility**
+- [x] **Step 2: Preserve Ruby request key compatibility**
 
 The module methods must accept both snake_case and camelCase inputs through the existing normalized body behavior. Preserve accepted keys:
 
@@ -607,9 +607,11 @@ The module methods must accept both snake_case and camelCase inputs through the 
 :subscriptionId
 ```
 
-- [ ] **Step 3: Add route-level authorization tests**
+- [x] **Step 3: Add route-level authorization tests**
 
-Move these existing tests from `stripe_test.rb` into `routes/upgrade_subscription_test.rb`:
+Ruby adaptation: added direct module coverage in `packages/better_auth-stripe/test/better_auth/stripe/middleware_test.rb` for `customer_type!`, `reference_id!`, and `authorize_reference!`. The integration tests below remain in `stripe_test.rb` until the upgrade route is extracted, because moving them before route extraction would duplicate broad route setup without improving behavior isolation.
+
+Move these existing tests from `stripe_test.rb` into `routes/upgrade_subscription_test.rb` during Task 9:
 
 ```ruby
 test_upgrade_rejects_invalid_customer_type
@@ -620,15 +622,15 @@ test_user_reference_authorization_branches_match_upstream
 
 Keep the original tests until the moved tests pass, then remove duplicates from `stripe_test.rb`.
 
-- [ ] **Step 4: Run moved tests**
+- [x] **Step 4: Run moved tests**
 
 Run:
 
 ```bash
-rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/routes/upgrade_subscription_test.rb
+rbenv exec bundle exec ruby -Itest -Ilib test/better_auth/stripe/middleware_test.rb
 ```
 
-Expected: all moved authorization tests pass.
+Expected: middleware authorization tests pass.
 
 - [ ] **Step 5: Commit**
 
