@@ -676,56 +676,39 @@ module BetterAuth
     end
 
     def stripe_id(object)
-      stripe_fetch(object, "id")
+      BetterAuth::Stripe::Utils.id(object)
     end
 
     def stripe_fetch(object, key)
-      return nil unless object.respond_to?(:[])
-
-      object[key] || object[key.to_sym]
+      BetterAuth::Stripe::Utils.fetch(object, key)
     end
 
     def stripe_time(value)
-      return nil unless value
-
-      Time.at(value.to_i)
+      BetterAuth::Stripe::Utils.time(value)
     end
 
     def stripe_subscription_options(config)
-      normalize_hash(config[:subscription] || {})
+      BetterAuth::Stripe::Utils.subscription_options(config)
     end
 
     def stripe_plans(config)
-      plans = stripe_subscription_options(config)[:plans] || []
-      plans = plans.call if plans.respond_to?(:call)
-      Array(plans).map do |plan|
-        normalized = normalize_hash(plan)
-        limits = stripe_fetch(plan, "limits")
-        normalized[:limits] = limits if limits
-        normalized
-      end
+      BetterAuth::Stripe::Utils.plans(config)
     end
 
     def stripe_plan_by_name(config, name)
-      stripe_plans(config).find { |plan| plan[:name].to_s.downcase == name.to_s.downcase }
+      BetterAuth::Stripe::Utils.plan_by_name(config, name)
     end
 
     def stripe_plan_by_price_info(config, price_id, lookup_key = nil)
-      stripe_plans(config).find do |plan|
-        plan[:price_id] == price_id || plan[:annual_discount_price_id] == price_id || (lookup_key && (plan[:lookup_key] == lookup_key || plan[:annual_discount_lookup_key] == lookup_key))
-      end
+      BetterAuth::Stripe::Utils.plan_by_price_info(config, price_id, lookup_key)
     end
 
     def stripe_price_id(config, plan, annual = false)
-      annual ? (plan[:annual_discount_price_id] || stripe_resolve_lookup(config, plan[:annual_discount_lookup_key])) : (plan[:price_id] || stripe_resolve_lookup(config, plan[:lookup_key]))
+      BetterAuth::Stripe::Utils.price_id(config, plan, annual)
     end
 
     def stripe_resolve_lookup(config, lookup_key)
-      return nil if lookup_key.to_s.empty?
-      return nil unless stripe_client(config).respond_to?(:prices)
-
-      prices = stripe_client(config).prices.list(lookup_keys: [lookup_key], active: true, limit: 1)
-      stripe_fetch(Array(stripe_fetch(prices, "data")).first || {}, "id")
+      BetterAuth::Stripe::Utils.resolve_lookup(config, lookup_key)
     end
 
     def stripe_reference_id!(ctx, session, customer_type, explicit_reference_id, config)
@@ -807,59 +790,39 @@ module BetterAuth
     end
 
     def stripe_active_or_trialing?(subscription)
-      %w[active trialing].include?(stripe_fetch(subscription, "status").to_s)
+      BetterAuth::Stripe::Utils.active_or_trialing?(subscription)
     end
 
     def stripe_pending_cancel?(subscription)
-      !!(stripe_fetch(subscription, "cancelAtPeriodEnd") || stripe_fetch(subscription, "cancelAt"))
+      BetterAuth::Stripe::Utils.pending_cancel?(subscription)
     end
 
     def stripe_stripe_pending_cancel?(subscription)
-      !!(stripe_fetch(subscription, "cancel_at_period_end") || stripe_fetch(subscription, "cancel_at"))
+      BetterAuth::Stripe::Utils.stripe_pending_cancel?(subscription)
     end
 
     def stripe_subscription_item(subscription)
-      Array(stripe_fetch(stripe_fetch(subscription, "items") || {}, "data")).first
+      BetterAuth::Stripe::Utils.subscription_item(subscription)
     end
 
     def stripe_resolve_plan_item(config, subscription)
-      items = Array(stripe_fetch(stripe_fetch(subscription, "items") || {}, "data"))
-      first = items.first
-      return nil unless first
-
-      items.each do |item|
-        price = stripe_fetch(item, "price") || {}
-        plan = stripe_plan_by_price_info(config, stripe_fetch(price, "id"), stripe_fetch(price, "lookup_key"))
-        return {item: item, plan: plan} if plan
-      end
-      {item: first, plan: nil} if items.length == 1
+      BetterAuth::Stripe::Utils.resolve_plan_item(config, subscription)
     end
 
     def stripe_resolve_quantity(subscription, plan_item, plan = nil)
-      items = Array(stripe_fetch(stripe_fetch(subscription, "items") || {}, "data"))
-      seat_price_id = plan && plan[:seat_price_id]
-      seat_item = seat_price_id && items.find { |item| stripe_fetch(stripe_fetch(item, "price") || {}, "id") == seat_price_id }
-      stripe_fetch(seat_item || plan_item, "quantity") || 1
+      BetterAuth::Stripe::Utils.resolve_quantity(subscription, plan_item, plan)
     end
 
     def stripe_line_item(config, price_id, quantity)
-      item = {price: price_id}
-      item[:quantity] = quantity unless stripe_metered_price?(config, price_id)
-      item
+      BetterAuth::Stripe::Utils.line_item(config, price_id, quantity)
     end
 
     def stripe_checkout_line_items(config, plan, price_id, quantity, auto_managed_seats, seat_only_plan)
-      items = []
-      items << stripe_line_item(config, price_id, auto_managed_seats ? 1 : quantity) unless seat_only_plan
-      items << {price: plan[:seat_price_id], quantity: quantity} if auto_managed_seats && plan[:seat_price_id]
-      items.concat(stripe_plan_line_items(plan))
-      items
+      BetterAuth::Stripe::Utils.checkout_line_items(config, plan, price_id, quantity, auto_managed_seats, seat_only_plan)
     end
 
     def stripe_plan_line_items(plan)
-      Array(plan[:line_items]).map do |item|
-        item.is_a?(Hash) ? normalize_hash(item) : item
-      end
+      BetterAuth::Stripe::Utils.plan_line_items(plan)
     end
 
     def stripe_schedule_plan_change(ctx, config, active_stripe, db_subscription, plan, price_id, quantity, seat_only_plan, body)
@@ -935,9 +898,7 @@ module BetterAuth
     end
 
     def stripe_direct_subscription_update?(old_plan, plan, auto_managed_seats)
-      return true if auto_managed_seats && old_plan && old_plan[:seat_price_id] != plan[:seat_price_id]
-
-      stripe_plan_line_items(old_plan || {}).map { |item| item[:price] } != stripe_plan_line_items(plan).map { |item| item[:price] }
+      BetterAuth::Stripe::Utils.direct_subscription_update?(old_plan, plan, auto_managed_seats)
     end
 
     def stripe_update_active_subscription_items(ctx, config, active_stripe, db_subscription, old_plan, plan, price_id, quantity, seat_only_plan, body)
@@ -1007,51 +968,19 @@ module BetterAuth
     end
 
     def stripe_metered_price?(config, price_id, lookup_key = nil)
-      price = stripe_resolve_stripe_price(config, price_id, lookup_key)
-      recurring = stripe_fetch(price || {}, "recurring") || {}
-      stripe_fetch(recurring, "usage_type") == "metered"
+      BetterAuth::Stripe::Utils.metered_price?(config, price_id, lookup_key)
     end
 
     def stripe_resolve_stripe_price(config, price_id, lookup_key = nil)
-      return nil unless stripe_client(config).respond_to?(:prices)
-
-      prices = stripe_client(config).prices
-      if lookup_key
-        result = prices.list(lookup_keys: [lookup_key], active: true, limit: 1)
-        Array(stripe_fetch(result, "data")).first
-      elsif price_id && prices.respond_to?(:retrieve)
-        prices.retrieve(price_id)
-      end
-    rescue
-      nil
+      BetterAuth::Stripe::Utils.resolve_stripe_price(config, price_id, lookup_key)
     end
 
     def stripe_subscription_state(subscription, include_status: true, compact: true)
-      item = stripe_subscription_item(subscription)
-      price = stripe_fetch(item || {}, "price") || {}
-      recurring = stripe_fetch(price, "recurring") || {}
-      state = {
-        periodStart: stripe_time(stripe_fetch(item || subscription, "current_period_start")),
-        periodEnd: stripe_time(stripe_fetch(item || subscription, "current_period_end")),
-        cancelAtPeriodEnd: stripe_fetch(subscription, "cancel_at_period_end"),
-        cancelAt: stripe_time(stripe_fetch(subscription, "cancel_at")),
-        canceledAt: stripe_time(stripe_fetch(subscription, "canceled_at")),
-        endedAt: stripe_time(stripe_fetch(subscription, "ended_at")),
-        trialStart: stripe_time(stripe_fetch(subscription, "trial_start")),
-        trialEnd: stripe_time(stripe_fetch(subscription, "trial_end")),
-        billingInterval: stripe_fetch(recurring, "interval"),
-        stripeScheduleId: stripe_schedule_id(subscription)
-      }
-      state[:status] = stripe_fetch(subscription, "status") if include_status
-      compact ? state.compact : state
+      BetterAuth::Stripe::Utils.subscription_state(subscription, include_status: include_status, compact: compact)
     end
 
     def stripe_schedule_id(subscription)
-      schedule = stripe_fetch(subscription, "schedule")
-      return nil if schedule.nil?
-      return schedule if schedule.is_a?(String)
-
-      stripe_id(schedule) || schedule.to_s
+      BetterAuth::Stripe::Utils.schedule_id(subscription)
     end
 
     def stripe_reference_by_customer(ctx, config, customer_id)
@@ -1109,7 +1038,7 @@ module BetterAuth
     end
 
     def stripe_redirect?(body)
-      body[:disable_redirect] != true
+      BetterAuth::Stripe::Utils.redirect?(body)
     end
 
     def stripe_stringify_keys(value)
@@ -1117,13 +1046,11 @@ module BetterAuth
     end
 
     def stripe_url(ctx, url)
-      return url if url.to_s.match?(/\A[a-zA-Z][a-zA-Z0-9+\-.]*:/)
-
-      "#{ctx.context.base_url}#{url.to_s.start_with?("/") ? url : "/#{url}"}"
+      BetterAuth::Stripe::Utils.url(ctx, url)
     end
 
     def stripe_escape_search(value)
-      value.to_s.gsub("\"", "\\\"")
+      BetterAuth::Stripe::Utils.escape_search(value)
     end
   end
 end

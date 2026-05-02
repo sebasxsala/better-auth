@@ -465,7 +465,7 @@ git commit -m "refactor(stripe): extract schema"
 - Modify: `packages/better_auth-stripe/lib/better_auth/stripe/types.rb`
 - Test: `packages/better_auth-stripe/test/better_auth/stripe/utils_test.rb`
 
-- [ ] **Step 1: Move option and plan helpers**
+- [x] **Step 1: Move option and plan helpers**
 
 Move these methods to `BetterAuth::Stripe::Utils`:
 
@@ -486,7 +486,7 @@ stripe_schedule_id
 
 Rename them without `stripe_` inside the module and keep `BetterAuth::Plugins` delegators for any helper currently used by tests.
 
-- [ ] **Step 2: Move generic helpers**
+- [x] **Step 2: Move generic helpers**
 
 Move these methods to `BetterAuth::Stripe::Utils`:
 
@@ -507,7 +507,7 @@ stripe_url
 stripe_escape_search
 ```
 
-- [ ] **Step 3: Add type constants for documented option values**
+- [x] **Step 3: Add type constants for documented option values**
 
 In `types.rb`, add:
 
@@ -528,7 +528,7 @@ module BetterAuth
 end
 ```
 
-- [ ] **Step 4: Add utils tests mirroring upstream `utils.test.ts`**
+- [x] **Step 4: Add utils tests mirroring upstream `utils.test.ts`**
 
 Create `utils_test.rb` with:
 
@@ -557,7 +557,7 @@ class BetterAuthStripeUtilsTest < Minitest::Test
 end
 ```
 
-- [ ] **Step 5: Run utils tests**
+- [x] **Step 5: Run utils tests**
 
 Run:
 
