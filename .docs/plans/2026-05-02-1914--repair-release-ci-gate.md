@@ -20,8 +20,8 @@ Because twelve package tags were pushed to the same commit, the release workflow
 - [x] Apply the release version changes from `main`, not `canary`.
 - [x] Update release docs so all package tags are listed.
 - [x] Verify the workflow and version metadata locally.
-- [ ] Commit the fix and version changes.
-- [ ] Push `main`, wait for CI, then create package tags from `main`.
+- [x] Commit the fix and version changes.
+- [x] Push `main`, wait for CI, then create package tags from `main`.
 
 ## Release decision notes
 
@@ -30,3 +30,7 @@ Because twelve package tags were pushed to the same commit, the release workflow
 - If any package already has `0.6.1`, the safest consistent recovery is to publish `0.6.2` for all release packages from `main`.
 - RubyGems already has `0.6.1` for `better_auth`, `better_auth-rails`, `better_auth-passkey`, and `better_auth-sinatra`.
 - Recovery version selected: `0.6.2` for all twelve packages from `main`.
+- Commit `c8fe191961861fe7e1aabbecd1ed4abf89a11bc8` was pushed to `main` and passed CI.
+- Tags `better_auth*-v0.6.2` were created at `c8fe191961861fe7e1aabbecd1ed4abf89a11bc8`.
+- Pushing twelve tags together did not create tag push workflow runs. GitHub does not reliably emit push events for bulk tag pushes over its tag creation limit, so the existing `Release` workflow was dispatched manually for each tag with `dry_run=false`.
+- All twelve `Release` workflow runs completed successfully, and RubyGems shows `0.6.2` for every package.
