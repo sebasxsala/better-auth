@@ -709,18 +709,20 @@ jobs:
           for attempt in $(seq 1 "$max_attempts"); do
             response=$(gh api \
               -H "Accept: application/vnd.github+json" \
-              "/repos/${REPO}/commits/${COMMIT_SHA}/check-runs?per_page=100")
+              "/repos/${REPO}/commits/${COMMIT_SHA}/check-runs?check_name=${expected_name}&per_page=100")
 
-            status=$(jq -r --arg name "$expected_name" '.check_runs[] | select(.name == $name) | .status // empty' <<< "$response" | head -n1)
-            conclusion=$(jq -r --arg name "$expected_name" '.check_runs[] | select(.name == $name) | .conclusion // empty' <<< "$response" | head -n1)
+            success_count=$(jq -r '[.check_runs[] | select(.conclusion == "success")] | length' <<< "$response")
+            status=$(jq -r '[.check_runs[] | .status] | unique | join(", ")' <<< "$response")
+            failure_conclusions=$(jq -r '[.check_runs[] | select(.conclusion != null and .conclusion != "success") | .conclusion] | unique | join(", ")' <<< "$response")
+            pending_count=$(jq -r '[.check_runs[] | select(.status != "completed")] | length' <<< "$response")
 
-            if [ "$conclusion" = "success" ]; then
+            if [ "$success_count" -gt 0 ]; then
               echo "Required CI check passed: CI / ${expected_name}"
               exit 0
             fi
 
-            if [ -n "$conclusion" ]; then
-              echo "::error ::Required CI check failed for ${COMMIT_SHA}: CI / ${expected_name} concluded ${conclusion}."
+            if [ "$pending_count" -eq 0 ] && [ -n "$failure_conclusions" ]; then
+              echo "::error ::Required CI check failed for ${COMMIT_SHA}: CI / ${expected_name} concluded ${failure_conclusions}."
               exit 1
             fi
 

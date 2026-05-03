@@ -20,6 +20,12 @@ Do not create separate folders for supported Rails lines. Keep compatibility in 
    - `packages/better_auth-api-key/lib/better_auth/api_key/version.rb`
    - `packages/better_auth-sinatra/lib/better_auth/sinatra/version.rb`
    - `packages/better_auth-hanami/lib/better_auth/hanami/version.rb`
+   - `packages/better_auth-oauth-provider/lib/better_auth/oauth_provider/version.rb`
+   - `packages/better_auth-redis-storage/lib/better_auth/redis_storage/version.rb`
+   - `packages/better_auth-mongo-adapter/lib/better_auth/mongo_adapter/version.rb`
+   - `packages/better_auth-scim/lib/better_auth/scim/version.rb`
+   - `packages/better_auth-sso/lib/better_auth/sso/version.rb`
+   - `packages/better_auth-stripe/lib/better_auth/stripe/version.rb`
 3. Let CI pass on `main`.
 4. Push a tag matching the package and version, for example:
 
@@ -36,6 +42,12 @@ The release workflow publishes only the gem named by the tag prefix:
 - `better_auth-api-key-v0.1.2` publishes `better_auth-api-key`.
 - `better_auth-sinatra-v0.1.2` publishes `better_auth-sinatra`.
 - `better_auth-hanami-v0.1.2` publishes `better_auth-hanami`.
+- `better_auth-oauth-provider-v0.1.2` publishes `better_auth-oauth-provider`.
+- `better_auth-redis-storage-v0.1.2` publishes `better_auth-redis-storage`.
+- `better_auth-mongo-adapter-v0.1.2` publishes `better_auth-mongo-adapter`.
+- `better_auth-scim-v0.1.2` publishes `better_auth-scim`.
+- `better_auth-sso-v0.1.2` publishes `better_auth-sso`.
+- `better_auth-stripe-v0.1.2` publishes `better_auth-stripe`.
 
 The target gem's version file must equal the tag version. Other gems may share that version number without being published.
 
