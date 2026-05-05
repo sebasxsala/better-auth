@@ -4,8 +4,8 @@ require "better_auth"
 require_relative "redis_storage/version"
 
 module BetterAuth
-  def self.redis_storage(client:, key_prefix: RedisStorage::DEFAULT_KEY_PREFIX, scan_count: nil)
-    RedisStorage.new(client: client, key_prefix: key_prefix, scan_count: scan_count)
+  def self.redis_storage(client:, key_prefix: RedisStorage::DEFAULT_KEY_PREFIX, scan_count: nil, atomic_clear: false)
+    RedisStorage.new(client: client, key_prefix: key_prefix, scan_count: scan_count, atomic_clear: atomic_clear)
   end
 
   class RedisStorage
@@ -13,23 +13,24 @@ module BetterAuth
     SCAN_DEFAULT_COUNT = 100
     DELETE_CHUNK_SIZE = 500
 
-    attr_reader :client, :key_prefix, :scan_count
+    attr_reader :client, :key_prefix, :scan_count, :atomic_clear
 
-    def self.build(client:, key_prefix: DEFAULT_KEY_PREFIX, scan_count: nil)
-      new(client: client, key_prefix: key_prefix, scan_count: scan_count)
+    def self.build(client:, key_prefix: DEFAULT_KEY_PREFIX, scan_count: nil, atomic_clear: false)
+      new(client: client, key_prefix: key_prefix, scan_count: scan_count, atomic_clear: atomic_clear)
     end
 
-    def self.redisStorage(client:, key_prefix: DEFAULT_KEY_PREFIX, scan_count: nil)
-      new(client: client, key_prefix: key_prefix, scan_count: scan_count)
+    def self.redisStorage(client:, key_prefix: DEFAULT_KEY_PREFIX, scan_count: nil, atomic_clear: false)
+      new(client: client, key_prefix: key_prefix, scan_count: scan_count, atomic_clear: atomic_clear)
     end
 
-    def initialize(client:, key_prefix: DEFAULT_KEY_PREFIX, scan_count: nil)
+    def initialize(client:, key_prefix: DEFAULT_KEY_PREFIX, scan_count: nil, atomic_clear: false)
       @client = client
       @key_prefix = key_prefix.nil? ? DEFAULT_KEY_PREFIX : key_prefix.to_s
       if !scan_count.nil? && !(scan_count.is_a?(Integer) && scan_count.positive?)
         raise ArgumentError, "scan_count must be nil or a positive Integer; got #{scan_count.inspect}"
       end
       @scan_count = scan_count
+      @atomic_clear = !!atomic_clear
     end
 
     def get(key)
@@ -53,14 +54,16 @@ module BetterAuth
     end
 
     def list_keys
-      storage_keys.map { |key| unprefix_key(key) }
+      prefix = storage_prefix
+      storage_keys(prefix).map { |key| unprefix_key(key, prefix) }
     end
 
     def clear
-      keys = storage_keys
-      # Upstream calls del(...keys) unconditionally; Ruby keeps this guard to
-      # avoid Redis ERR wrong number of arguments when no prefixed keys exist.
-      keys.each_slice(DELETE_CHUNK_SIZE) { |chunk| client.del(*chunk) }
+      if atomic_clear
+        clear_current_generation
+      else
+        delete_matching_keys(storage_prefix)
+      end
       nil
     end
 
@@ -71,28 +74,79 @@ module BetterAuth
     def prefix_key(key)
       raise ArgumentError, "secondary storage key must not be nil" if key.nil?
 
-      "#{key_prefix}#{key}"
+      "#{storage_prefix}#{key}"
     end
 
-    def unprefix_key(key)
-      key.sub(/\A#{Regexp.escape(key_prefix)}/, "")
+    def unprefix_key(key, prefix = storage_prefix)
+      key.sub(/\A#{Regexp.escape(prefix)}/, "")
     end
 
-    def storage_keys
-      return scan_keys if scan_count
+    def storage_prefix(generation = current_generation)
+      return key_prefix unless atomic_clear
 
-      client.keys("#{key_prefix}*")
+      "#{key_prefix}v#{generation}:"
     end
 
-    def scan_keys
-      cursor = "0"
+    def generation_key
+      "#{key_prefix}__generation__"
+    end
+
+    def current_generation
+      return nil unless atomic_clear
+
+      generation = client.get(generation_key).to_i
+      generation.positive? ? generation : 1
+    end
+
+    def clear_current_generation
+      generation = current_generation
+      bump_generation(generation)
+      delete_matching_keys(storage_prefix(generation), single_key: true)
+    end
+
+    def bump_generation(previous_generation)
+      generation = client.incr(generation_key).to_i
+      generation = client.incr(generation_key).to_i if generation <= previous_generation.to_i
+      generation
+    end
+
+    def storage_keys(prefix = storage_prefix)
+      return scan_keys(prefix) if scan_count
+
+      client.keys("#{prefix}*")
+    end
+
+    def scan_keys(prefix = storage_prefix)
       matches = []
+      each_scan_batch(prefix) { |keys| matches.concat(keys) }
+      matches
+    end
+
+    def each_scan_batch(prefix = storage_prefix)
+      cursor = "0"
       loop do
-        cursor, keys = client.scan(cursor, match: "#{key_prefix}*", count: scan_count)
-        matches.concat(keys)
+        cursor, keys = client.scan(cursor, match: "#{prefix}*", count: scan_count)
+        yield keys
         break if cursor.to_s == "0"
       end
-      matches
+    end
+
+    def delete_matching_keys(prefix, single_key: false)
+      if scan_count
+        each_scan_batch(prefix) { |keys| delete_keys(keys, single_key: single_key) }
+      else
+        delete_keys(storage_keys(prefix), single_key: single_key)
+      end
+    end
+
+    def delete_keys(keys, single_key: false)
+      # Upstream calls del(...keys) unconditionally; Ruby keeps this guard to
+      # avoid Redis ERR wrong number of arguments when no prefixed keys exist.
+      if single_key
+        keys.each { |key| client.del(key) }
+      else
+        keys.each_slice(DELETE_CHUNK_SIZE) { |chunk| client.del(*chunk) }
+      end
     end
 
     def coerce_ttl(ttl)
@@ -113,7 +167,8 @@ module BetterAuth
       return nil unless numeric.respond_to?(:positive?) && numeric.positive?
       return nil if numeric.respond_to?(:finite?) && !numeric.finite?
 
-      numeric.is_a?(Integer) ? numeric : numeric.to_i
+      seconds = numeric.is_a?(Integer) ? numeric : numeric.to_i
+      seconds.positive? ? seconds : nil
     end
   end
 end

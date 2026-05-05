@@ -27,6 +27,15 @@ class RedisStorageTest < Minitest::Test
     assert_equal "payload", @client.data.fetch("better-auth:session-token")
   end
 
+  def test_atomic_clear_scopes_keys_by_generation
+    storage = BetterAuth::RedisStorage.new(client: @client, atomic_clear: true)
+
+    storage.set("session-token", "payload")
+
+    assert_equal "payload", storage.get("session-token")
+    assert_equal "payload", @client.data.fetch("better-auth:v1:session-token")
+  end
+
   def test_set_with_positive_ttl_uses_setex
     result = @storage.set("rate-limit", "payload", 60)
 
@@ -71,6 +80,17 @@ class RedisStorageTest < Minitest::Test
     @storage.set("rational-ttl", "payload", Rational(241, 2))
 
     assert_equal [["better-auth:rational-ttl", 120, "payload"]], @client.setex_calls
+  end
+
+  def test_set_with_sub_second_numeric_ttl_falls_back_to_plain_set
+    @storage.set("float-sub-second-ttl", "payload", 0.5)
+    @storage.set("rational-sub-second-ttl", "payload", Rational(1, 2))
+
+    assert_empty @client.setex_calls
+    assert_equal [
+      ["better-auth:float-sub-second-ttl", "payload"],
+      ["better-auth:rational-sub-second-ttl", "payload"]
+    ], @client.set_calls
   end
 
   def test_non_finite_numeric_ttl_falls_back_to_set
@@ -125,6 +145,33 @@ class RedisStorageTest < Minitest::Test
     assert_empty @client.del_calls
   end
 
+  def test_atomic_clear_hides_existing_keys_without_deleting_new_generation
+    storage = BetterAuth::RedisStorage.new(client: @client, atomic_clear: true)
+    storage.set("a", "one")
+
+    result = storage.clear
+    storage.set("a", "two")
+
+    assert_nil result
+    assert_equal "two", storage.get("a")
+    assert_equal ["a"], storage.list_keys
+    assert_nil @client.data["better-auth:v1:a"]
+    assert_equal "two", @client.data.fetch("better-auth:v2:a")
+    assert_equal [["better-auth:v1:a"]], @client.del_calls
+  end
+
+  def test_atomic_clear_makes_late_old_generation_writes_logically_invisible
+    storage = BetterAuth::RedisStorage.new(client: @client, atomic_clear: true)
+    storage.set("before", "old")
+
+    storage.clear
+    @client.set("better-auth:v1:late", "stale")
+
+    assert_nil storage.get("late")
+    assert_empty storage.list_keys
+    assert_equal "stale", @client.data.fetch("better-auth:v1:late")
+  end
+
   def test_clear_deletes_in_chunks_when_many_keys
     client = FakeRedisClient.new
     storage = BetterAuth::RedisStorage.new(client: client)
@@ -167,6 +214,36 @@ class RedisStorageTest < Minitest::Test
     assert_equal [["0", {match: "better-auth:*", count: 50}]], scan_client.scan_calls.first(1)
   end
 
+  def test_clear_with_scan_count_deletes_each_scan_page_before_next_scan
+    scan_client = ScanCapableFakeRedisClient.new
+    600.times { |i| scan_client.set("better-auth:k#{i}", "v") }
+    scan_client.set("other:c", "three")
+
+    storage = BetterAuth::RedisStorage.new(client: scan_client, scan_count: 50)
+
+    storage.clear
+
+    assert_empty scan_client.keys_calls
+    assert_equal 0, scan_client.data.keys.count { |key| key.start_with?("better-auth:") }
+    assert_equal "three", scan_client.get("other:c")
+    first_del_index = scan_client.events.index { |event| event.first == :del }
+    second_scan_index = scan_client.events.each_index.select { |index| scan_client.events[index].first == :scan }.fetch(1)
+    assert_operator first_del_index, :<, second_scan_index
+  end
+
+  def test_atomic_clear_with_scan_count_cleans_previous_generation_with_scan
+    scan_client = ScanCapableFakeRedisClient.new
+    storage = BetterAuth::RedisStorage.new(client: scan_client, scan_count: 50, atomic_clear: true)
+    storage.set("a", "one")
+    storage.set("b", "two")
+
+    storage.clear
+
+    assert_empty scan_client.keys_calls
+    assert_equal ["better-auth:v1:*"], scan_client.scan_calls.map { |(_cursor, options)| options.fetch(:match) }.uniq
+    assert_empty scan_client.data.keys.grep(/\Abetter-auth:v1:/)
+  end
+
   def test_scan_count_must_be_nil_or_positive_integer
     [0, -1, "100"].each do |scan_count|
       error = assert_raises(ArgumentError) do
@@ -198,6 +275,12 @@ class RedisStorageTest < Minitest::Test
     assert_instance_of BetterAuth::RedisStorage, storage
   end
 
+  def test_build_forwards_atomic_clear
+    storage = BetterAuth::RedisStorage.build(client: @client, atomic_clear: true)
+
+    assert_equal true, storage.atomic_clear
+  end
+
   def test_module_level_redis_storage_builder_returns_storage_instance
     storage = BetterAuth.redis_storage(client: @client, key_prefix: "auth:")
 
@@ -208,10 +291,22 @@ class RedisStorageTest < Minitest::Test
     assert_equal "v", @client.data.fetch("auth:k")
   end
 
+  def test_module_level_redis_storage_builder_forwards_atomic_clear
+    storage = BetterAuth.redis_storage(client: @client, atomic_clear: true)
+
+    assert_equal true, storage.atomic_clear
+  end
+
   def test_camel_case_redis_storage_class_method_alias_matches_upstream_name
     storage = BetterAuth::RedisStorage.redisStorage(client: @client)
 
     assert_instance_of BetterAuth::RedisStorage, storage
+  end
+
+  def test_camel_case_redis_storage_forwards_atomic_clear
+    storage = BetterAuth::RedisStorage.redisStorage(client: @client, atomic_clear: true)
+
+    assert_equal true, storage.atomic_clear
   end
 
   def test_camel_case_list_keys_alias_matches_upstream_name
@@ -310,7 +405,7 @@ class RedisStorageTest < Minitest::Test
   end
 
   class FakeRedisClient
-    attr_reader :data, :set_calls, :setex_calls, :del_calls, :keys_calls
+    attr_reader :data, :set_calls, :setex_calls, :del_calls, :keys_calls, :incr_calls
 
     def initialize
       @data = {}
@@ -318,6 +413,7 @@ class RedisStorageTest < Minitest::Test
       @setex_calls = []
       @del_calls = []
       @keys_calls = []
+      @incr_calls = []
     end
 
     def get(key)
@@ -339,6 +435,11 @@ class RedisStorageTest < Minitest::Test
       keys.each { |key| data.delete(key) }
     end
 
+    def incr(key)
+      incr_calls << key
+      data[key] = data.fetch(key, 0).to_i + 1
+    end
+
     def keys(pattern)
       keys_calls << pattern
       regex = Regexp.new("\\A#{Regexp.escape(pattern).gsub("\\*", ".*")}\\z")
@@ -347,16 +448,25 @@ class RedisStorageTest < Minitest::Test
   end
 
   class ScanCapableFakeRedisClient < FakeRedisClient
-    attr_reader :scan_calls
+    attr_reader :scan_calls, :events
 
     def initialize
       super
       @scan_calls = []
+      @events = []
+      @scan_snapshot = []
+    end
+
+    def del(*keys)
+      events << [:del, keys]
+      super
     end
 
     def scan(cursor, match:, count:)
       scan_calls << [cursor, {match: match, count: count}]
-      matching = keys_without_tracking(match)
+      events << [:scan, cursor]
+      @scan_snapshot = keys_without_tracking(match) if cursor == "0"
+      matching = @scan_snapshot
       midpoint = (matching.length / 2.0).ceil
       if cursor == "0" && matching.length > midpoint
         ["1", matching.first(midpoint)]
