@@ -182,4 +182,25 @@ class BetterAuthPasskeyRoutesRegistrationTest < Minitest::Test
     assert_equal response.fetch("id"), captured.fetch(:after_client_data).fetch("id")
     assert_equal "after-route-context", captured.fetch(:after_context)
   end
+
+  def test_verify_registration_rejects_duplicate_credential_id
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "duplicate-registration-route@example.com")
+    client = WebAuthn::FakeClient.new(ORIGIN)
+    registration = auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie}, return_headers: true)
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    create_passkey(auth, user_id: user.fetch("id"), name: "Existing", credential_id: response.fetch("id"))
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_passkey_registration(
+        headers: {"cookie" => [cookie, cookie_header(registration.fetch(:headers).fetch("set-cookie"))].join("; "), "origin" => ORIGIN},
+        body: {response: response}
+      )
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("PREVIOUSLY_REGISTERED"), error.message
+    assert_equal 1, auth.context.adapter.find_many(model: "passkey", where: [{field: "credentialID", value: response.fetch("id")}]).length
+  end
 end

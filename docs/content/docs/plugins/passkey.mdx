@@ -139,9 +139,11 @@ The plugin configures `rp_id`, `rp_name`, and allowed origins per request with `
 - `excludeCredentials` entries (registration options) are emitted as `{id, transports?}` to match upstream's `@simplewebauthn/server` output. `allowCredentials` (authentication options) still includes `type: "public-key"`.
 - `transports` is omitted from credential descriptors when the stored value is missing or empty (rather than an empty array).
 - The default storage table is `passkeys` (plural) in the SQL adapters, mapped from the upstream `passkey` model. This is an intentional Ruby-specific adaptation.
+- `credentialID` is unique in the Ruby schema. This is intentional hardening beyond upstream v1.6.9 and prevents storing the same WebAuthn credential more than once.
 - `rp_id` resolution uses `URI.parse(base_url).host` (port stripped). When `base_url` is empty or unparseable, `rp_id` defaults to `"localhost"`.
 - `update_passkey` accepts `name: ""` to match upstream `z.string()`. Missing or non-string `name` still raises `VALIDATION_ERROR`.
 - Cross-user `delete_passkey` raises `UNAUTHORIZED` with the `PASSKEY_NOT_FOUND` message, mirroring upstream's `requireResourceOwnership` middleware behavior when only `notFoundError` is configured.
+- Existing databases should deduplicate historical `credential_id` values before adding the unique constraint during migration.
 
 ## Support Notes
 

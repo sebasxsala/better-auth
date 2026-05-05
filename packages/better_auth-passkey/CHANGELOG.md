@@ -6,6 +6,8 @@
 - Return `BAD_REQUEST` for passkey registration WebAuthn verification failures while preserving `INTERNAL_SERVER_ERROR` for unexpected failures.
 - Invalidate stored WebAuthn challenges after failed registration or authentication verification attempts.
 - Read passkey attestation metadata via the public `credential.response` API from the `webauthn` gem.
+- Invalidate authentication challenges after all terminal failures once a valid challenge is loaded, including missing credentials, callback errors, and session creation failures.
+- Reject duplicate registered WebAuthn credential IDs with `PREVIOUSLY_REGISTERED` and mark `credentialID` unique in the passkey schema.
 
 ## [0.2.0] - 2026-04-29
 

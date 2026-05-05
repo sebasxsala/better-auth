@@ -9,7 +9,7 @@ class BetterAuthPasskeySchemaTest < Minitest::Test
     assert_equal({type: "string", required: false}, fields.fetch(:name))
     assert_equal({type: "string", required: true}, fields.fetch(:public_key))
     assert_equal({type: "string", references: {model: "user", field: "id"}, required: true, index: true}, fields.fetch(:user_id))
-    assert_equal({type: "string", required: true, index: true}, fields.fetch(:credential_id))
+    assert_equal({type: "string", required: true, unique: true}, fields.fetch(:credential_id))
     assert_equal({type: "number", required: true}, fields.fetch(:counter))
     assert_equal({type: "string", required: true}, fields.fetch(:device_type))
     assert_equal({type: "boolean", required: true}, fields.fetch(:backed_up))

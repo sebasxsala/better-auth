@@ -76,6 +76,12 @@ module BetterAuth
               raise
             end
 
+            existing_passkey = ctx.context.adapter.find_one(model: "passkey", where: [{field: "credentialID", value: credential.id}])
+            if existing_passkey
+              ctx.context.internal_adapter.delete_verification_by_identifier(verification_token)
+              raise APIError.new("BAD_REQUEST", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("PREVIOUSLY_REGISTERED"))
+            end
+
             data = ctx.context.adapter.create(
               model: "passkey",
               data: {
