@@ -4,7 +4,7 @@
 
 ## Summary
 
-Phase 2 adds the shared request execution pipeline for the Ruby core gem: endpoint objects, direct server API calls, Rack routing, origin/CSRF checks, plugin request/response hooks, basic rate limiting, and endpoint conflict logging.
+Phase 2 adds the shared request execution pipeline for the Ruby core gem: endpoint objects, direct server API calls, Rack routing, origin/CSRF checks, plugin request/response hooks, rate limiting, and endpoint conflict logging.
 
 ## Upstream Implementation
 
@@ -16,10 +16,10 @@ Ruby exposes `BetterAuth::Endpoint`, `BetterAuth::API`, and `BetterAuth::Router`
 
 ### Design Decisions
 
-- Phase 2 tests use synthetic endpoints for pipeline behavior because full email/session/OAuth route semantics are scheduled for later phases.
-- Generic cookie/header aggregation is implemented now; Better Auth cookie names, signed session cookies, chunking, and session cache behavior remain Phase 4 work.
-- Generic header setting rejects CR/LF in names and values to avoid header injection while cookie/session-specific encoding remains Phase 4 work.
-- Rate limiting defaults to an in-memory store for Phase 2, but it now accepts `rate_limit: { custom_storage: ... }` and `storage: "secondary-storage"` so apps can avoid process-local counters before adapter-backed rate limits land. The limiter also mirrors upstream special auth-route defaults, custom path rules, disabled custom rules, upstream-style retry headers, IP tracking disablement, configurable IP headers, and IPv6 subnet normalization.
+- Pipeline behavior is covered with both synthetic endpoints and real base routes.
+- Generic cookie/header aggregation is implemented, and Better Auth cookie names, signed session cookies, chunking, and session cache behavior are covered by cookie/session route tests.
+- Generic header setting rejects CR/LF in names and values to avoid header injection.
+- Rate limiting defaults to an in-memory store, and also accepts `rate_limit: { custom_storage: ... }`, `storage: "secondary-storage"`, and `storage: "database"` using the `rateLimit` table. The limiter mirrors upstream special auth-route defaults, custom path rules, disabled custom rules, upstream-style retry headers, IP tracking disablement, configurable IP headers, and IPv6 subnet normalization.
 - Request-time base URL inference and trusted proxy header handling live on `BetterAuth::Context` so Rack requests without configured `base_url` can still populate trusted origins.
 - Endpoint schema fields are enforced through a small adapter contract instead of a hard validator dependency: schemas may respond to `parse`, be callable, or return dry-style objects that answer `success?`/`to_h`.
 - Trusted proxy headers follow the upstream validation shape: only `http`/`https` protocols are accepted, suspicious host characters are rejected, and invalid forwarded values fall back to the actual Rack request origin.
@@ -31,7 +31,7 @@ Phase 2 intentionally does not add `rack-attack`, `rack-protection`, `dry-valida
 
 The current design keeps extension points open:
 
-- Rate limiting can use custom or secondary storage now; database-backed storage belongs with Phase 3 adapters.
+- Rate limiting can use memory, custom, secondary storage, or database storage.
 - Endpoint schemas can wrap third-party validators later without exposing those gems as required dependencies.
 - URL/origin parsing remains local and test-driven against upstream cases; `addressable`/`public_suffix` can still be evaluated if later wildcard or domain behavior requires it.
 
