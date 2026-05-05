@@ -78,6 +78,29 @@ class BetterAuthAPIKeyRoutesIndexTest < Minitest::Test
     refute_nil auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: no_expiry.fetch("id")}])
   end
 
+  def test_deferred_schedule_cleanup_logs_failures
+    deferred = []
+    errors = []
+    auth = build_api_key_auth(
+      defer_updates: true,
+      advanced: {background_tasks: {handler: ->(task) { deferred << task }}}
+    )
+    logger = Object.new
+    logger.define_singleton_method(:error) { |message, *| errors << message }
+    auth.context.define_singleton_method(:logger) { logger }
+    auth.context.adapter.define_singleton_method(:delete_many) do |**|
+      raise StandardError, "simulated cleanup failure"
+    end
+    ctx = Struct.new(:context).new(auth.context)
+    config = BetterAuth::APIKey::Configuration.normalize(defer_updates: true)
+
+    BetterAuth::APIKey::Routes.schedule_cleanup(ctx, config)
+    deferred.each(&:call)
+
+    assert_equal 1, errors.length
+    assert_match(/simulated cleanup failure/, errors.first)
+  end
+
   private
 
   def create_expired_record(auth, key)

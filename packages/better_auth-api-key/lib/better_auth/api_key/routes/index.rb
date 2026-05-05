@@ -64,7 +64,7 @@ module BetterAuth
       def schedule_cleanup(ctx, config)
         task = -> { delete_expired(ctx.context, config) }
         if config[:defer_updates] && BetterAuth::APIKey::Utils.background_tasks?(ctx)
-          ctx.context.run_in_background(task)
+          BetterAuth::APIKey::Utils.run_background_task(ctx, "Deferred API key cleanup", task)
         else
           task.call
         end

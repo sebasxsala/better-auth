@@ -85,6 +85,16 @@ module BetterAuth
         ctx.context.options.advanced.dig(:background_tasks, :handler).respond_to?(:call)
       end
 
+      def run_background_task(ctx, label, task)
+        wrapped = lambda do
+          task.call
+        rescue => error
+          logger = ctx.context.logger if ctx.context.respond_to?(:logger)
+          logger.error("[API KEY PLUGIN] #{label} failed: #{error.message}") if logger.respond_to?(:error)
+        end
+        ctx.context.run_in_background(wrapped)
+      end
+
       def auth_required?(ctx)
         !!(ctx.request || (ctx.headers && !ctx.headers.empty?))
       end

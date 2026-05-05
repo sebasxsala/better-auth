@@ -31,9 +31,21 @@ module BetterAuth
             records = records.drop(offset) if offset
             records = records.first(limit) if limit
             records.each { |record| BetterAuth::Plugins.api_key_delete_expired(ctx.context, BetterAuth::Plugins.api_key_resolve_config(ctx.context, config, BetterAuth::Plugins.api_key_record_config_id(record))) }
+            migration_records = records.select { |record| BetterAuth::APIKey::Adapter.legacy_metadata_migration_needed?(record) }
+            if migration_records.any?
+              BetterAuth::APIKey::Utils.run_background_task(
+                ctx,
+                "API key metadata migration",
+                lambda do
+                  migration_records.each do |record|
+                    record_config = BetterAuth::Plugins.api_key_resolve_config(ctx.context, config, BetterAuth::Plugins.api_key_record_config_id(record))
+                    BetterAuth::APIKey::Adapter.batch_migrate_legacy_metadata(ctx, [record], record_config)
+                  end
+                end
+              )
+            end
             api_keys = records.map do |record|
-              record_config = BetterAuth::Plugins.api_key_resolve_config(ctx.context, config, BetterAuth::Plugins.api_key_record_config_id(record))
-              BetterAuth::Plugins.api_key_public(BetterAuth::Plugins.api_key_migrate_legacy_metadata(ctx, record, record_config), include_key_field: false)
+              BetterAuth::Plugins.api_key_public(record, include_key_field: false)
             end
             ctx.json({apiKeys: api_keys, total: total, limit: limit, offset: offset})
           end
