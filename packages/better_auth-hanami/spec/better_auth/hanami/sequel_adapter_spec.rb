@@ -60,6 +60,88 @@ RSpec.describe BetterAuth::Hanami::SequelAdapter do
     expect(matches.map { |user| user.fetch("id") }).to eq([unverified.fetch("id")])
   end
 
+  it "persists and reads plugin json and array fields" do
+    typed_plugin = BetterAuth::Plugin.new(
+      id: "typed",
+      schema: {
+        testModel: {
+          model_name: "test_models",
+          fields: {
+            id: {type: "string", required: true},
+            metadata: {type: "json", required: true},
+            tags: {type: "string[]", required: true},
+            scores: {type: "number[]", required: true}
+          }
+        }
+      }
+    )
+    typed_config = BetterAuth::Configuration.new(secret: secret, database: :memory, plugins: [typed_plugin])
+    db = Sequel.sqlite
+    apply_migration(db, typed_config)
+    adapter = described_class.new(typed_config, connection: db)
+
+    created = adapter.create(
+      model: "testModel",
+      data: {
+        metadata: {"foo" => "bar"},
+        tags: ["a", "b"],
+        scores: [1, 2]
+      }
+    )
+    reloaded = adapter.find_one(model: "testModel", where: [{field: "id", value: created.fetch("id")}])
+
+    expect(created).to include(
+      "metadata" => {"foo" => "bar"},
+      "tags" => ["a", "b"],
+      "scores" => [1, 2]
+    )
+    expect(reloaded).to eq(created)
+  end
+
+  it "joins plugin one-to-one models inferred from schema references" do
+    one_to_one_plugin = BetterAuth::Plugin.new(
+      id: "one-to-one",
+      schema: {
+        oneToOneTable: {
+          model_name: "one_to_one_tables",
+          fields: {
+            id: {type: "string", required: true},
+            oneToOne: {type: "string", required: true, references: {model: "user", field: "id"}, unique: true}
+          }
+        }
+      }
+    )
+    join_config = BetterAuth::Configuration.new(secret: secret, database: :memory, plugins: [one_to_one_plugin], experimental: {joins: true})
+    db = Sequel.sqlite
+    apply_migration(db, join_config)
+    adapter = described_class.new(join_config, connection: db)
+
+    user = adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    one_to_one = adapter.create(model: "oneToOneTable", data: {id: "one-1", oneToOne: user.fetch("id")}, force_allow_id: true)
+    session = adapter.create(model: "session", data: {id: "session-1", userId: user.fetch("id"), token: "token-1", expiresAt: Time.now + 3600}, force_allow_id: true)
+
+    joined = adapter.find_one(model: "user", where: [{field: "id", value: user.fetch("id")}], join: {oneToOneTable: true})
+    joined_many = adapter.find_many(model: "user", where: [{field: "id", value: user.fetch("id")}], join: {oneToOneTable: true, session: true})
+
+    expect(joined.fetch("oneToOneTable")).to eq(one_to_one)
+    expect(joined_many).to eq([user.merge("oneToOneTable" => one_to_one, "session" => [session])])
+  end
+
+  it "treats LIKE wildcard characters literally in string predicates" do
+    db = Sequel.sqlite
+    apply_migration(db, config)
+    adapter = described_class.new(config, connection: db)
+    literal_percent = adapter.create(model: "user", data: {id: "user-percent", name: "100% Ada", email: "percent@example.com"}, force_allow_id: true)
+    adapter.create(model: "user", data: {id: "user-normal", name: "100x Ada", email: "normal@example.com"}, force_allow_id: true)
+    literal_underscore = adapter.create(model: "user", data: {id: "user-underscore", name: "Ada_1", email: "underscore@example.com"}, force_allow_id: true)
+
+    percent_matches = adapter.find_many(model: "user", where: [{field: "name", value: "100%", operator: "starts_with"}])
+    underscore_matches = adapter.find_many(model: "user", where: [{field: "name", value: "_", operator: "contains"}])
+
+    expect(percent_matches.map { |user| user.fetch("id") }).to eq([literal_percent.fetch("id")])
+    expect(underscore_matches.map { |user| user.fetch("id") }).to eq([literal_underscore.fetch("id")])
+  end
+
   describe ".from_hanami" do
     it "warns when no Hanami container is available and memory storage is used" do
       expect(Kernel).to receive(:warn).with(/in-memory|Memory/i)
