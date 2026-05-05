@@ -10,6 +10,7 @@ module BetterAuth
           BetterAuth::Endpoint.new(path: "/subscription/cancel/callback", method: "GET") do |ctx|
             query = BetterAuth::Plugins.normalize_hash(ctx.query)
             callback = query[:callback_url] || "/"
+            BetterAuth::Stripe::Middleware.validate_trusted_url!(ctx, callback, "callbackURL")
             unless query[:subscription_id]
               raise ctx.redirect(BetterAuth::Plugins.stripe_url(ctx, callback))
             end

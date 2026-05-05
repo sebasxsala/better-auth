@@ -47,6 +47,22 @@ module BetterAuth
 
         nil
       end
+
+      def validate_trusted_url!(ctx, value, label)
+        return if value.nil? || value.to_s.empty?
+
+        validation_value = value.to_s.gsub("{CHECKOUT_SESSION_ID}", "checkout_session_id")
+        return if ctx.context.trusted_origin?(validation_value, allow_relative_paths: true)
+
+        raise APIError.new("FORBIDDEN", message: "Invalid #{label}")
+      end
+
+      def validate_trusted_urls!(ctx, source, mapping)
+        body = BetterAuth::Plugins.normalize_hash(source || {})
+        mapping.each do |key, label|
+          validate_trusted_url!(ctx, body[key], label)
+        end
+      end
     end
   end
 end

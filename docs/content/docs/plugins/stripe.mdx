@@ -263,6 +263,10 @@ Request body:
 | `disableRedirect` / `disable_redirect` | `Boolean` | Adds a `redirect` flag to the response for client behavior. |
 | `scheduleAtPeriodEnd` / `schedule_at_period_end` | `Boolean` | Schedule the plan change at the end of the current billing period. |
 
+<Callout type="warning">
+`successUrl`, `cancelUrl`, `returnUrl`, and callback URLs must be relative paths or absolute URLs whose origin is configured in `trusted_origins`.
+</Callout>
+
 The plugin supports one active or trialing subscription per reference ID at a time. If the reference already has an active subscription, pass `subscriptionId` when changing plans so the existing Stripe subscription is updated instead of creating a separate checkout.
 
 <Callout type="info">

@@ -10,6 +10,7 @@ module BetterAuth
           BetterAuth::Endpoint.new(path: "/subscription/upgrade", method: "POST") do |ctx|
             session = BetterAuth::Routes.current_session(ctx)
             body = BetterAuth::Plugins.normalize_hash(ctx.body)
+            BetterAuth::Stripe::Middleware.validate_trusted_urls!(ctx, body, success_url: "successUrl", cancel_url: "cancelUrl", return_url: "returnUrl")
             subscription_options = BetterAuth::Plugins.stripe_subscription_options(config)
             customer_type = BetterAuth::Plugins.stripe_customer_type!(body)
             reference_id = BetterAuth::Plugins.stripe_reference_id!(ctx, session, customer_type, body[:reference_id], config)
