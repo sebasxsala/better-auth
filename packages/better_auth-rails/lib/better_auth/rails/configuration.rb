@@ -8,6 +8,7 @@ module BetterAuth
         base_url
         base_path
         secret
+        secrets
         database
         plugins
         trusted_origins

@@ -55,6 +55,18 @@ RSpec.describe BetterAuth::Rails do
     expect(auth.options.social_providers[:github]).to include(client_id: "id")
   end
 
+  it "passes configured secret rotation entries to core auth options" do
+    secrets = [{version: 1, value: "b" * 32}, {version: 2, value: "c" * 32}]
+
+    described_class.configure do |config|
+      config.secret = "test-secret-that-is-long-enough-for-validation"
+      config.database = :memory
+      config.secrets = secrets
+    end
+
+    expect(described_class.configuration.to_auth_options.fetch(:secrets)).to eq(secrets)
+  end
+
   it "builds nested option hashes from Rails-style configuration blocks" do
     described_class.configure do |config|
       config.secret = "test-secret-that-is-long-enough-for-validation"

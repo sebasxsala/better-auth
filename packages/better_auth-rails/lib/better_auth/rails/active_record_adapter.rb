@@ -1,8 +1,12 @@
 # frozen_string_literal: true
 
+require "securerandom"
+
 module BetterAuth
   module Rails
     class ActiveRecordAdapter < BetterAuth::Adapters::Base
+      include BetterAuth::Adapters::JoinSupport
+
       begin
         require "active_record" unless defined?(::ActiveRecord)
       rescue LoadError
@@ -45,16 +49,16 @@ module BetterAuth
         model = model.to_s
         relation = relation_for(model, where: where, sort_by: sort_by, limit: limit, offset: offset, select: select, join: join)
         records = relation.map { |record| normalize_record(model, record, join: join) }
-        collection_join?(model, join) ? aggregate_collection_joins(records) : records
+        collection_join?(model, join) ? aggregate_collection_joins(model, records, join) : records
       end
 
       def update(model:, where:, update:)
         model = model.to_s
-        record = relation_for(model, where: where).first
-        return nil unless record
+        existing = find_one(model: model, where: where, select: ["id"])
+        return nil unless existing
 
-        record.update!(physical_attributes(model, transform_input(model, update, "update", true)))
-        normalize_record(model, record)
+        update_many(model: model, where: where, update: update)
+        find_one(model: model, where: [{field: "id", value: existing.fetch("id")}])
       end
 
       def update_many(model:, where:, update:, returning: false)
@@ -72,9 +76,7 @@ module BetterAuth
       end
 
       def delete(model:, where:)
-        model = model.to_s
-        record = relation_for(model, where: where).first
-        record&.destroy!
+        delete_many(model: model, where: where)
         nil
       end
 
@@ -135,9 +137,9 @@ module BetterAuth
         when "gte" then scope.where("#{column} >= ?", value)
         when "lt" then scope.where("#{column} < ?", value)
         when "lte" then scope.where("#{column} <= ?", value)
-        when "contains" then scope.where("#{column} LIKE ?", "%#{value}%")
-        when "starts_with" then scope.where("#{column} LIKE ?", "#{value}%")
-        when "ends_with" then scope.where("#{column} LIKE ?", "%#{value}")
+        when "contains" then scope.where("#{column} LIKE ? ESCAPE ?", "%#{escape_like(value)}%", "\\")
+        when "starts_with" then scope.where("#{column} LIKE ? ESCAPE ?", "#{escape_like(value)}%", "\\")
+        when "ends_with" then scope.where("#{column} LIKE ? ESCAPE ?", "%#{escape_like(value)}", "\\")
         else scope.where(column => value)
         end
       end
@@ -171,7 +173,7 @@ module BetterAuth
           end
           output[field] = value if value_provided
         end
-        output["id"] = SecureRandom.urlsafe_base64(16) if action == "create" && !output.key?("id")
+        output["id"] = generated_id if action == "create" && !output.key?("id")
         output
       end
 
@@ -289,7 +291,9 @@ module BetterAuth
             from: reference.fetch(:field).to_s,
             to: foreign_key,
             collection: !unique,
-            owner: :base
+            owner: :base,
+            relation: unique ? "one-to-one" : "one-to-many",
+            unique: unique
           }
         end
 
@@ -306,16 +310,10 @@ module BetterAuth
           from: foreign_key,
           to: reference.fetch(:field).to_s,
           collection: false,
-          owner: :join
+          owner: :join,
+          relation: "one-to-one",
+          unique: true
         }
-      end
-
-      def reference_model_matches?(attributes, model)
-        reference = attributes[:references]
-        return false unless reference
-
-        reference_model = reference[:model] || reference["model"]
-        reference_model.to_s == model.to_s || reference_model.to_s == table_for(model)
       end
 
       def association_defined?(klass, association)
@@ -334,11 +332,7 @@ module BetterAuth
         physical_name(model).split("_").map(&:capitalize).join
       end
 
-      def collection_join?(model, join)
-        model == "user" && join&.keys&.any? { |join_model| join_model.to_s == "account" }
-      end
-
-      def aggregate_collection_joins(records)
+      def aggregate_collection_joins(_model, records, _join)
         records
       end
 
@@ -377,6 +371,18 @@ module BetterAuth
 
       def resolve_default(value)
         value.respond_to?(:call) ? value.call : value
+      end
+
+      def generated_id
+        generator = options.advanced.dig(:database, :generate_id) || options.advanced.dig(:database, :generateId)
+        return generator.call.to_s if generator.respond_to?(:call)
+        return SecureRandom.uuid if generator.to_s == "uuid"
+
+        SecureRandom.hex(16)
+      end
+
+      def escape_like(value)
+        value.to_s.gsub(/[\\%_]/) { |match| "\\#{match}" }
       end
     end
   end
