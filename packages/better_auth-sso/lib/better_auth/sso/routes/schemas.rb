@@ -44,17 +44,18 @@ module BetterAuth
 
         def plugin_schema(config = {})
           normalized = BetterAuth::Plugins.normalize_hash(config || {})
+          field_mappings = BetterAuth::Plugins.normalize_hash(normalized[:fields] || {})
           fields = {
-            issuer: {type: "string", required: true},
-            oidcConfig: {type: "string", required: false},
-            samlConfig: {type: "string", required: false},
-            userId: {type: "string", required: true},
-            providerId: {type: "string", required: true, unique: true},
-            domain: {type: "string", required: true},
-            organizationId: {type: "string", required: false}
+            issuer: field("issuer", {type: "string", required: true}, field_mappings),
+            oidcConfig: field("oidcConfig", {type: "string", required: false}, field_mappings),
+            samlConfig: field("samlConfig", {type: "string", required: false}, field_mappings),
+            userId: field("userId", {type: "string", required: true, references: {model: "user", field: "id"}}, field_mappings),
+            providerId: field("providerId", {type: "string", required: true, unique: true}, field_mappings),
+            domain: field("domain", {type: "string", required: true}, field_mappings),
+            organizationId: field("organizationId", {type: "string", required: false}, field_mappings)
           }
           if normalized.dig(:domain_verification, :enabled)
-            fields[:domainVerified] = {type: "boolean", required: false, default_value: false}
+            fields[:domainVerified] = field("domainVerified", {type: "boolean", required: false, default_value: false}, field_mappings)
           end
           {
             ssoProvider: {
@@ -70,6 +71,11 @@ module BetterAuth
 
         def saml_config_key?(key)
           SAML_CONFIG_KEYS.include?(BetterAuth::Plugins.normalize_key(key))
+        end
+
+        def field(logical_name, attributes, mappings)
+          mapping = mappings[BetterAuth::Plugins.normalize_key(logical_name)]
+          mapping ? attributes.merge(field_name: mapping) : attributes
         end
       end
     end

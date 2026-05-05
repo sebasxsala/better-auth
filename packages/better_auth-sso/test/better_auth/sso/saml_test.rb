@@ -1531,6 +1531,79 @@ class BetterAuthSSOSAMLMirrorTest < Minitest::Test
     assert_nil auth.context.internal_adapter.find_session(session_token)
   end
 
+  def test_idp_initiated_slo_logout_response_includes_in_response_to
+    auth = build_auth_with_json_saml_parser(
+      saml_options: {enableSingleLogout: true},
+      saml_user_info: {
+        id: "assertion-slo-in-response-to",
+        email: "slo-in-response-to@example.com",
+        name: "SLO InResponseTo",
+        name_id: "name-id-in-response-to",
+        session_index: "session-index-in-response-to"
+      }
+    )
+    cookie = sign_up_cookie(auth)
+    register_saml_provider(auth, cookie, provider_id: "idp-slo-in-response-to", saml_config: {singleLogoutService: "https://idp.example.com/slo"})
+    auth.api.acs_endpoint(
+      params: {providerId: "idp-slo-in-response-to"},
+      body: {SAMLResponse: saml_xml_response(assertion_id: "assertion-slo-in-response-to")},
+      as_response: true
+    )
+
+    status, _headers, response_body = auth.api.slo_endpoint(
+      params: {providerId: "idp-slo-in-response-to"},
+      body: {
+        SAMLRequest: saml_logout_request(name_id: "name-id-in-response-to", session_index: "session-index-in-response-to", id: "_logout-request-id"),
+        RelayState: "/signed-out"
+      },
+      as_response: true
+    )
+    encoded_response = response_body.join[/name="SAMLResponse" value="([^"]+)"/, 1]
+    xml = Base64.decode64(encoded_response)
+
+    assert_equal 200, status
+    assert_includes xml, 'InResponseTo="_logout-request-id"'
+  end
+
+  def test_slo_rejects_unsigned_logout_request_when_signature_required
+    auth = build_auth_with_json_saml_parser(saml_options: {enableSingleLogout: true, wantLogoutRequestSigned: true})
+    cookie = sign_up_cookie(auth)
+    register_saml_provider(auth, cookie, provider_id: "signed-request-required", saml_config: {singleLogoutService: "https://idp.example.com/slo"})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.slo_endpoint(
+        params: {providerId: "signed-request-required"},
+        body: {SAMLRequest: saml_logout_request(name_id: "name-id", session_index: "session-index")}
+      )
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal "Invalid LogoutRequest", error.message
+  end
+
+  def test_slo_rejects_unsigned_logout_response_when_signature_required
+    auth = build_auth_with_json_saml_parser(saml_options: {enableSingleLogout: true, wantLogoutResponseSigned: true})
+    cookie = sign_up_cookie(auth)
+    register_saml_provider(auth, cookie, provider_id: "signed-response-required", saml_config: {singleLogoutService: "https://idp.example.com/slo"})
+    _init_status, init_headers, _init_body = auth.api.initiate_slo(
+      headers: {"cookie" => cookie},
+      params: {providerId: "signed-response-required"},
+      body: {callbackURL: "/after-logout"},
+      as_response: true
+    )
+    request_id = saml_logout_request_id_from_url(init_headers.fetch("location"))
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.slo_endpoint(
+        params: {providerId: "signed-response-required"},
+        body: {SAMLResponse: saml_logout_response(in_response_to: request_id), RelayState: "/after-logout"}
+      )
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal "Invalid LogoutResponse", error.message
+  end
+
   def test_logout_response_consumes_pending_request_and_redirects_safely
     auth = build_auth_with_json_saml_parser(saml_options: {enableSingleLogout: true})
     cookie = sign_up_cookie(auth)
@@ -1709,8 +1782,9 @@ class BetterAuthSSOSAMLMirrorTest < Minitest::Test
     xml[/\bID=['"]([^'"]+)['"]/, 1]
   end
 
-  def saml_logout_request(name_id:, session_index:)
-    Base64.strict_encode64("<samlp:LogoutRequest xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\"><saml:NameID>#{name_id}</saml:NameID><samlp:SessionIndex>#{session_index}</samlp:SessionIndex></samlp:LogoutRequest>")
+  def saml_logout_request(name_id:, session_index:, id: nil)
+    id_attribute = id ? " ID=\"#{id}\"" : ""
+    Base64.strict_encode64("<samlp:LogoutRequest xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" xmlns:saml=\"urn:oasis:names:tc:SAML:2.0:assertion\"#{id_attribute}><saml:NameID>#{name_id}</saml:NameID><samlp:SessionIndex>#{session_index}</samlp:SessionIndex></samlp:LogoutRequest>")
   end
 
   def saml_logout_response(in_response_to:, status_code: "urn:oasis:names:tc:SAML:2.0:status:Success")

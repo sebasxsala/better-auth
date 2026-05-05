@@ -20,7 +20,7 @@ module BetterAuth
             initiate_slo: BetterAuth::Plugins.sso_initiate_slo_endpoint(normalized),
             list_sso_providers: BetterAuth::Plugins.sso_list_providers_endpoint,
             get_sso_provider: BetterAuth::Plugins.sso_get_provider_endpoint,
-            update_sso_provider: BetterAuth::Plugins.sso_update_provider_endpoint,
+            update_sso_provider: BetterAuth::Plugins.sso_update_provider_endpoint(normalized),
             delete_sso_provider: BetterAuth::Plugins.sso_delete_provider_endpoint
           }
           if normalized.dig(:domain_verification, :enabled)

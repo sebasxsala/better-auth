@@ -364,6 +364,75 @@ class BetterAuthSSOProvidersTest < Minitest::Test
     assert_equal 400, error.status_code
   end
 
+  def test_update_provider_rejects_saml_metadata_that_exceeds_configured_limit
+    auth = build_auth(saml: {maxMetadataSize: 16})
+    cookie = sign_up_cookie(auth)
+    user = user_by_email(auth, "owner@example.com")
+    create_serialized_saml_provider(auth, user.fetch("id"), "saml-provider")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.update_sso_provider(
+        headers: {"cookie" => cookie},
+        body: {
+          providerId: "saml-provider",
+          samlConfig: {idpMetadata: {metadata: "<EntityDescriptor>too-large</EntityDescriptor>"}}
+        }
+      )
+    end
+
+    assert_equal 400, error.status_code
+    assert_includes error.message, "IdP metadata exceeds maximum allowed size"
+  end
+
+  def test_update_provider_rejects_deprecated_saml_algorithm_when_configured
+    auth = build_auth(saml: {algorithms: {onDeprecated: "reject"}})
+    cookie = sign_up_cookie(auth)
+    user = user_by_email(auth, "owner@example.com")
+    create_serialized_saml_provider(auth, user.fetch("id"), "saml-provider")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.update_sso_provider(
+        headers: {"cookie" => cookie},
+        body: {providerId: "saml-provider", samlConfig: {signatureAlgorithm: "rsa-sha1"}}
+      )
+    end
+
+    assert_equal 400, error.status_code
+    assert_includes error.message, "deprecated signature algorithm"
+  end
+
+  def test_update_provider_merges_resolved_issuer_into_protocol_configs
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    user = user_by_email(auth, "owner@example.com")
+    create_serialized_saml_provider(auth, user.fetch("id"), "saml-provider")
+    create_serialized_oidc_provider(auth, user.fetch("id"), "oidc-provider", "client123")
+
+    auth.api.update_sso_provider(
+      headers: {"cookie" => cookie},
+      body: {
+        providerId: "saml-provider",
+        issuer: "https://new-saml-issuer.example.com",
+        samlConfig: {callbackUrl: "/new-dashboard"}
+      }
+    )
+    saml_provider = auth.context.adapter.find_one(model: "ssoProvider", where: [{field: "providerId", value: "saml-provider"}])
+    saml_config = BetterAuth::Plugins.sso_provider_config_hash(saml_provider.fetch("samlConfig"))
+    assert_equal "https://new-saml-issuer.example.com", saml_config.fetch(:issuer)
+
+    auth.api.update_sso_provider(
+      headers: {"cookie" => cookie},
+      body: {
+        providerId: "oidc-provider",
+        issuer: "https://new-oidc-issuer.example.com",
+        oidcConfig: {clientId: "client456"}
+      }
+    )
+    oidc_provider = auth.context.adapter.find_one(model: "ssoProvider", where: [{field: "providerId", value: "oidc-provider"}])
+    oidc_config = BetterAuth::Plugins.sso_provider_config_hash(oidc_provider.fetch("oidcConfig"))
+    assert_equal "https://new-oidc-issuer.example.com", oidc_config.fetch(:issuer)
+  end
+
   def test_update_provider_rejects_empty_update
     auth = build_auth
     cookie = sign_up_cookie(auth)

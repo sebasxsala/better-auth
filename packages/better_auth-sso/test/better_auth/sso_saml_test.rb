@@ -1262,7 +1262,12 @@ class BetterAuthPluginsSSOSAMLTest < Minitest::Test
     logout_request = saml_logout_request(name_id: "name-id", session_index: "session-index")
     status, response_headers, _body = auth.api.slo_endpoint(
       params: {providerId: "saml-signed-slo"},
-      query: {SAMLRequest: logout_request, RelayState: "/signed-out"},
+      query: {
+        SAMLRequest: logout_request,
+        RelayState: "/signed-out",
+        SigAlg: XMLSecurity::Document::RSA_SHA256,
+        Signature: "idp-signature"
+      },
       as_response: true
     )
     assert_equal 302, status

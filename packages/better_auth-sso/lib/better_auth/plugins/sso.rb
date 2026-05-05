@@ -91,9 +91,58 @@ module BetterAuth
         init: ->(_ctx) { {options: {advanced: {disable_origin_check: ["/sso/saml2/callback", "/sso/saml2/sp/acs", "/sso/saml2/sp/slo"]}}} },
         schema: BetterAuth::SSO::Routes::Schemas.plugin_schema(config),
         endpoints: endpoints,
+        hooks: sso_hooks(config),
         error_codes: SSO_ERROR_CODES,
         options: config
       )
+    end
+
+    def sso_hooks(config = {})
+      {
+        before: [
+          {
+            matcher: ->(ctx) { ctx.path == "/sign-out" },
+            handler: ->(ctx) { sso_before_sign_out(ctx, config) }
+          }
+        ],
+        after: [
+          {
+            matcher: ->(ctx) { ctx.path.to_s.match?(%r{\A/callback/[^/]+\z}) },
+            handler: ->(ctx) { sso_after_generic_callback(ctx, config) }
+          }
+        ]
+      }
+    end
+
+    def sso_before_sign_out(ctx, config = {})
+      return unless config.dig(:saml, :enable_single_logout)
+
+      token_cookie = ctx.context.auth_cookies[:session_token]
+      session_token = ctx.get_signed_cookie(token_cookie.name, ctx.context.secret)
+      return if session_token.to_s.empty?
+
+      lookup_key = "#{SSO_SAML_SESSION_BY_ID_KEY_PREFIX}#{session_token}"
+      session_lookup = ctx.context.internal_adapter.find_verification_value(lookup_key)
+      saml_session_key = session_lookup&.fetch("value", nil)
+      ctx.context.internal_adapter.delete_verification_by_identifier(saml_session_key) if saml_session_key
+      ctx.context.internal_adapter.delete_verification_by_identifier(lookup_key)
+      nil
+    rescue
+      nil
+    end
+
+    def sso_after_generic_callback(ctx, config = {})
+      new_session = ctx.context.new_session if ctx.context.respond_to?(:new_session)
+      return unless new_session && new_session[:user]
+      return unless defined?(BetterAuth::SSO::Linking::OrgAssignment)
+
+      BetterAuth::SSO::Linking::OrgAssignment.assign_organization_by_domain(
+        ctx,
+        user: new_session.fetch(:user),
+        provisioning_options: config[:organization_provisioning],
+        domain_verification: config[:domain_verification]
+      )
+      nil
     end
 
     def sso_schema(config = {})
@@ -245,7 +294,7 @@ module BetterAuth
       end
     end
 
-    def sso_update_provider_endpoint
+    def sso_update_provider_endpoint(config = {})
       Endpoint.new(path: "/sso/update-provider", method: "POST") do |ctx|
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
@@ -264,13 +313,17 @@ module BetterAuth
           current = sso_provider_config_hash(provider["oidcConfig"])
           raise APIError.new("BAD_REQUEST", message: "Cannot update OIDC config for a provider that doesn't have OIDC configured") if current.empty?
 
-          update[:oidcConfig] = current.merge(normalize_hash(body[:oidc_config]))
+          resolved_issuer = update[:issuer] || current[:issuer] || provider["issuer"]
+          update[:oidcConfig] = current.merge(normalize_hash(body[:oidc_config])).merge(issuer: resolved_issuer).compact
         end
         if body.key?(:saml_config)
           current = sso_provider_config_hash(provider["samlConfig"])
           raise APIError.new("BAD_REQUEST", message: "Cannot update SAML config for a provider that doesn't have SAML configured") if current.empty?
 
-          update[:samlConfig] = current.merge(normalize_hash(body[:saml_config]))
+          resolved_issuer = update[:issuer] || current[:issuer] || provider["issuer"]
+          merged_saml_config = current.merge(normalize_hash(body[:saml_config])).merge(issuer: resolved_issuer).compact
+          sso_validate_saml_config!(merged_saml_config, config)
+          update[:samlConfig] = merged_saml_config
         end
         updated = ctx.context.adapter.update(model: "ssoProvider", where: [{field: "id", value: provider.fetch("id")}], update: update)
         ctx.json(sso_sanitize_provider(updated, ctx.context))
@@ -438,13 +491,18 @@ module BetterAuth
         provider = sso_find_provider!(ctx, sso_fetch(ctx.params, :provider_id))
         relay_state = sso_fetch(ctx.body, :relay_state) || sso_fetch(ctx.query, :relay_state)
         if sso_fetch(ctx.body, :saml_response) || sso_fetch(ctx.query, :saml_response)
-          sso_process_saml_logout_response(ctx, sso_fetch(ctx.body, :saml_response) || sso_fetch(ctx.query, :saml_response))
+          raw_response = sso_fetch(ctx.body, :saml_response) || sso_fetch(ctx.query, :saml_response)
+          sso_validate_saml_slo_signature!(ctx, raw_response, "Invalid LogoutResponse") if config.dig(:saml, :want_logout_response_signed)
+          sso_process_saml_logout_response(ctx, raw_response)
           Cookies.delete_session_cookie(ctx)
           next sso_redirect(ctx, sso_safe_slo_redirect_url(ctx, relay_state, provider.fetch("providerId")))
         end
 
-        sso_process_saml_logout_request(ctx, provider, sso_fetch(ctx.body, :saml_request) || sso_fetch(ctx.query, :saml_request))
-        response = Base64.strict_encode64("<samlp:LogoutResponse xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" ID=\"_#{BetterAuth::Crypto.random_string(32)}\" Version=\"2.0\" IssueInstant=\"#{Time.now.utc.iso8601}\" Destination=\"#{sso_saml_logout_destination(provider)}\"><samlp:Status><samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:Success\"/></samlp:Status></samlp:LogoutResponse>")
+        raw_request = sso_fetch(ctx.body, :saml_request) || sso_fetch(ctx.query, :saml_request)
+        sso_validate_saml_slo_signature!(ctx, raw_request, "Invalid LogoutRequest") if config.dig(:saml, :want_logout_request_signed)
+        logout_request_data = sso_process_saml_logout_request(ctx, provider, raw_request)
+        in_response_to = logout_request_data[:id].to_s.empty? ? "" : " InResponseTo=\"#{CGI.escapeHTML(logout_request_data[:id].to_s)}\""
+        response = Base64.strict_encode64("<samlp:LogoutResponse xmlns:samlp=\"urn:oasis:names:tc:SAML:2.0:protocol\" ID=\"_#{BetterAuth::Crypto.random_string(32)}\"#{in_response_to} Version=\"2.0\" IssueInstant=\"#{Time.now.utc.iso8601}\" Destination=\"#{sso_saml_logout_destination(provider)}\"><samlp:Status><samlp:StatusCode Value=\"urn:oasis:names:tc:SAML:2.0:status:Success\"/></samlp:Status></samlp:LogoutResponse>")
         if sso_fetch(ctx.body, :saml_request)
           next sso_saml_post_form(sso_saml_logout_destination(provider), "SAMLResponse", response, relay_state)
         end
@@ -691,6 +749,21 @@ module BetterAuth
         sso_validate_url!(saml_config[:single_logout_service], "SAML singleLogoutService must be a valid URL")
       end
 
+      config_algorithm_xml = +""
+      unless saml_config[:signature_algorithm].to_s.empty?
+        config_algorithm_xml << "<ds:SignatureMethod Algorithm=\"#{saml_config[:signature_algorithm]}\"/>"
+      end
+      unless saml_config[:digest_algorithm].to_s.empty?
+        config_algorithm_xml << "<ds:DigestMethod Algorithm=\"#{saml_config[:digest_algorithm]}\"/>"
+      end
+      sso_validate_saml_algorithms!(
+        config_algorithm_xml,
+        on_deprecated: plugin_config.dig(:saml, :algorithms, :on_deprecated) || saml_config[:on_deprecated_algorithm] || "warn",
+        allowed_signature_algorithms: plugin_config.dig(:saml, :algorithms, :allowed_signature_algorithms) || saml_config[:allowed_signature_algorithms],
+        allowed_digest_algorithms: plugin_config.dig(:saml, :algorithms, :allowed_digest_algorithms) || saml_config[:allowed_digest_algorithms],
+        allowed_key_encryption_algorithms: plugin_config.dig(:saml, :algorithms, :allowed_key_encryption_algorithms) || saml_config[:allowed_key_encryption_algorithms],
+        allowed_data_encryption_algorithms: plugin_config.dig(:saml, :algorithms, :allowed_data_encryption_algorithms) || saml_config[:allowed_data_encryption_algorithms]
+      )
       sso_validate_saml_algorithms!(
         metadata.to_s,
         on_deprecated: plugin_config.dig(:saml, :algorithms, :on_deprecated) || saml_config[:on_deprecated_algorithm] || "warn",
@@ -853,11 +926,11 @@ module BetterAuth
 
     def sso_process_saml_logout_request(ctx, provider, raw_request)
       data = sso_parse_saml_logout_request(raw_request)
-      return if data[:name_id].to_s.empty?
+      return data if data[:name_id].to_s.empty?
 
       session_identifier = "#{SSO_SAML_SESSION_KEY_PREFIX}#{provider.fetch("providerId")}:#{data[:name_id]}"
       verification = ctx.context.internal_adapter.find_verification_value(session_identifier)
-      return unless verification
+      return data unless verification
 
       record = JSON.parse(verification.fetch("value"))
       session_token = record["sessionToken"]
@@ -865,8 +938,9 @@ module BetterAuth
       ctx.context.internal_adapter.delete_session(session_token) if session_token && session_index_matches
       ctx.context.internal_adapter.delete_verification_by_identifier(session_identifier)
       ctx.context.internal_adapter.delete_verification_by_identifier("#{SSO_SAML_SESSION_BY_ID_KEY_PREFIX}#{session_token}") if session_token
+      data
     rescue
-      nil
+      {}
     end
 
     def sso_store_saml_logout_request(ctx, provider, request_id, config)
@@ -894,11 +968,25 @@ module BetterAuth
     def sso_parse_saml_logout_request(raw_request)
       xml = Base64.decode64(raw_request.to_s.gsub(/\s+/, ""))
       {
+        id: xml[/\bID=['"]([^'"]+)['"]/, 1],
         name_id: xml[%r{<(?:\w+:)?NameID[^>]*>([^<]+)</(?:\w+:)?NameID>}, 1],
         session_index: xml[%r{<(?:\w+:)?SessionIndex[^>]*>([^<]+)</(?:\w+:)?SessionIndex>}, 1]
       }
     rescue
       {}
+    end
+
+    def sso_validate_saml_slo_signature!(ctx, raw_message, error_message)
+      return true if !sso_fetch(ctx.body, :signature).to_s.empty? || !sso_fetch(ctx.query, :signature).to_s.empty?
+
+      xml = Base64.decode64(raw_message.to_s.gsub(/\s+/, ""))
+      return true if xml.include?("<Signature") || xml.include?(":Signature")
+
+      raise APIError.new("BAD_REQUEST", message: error_message)
+    rescue APIError
+      raise
+    rescue
+      raise APIError.new("BAD_REQUEST", message: error_message)
     end
 
     def sso_parse_saml_logout_response(raw_response)
