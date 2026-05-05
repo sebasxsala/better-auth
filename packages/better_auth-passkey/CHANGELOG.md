@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-05
+
 - Require a fresh session for session-required passkey registration verification.
 - Return `BAD_REQUEST` for passkey registration WebAuthn verification failures while preserving `INTERNAL_SERVER_ERROR` for unexpected failures.
 - Invalidate stored WebAuthn challenges after failed registration or authentication verification attempts.

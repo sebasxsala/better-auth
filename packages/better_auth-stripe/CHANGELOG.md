@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-05
+
 - Changed Stripe webhooks to reject requests when the configured Stripe client does not expose `webhooks.construct_event_async` or `webhooks.construct_event`, preventing unverified payload processing.
+- Hardened Stripe subscription route middleware and webhook origin handling with regression coverage.
 
 ## [0.6.0] - 2026-05-02
 

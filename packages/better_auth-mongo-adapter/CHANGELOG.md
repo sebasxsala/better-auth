@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-05-05
+
 - Added explicit `ensure_indexes!` setup helper for Mongo indexes derived from Better Auth schema metadata.
 - Updated MongoDB setup docs to use the lambda adapter form, clearer standalone/replica-set transaction guidance, and production index guidance.
 - Consolidated Mongo fake test support and strengthened transaction rollback coverage for staged mutations.

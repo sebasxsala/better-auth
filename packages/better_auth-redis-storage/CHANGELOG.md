@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-05-05
+
 - Validate `scan_count` as either `nil` or a positive `Integer`.
 - Reject `nil` logical keys before prefixing Redis keys.
 - Coerce positive finite non-Integer `Numeric` TTL values for `SETEX`.

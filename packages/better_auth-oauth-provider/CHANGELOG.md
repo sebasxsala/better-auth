@@ -2,8 +2,11 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-05-05
+
 - Fixed OAuth provider consent approval, metadata, issuer normalization, revocation persistence, and endpoint-specific rate limits for hardening parity.
 - Changed RP-initiated logout ID token validation to use the hardened HS256 ID token key; old ID tokens signed only with the public client id will no longer validate.
+- Hardened OAuth client endpoints, token exchange, introspection, userinfo, and pairwise behavior with expanded parity coverage.
 
 ## 0.3.0 - 2026-04-30
 

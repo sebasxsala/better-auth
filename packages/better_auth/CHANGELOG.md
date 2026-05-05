@@ -7,10 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-05
+
+### Added
+
+- Completed OpenAPI support with upstream v1.6.9 base-route schema parity, `/ok` and `/error` documentation, richer helper-generated schemas, plugin endpoint metadata coverage, and Scalar reference configuration parity.
+- Added shared join query handling for adapter-backed relation loading.
+
+### Changed
+
 - Modernized the MCP plugin to use OAuth Provider-style client, token, metadata, and protected-resource behavior while keeping legacy MCP routes as aliases.
-- Fixed OAuth refresh token rotation to reject refresh tokens presented by a different authenticated client.
 - Changed OAuth HS256 ID token signing to use non-public key material; existing ID tokens signed only with the public client id will no longer validate.
+
+### Fixed
+
+- Fixed OAuth refresh token rotation to reject refresh tokens presented by a different authenticated client.
 - Fixed OAuth client-secret verification to use constant-time comparison for encrypted and custom-hashed storage modes.
+- Hardened router and OAuth protocol behavior around path handling, issuer metadata, and public route coverage.
 
 ## [0.4.0] - 2026-04-30
 

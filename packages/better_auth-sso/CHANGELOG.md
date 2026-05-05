@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-05-05
+
 - Fixed SAML config validation for `singleSignOnService` and added validation for `singleLogoutService`.
 - Hardened OIDC callbacks by binding signed state `providerId` to the callback route and verifying `nonce` on JWKS-backed ID tokens.
 - Changed SSO domain verification to require exact TXT record matches and corrected the insufficient access error code to `INSUFFICIENT_ACCESS`.

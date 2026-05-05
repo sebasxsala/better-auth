@@ -2,7 +2,11 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-05-05
+
 - Changed API-key-backed sessions to expose `tokenFingerprint` instead of storing the raw API key in `session["token"]`.
+- Hardened API key listing and expired-key cleanup behavior.
+- Improved API key metadata handling and added regression coverage for session fingerprint behavior.
 
 ## 0.2.1 - 2026-04-30
 

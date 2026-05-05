@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-05-05
+
 - Fixed auth dispatch when Rack splits mounted paths across `SCRIPT_NAME` and `PATH_INFO`.
 - Rejected `better_auth at: "/"` to avoid capturing every Sinatra route.
 - Stopped swallowing real migration bookkeeping query errors while preserving empty-state behavior for missing schema tables.
