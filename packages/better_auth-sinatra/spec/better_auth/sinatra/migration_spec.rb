@@ -16,15 +16,18 @@ end
 class BetterAuthSinatraFakeSQLConnection
   attr_reader :executed_statements, :applied_versions
 
-  def initialize
+  def initialize(select_error: nil)
     @executed_statements = []
     @applied_versions = []
+    @select_error = select_error
   end
 
   def exec(statement)
     @executed_statements << statement
 
     if statement.match?(/SELECT .*better_auth_schema_migrations/i)
+      raise @select_error if @select_error
+
       applied_versions.map { |version| {"version" => version} }
     elsif (match = statement.match(/VALUES \('([^']+)'\)/))
       @applied_versions << match[1]
@@ -107,6 +110,43 @@ RSpec.describe BetterAuth::Sinatra::Migration do
     end
   end
 
+  it "raises when applied migration lookup fails for a real database error" do
+    Dir.mktmpdir("better-auth-sinatra-migrate") do |dir|
+      migrations_path = File.join(dir, "db/better_auth/migrate")
+      FileUtils.mkdir_p(migrations_path)
+      File.write(
+        File.join(migrations_path, "20260427000000_create_better_auth_tables.sql"),
+        "CREATE TABLE users (id text PRIMARY KEY);\n"
+      )
+      connection = BetterAuthSinatraFakeSQLConnection.new(select_error: RuntimeError.new("permission denied for table better_auth_schema_migrations"))
+      auth = BetterAuth.auth(
+        secret: secret,
+        database: ->(options) { BetterAuthSinatraFakeSQLAdapter.new(options, connection) }
+      )
+
+      expect {
+        described_class.migrate(auth, migrations_path: migrations_path)
+      }.to raise_error(RuntimeError, /permission denied/)
+    end
+  end
+
+  it "treats a missing schema migrations table as no applied migrations" do
+    connection = BetterAuthSinatraFakeSQLConnection.new(select_error: RuntimeError.new("relation \"better_auth_schema_migrations\" does not exist"))
+
+    expect(described_class.applied_migrations(connection, :postgres)).to eq([])
+  end
+
+  it "splits multiple SQL statements on one line" do
+    sql = "CREATE TABLE users (id text PRIMARY KEY); CREATE INDEX idx_users_on_id ON users (id);"
+
+    statements = described_class.statements(sql)
+
+    expect(statements).to eq([
+      "CREATE TABLE users (id text PRIMARY KEY)",
+      "CREATE INDEX idx_users_on_id ON users (id)"
+    ])
+  end
+
   it "supports SQL connections that expose query instead of exec or execute" do
     connection = BetterAuthSinatraFakeQueryConnection.new
 
@@ -161,6 +201,29 @@ RSpec.describe BetterAuth::Sinatra::Migration do
           migration = Dir["db/better_auth/migrate/*_create_better_auth_tables.sql"].first
           expect(File.read(migration)).to include("-- Dialect: postgres")
         end
+      end
+    end
+  ensure
+    Rake.application = Rake::Application.new
+  end
+
+  it "prints mount and documentation guidance from the routes task" do
+    Dir.mktmpdir("better-auth-sinatra-tasks") do |dir|
+      in_directory(dir) do
+        load_tasks
+        FileUtils.mkdir_p("config")
+        File.write(
+          "config/better_auth.rb",
+          <<~RUBY
+            BetterAuth::Sinatra.configure do |config|
+              config.base_path = "/auth"
+            end
+          RUBY
+        )
+
+        expect {
+          Rake::Task["better_auth:routes"].invoke
+        }.to output(/\/auth\/\* -> BetterAuth.auth.*OpenAPI/m).to_stdout
       end
     end
   ensure

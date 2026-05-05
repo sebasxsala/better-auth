@@ -6,6 +6,13 @@ module BetterAuth
   module Sinatra
     module Migration
       DEFAULT_MIGRATIONS_PATH = "db/better_auth/migrate"
+      MISSING_MIGRATIONS_TABLE_MESSAGES = [
+        /no such table/i,
+        /relation .* does not exist/i,
+        /table .* doesn't exist/i,
+        /undefined table/i,
+        /invalid object name/i
+      ].freeze
 
       class UnsupportedAdapterError < StandardError; end
 
@@ -83,7 +90,11 @@ module BetterAuth
       def applied_migrations(connection, dialect)
         rows = execute_sql(connection, "SELECT #{quote("version", dialect)} FROM #{quote("better_auth_schema_migrations", dialect)};")
         Array(rows).map { |row| row["version"] || row[:version] }
-      rescue
+      rescue UnsupportedAdapterError
+        raise
+      rescue => error
+        raise error unless missing_schema_migrations_table?(error)
+
         []
       end
 
@@ -109,7 +120,25 @@ module BetterAuth
       end
 
       def statements(sql)
-        sql.split(/;\s*$/).map(&:strip).reject(&:empty?)
+        normalized = sql.to_s.gsub("\r\n", "\n").strip
+        return [] if normalized.empty?
+
+        chunks = normalized.split(/;\s*\n/)
+        chunks.flat_map do |chunk|
+          chunk = chunk.strip
+          next [] if chunk.empty?
+
+          if chunk.include?(";") && !chunk.include?("\n")
+            chunk.split(";").map(&:strip).reject(&:empty?)
+          else
+            [chunk.delete_suffix(";")]
+          end
+        end
+      end
+
+      def missing_schema_migrations_table?(error)
+        message = error.message.to_s
+        MISSING_MIGRATIONS_TABLE_MESSAGES.any? { |pattern| message.match?(pattern) }
       end
 
       def quote(identifier, dialect)

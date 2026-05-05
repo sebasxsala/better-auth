@@ -58,6 +58,18 @@ RSpec.describe BetterAuth::Sinatra do
     expect(described_class.auth.options.base_path).to eq("/auth")
   end
 
+  it "includes versioned secrets in auth options when set" do
+    described_class.configure do |config|
+      config.secret = secret
+      config.database = :memory
+      config.secrets = [{version: 1, value: "rotated-secret-that-is-long-enough-for-validation"}]
+    end
+
+    options = described_class.configuration.to_auth_options
+
+    expect(options[:secrets]).to eq([{version: 1, value: "rotated-secret-that-is-long-enough-for-validation"}])
+  end
+
   def secret
     "sinatra-secret-that-is-long-enough-for-validation"
   end

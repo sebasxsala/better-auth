@@ -10,9 +10,9 @@ module BetterAuth
       end
 
       def call(env)
-        return auth.call(env) if mounted_path?(env["PATH_INFO"])
+        return @app.call(env) unless mount_matches?(env)
 
-        @app.call(env)
+        auth.call(env.merge("PATH_INFO" => mounted_path_info(env)))
       end
 
       private
@@ -23,11 +23,31 @@ module BetterAuth
         @auth
       end
 
-      def mounted_path?(path)
-        normalized = normalize_path(path)
-        return true if @mount_path == "/"
+      def mount_matches?(env)
+        return false if @mount_path == "/"
 
-        normalized == @mount_path || normalized.start_with?("#{@mount_path}/")
+        path_info = normalize_path(env["PATH_INFO"])
+        return true if path_info == @mount_path || path_info.start_with?("#{@mount_path}/")
+
+        full = full_request_path(env)
+        full == @mount_path || full.start_with?("#{@mount_path}/")
+      end
+
+      def full_request_path(env)
+        script = env.fetch("SCRIPT_NAME", "").to_s
+        path = env.fetch("PATH_INFO", "").to_s
+        normalize_path("#{script}#{path}")
+      end
+
+      def mounted_path_info(env)
+        path_info = normalize_path(env["PATH_INFO"])
+        return path_info if path_info == @mount_path || path_info.start_with?("#{@mount_path}/")
+
+        script_name = normalize_path(env["SCRIPT_NAME"])
+        prefix = (script_name == "/") ? @mount_path : script_name
+        return path_info if path_info == prefix || path_info.start_with?("#{prefix}/")
+
+        normalize_path("#{prefix}/#{path_info.delete_prefix("/")}")
       end
 
       def normalize_path(path)

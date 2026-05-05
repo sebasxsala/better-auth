@@ -30,11 +30,6 @@ namespace :better_auth do
     end
   end
 
-  desc "Create the Better Auth SQL migration"
-  task "generate:migration" do
-    Rake::Task["better_auth:generate:migration"].invoke
-  end
-
   desc "Run pending Better Auth SQL migrations"
   task :migrate do
     BetterAuth::Sinatra.load_app_config
@@ -44,6 +39,8 @@ namespace :better_auth do
   desc "Print Better Auth Sinatra mount information"
   task :routes do
     BetterAuth::Sinatra.load_app_config
-    puts "#{BetterAuth::Sinatra.configuration.base_path}/* -> BetterAuth.auth"
+    mount_path = BetterAuth::Sinatra.configuration.base_path
+    puts "#{mount_path}/* -> BetterAuth.auth"
+    puts "Core routes are handled by Better Auth; use the OpenAPI plugin or HTTP API docs for endpoint details."
   end
 end

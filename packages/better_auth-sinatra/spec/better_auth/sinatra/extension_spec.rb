@@ -29,6 +29,24 @@ RSpec.describe "BetterAuth::Sinatra extension" do
     expect(JSON.parse(last_response.body)).to eq("ok" => true)
   end
 
+  it "dispatches auth when SCRIPT_NAME and PATH_INFO split the mount prefix" do
+    self.app = build_app(mount_path: "/api/auth")
+
+    get "/ok", {}, {"SCRIPT_NAME" => "/api/auth", "PATH_INFO" => "/ok"}
+
+    expect(last_response.status).to eq(200)
+    expect(JSON.parse(last_response.body)).to eq("ok" => true)
+  end
+
+  it "dispatches auth when the Sinatra app is nested under a parent Rack mount" do
+    self.app = build_app(mount_path: "/auth")
+
+    get "/auth/ok", {}, {"SCRIPT_NAME" => "/api", "PATH_INFO" => "/auth/ok"}
+
+    expect(last_response.status).to eq(200)
+    expect(JSON.parse(last_response.body)).to eq("ok" => true)
+  end
+
   it "dispatches plugin endpoints through the Sinatra mount" do
     plugin = BetterAuth::Plugin.new(
       id: "sinatra-plugin",
@@ -94,6 +112,16 @@ RSpec.describe "BetterAuth::Sinatra extension" do
     expect(last_response.body).to eq("")
   end
 
+  it "halts protected Sinatra routes with a JSON 401 when JSON is preferred" do
+    self.app = build_app
+
+    get "/private", {}, "HTTP_ACCEPT" => "application/json"
+
+    expect(last_response.status).to eq(401)
+    expect(last_response["content-type"]).to include("application/json")
+    expect(JSON.parse(last_response.body)).to eq("code" => "UNAUTHORIZED", "message" => "Unauthorized")
+  end
+
   it "keeps the mount path as the core base path when overrides include base_path" do
     self.app = build_app(mount_path: "/auth", overrides: {base_path: "/api/auth"})
 
@@ -101,6 +129,41 @@ RSpec.describe "BetterAuth::Sinatra extension" do
 
     expect(last_response.status).to eq(200)
     expect(JSON.parse(last_response.body)).to eq("ok" => true)
+  end
+
+  it "raises when better_auth mount path is root" do
+    expect {
+      Class.new(Sinatra::Base) do
+        register BetterAuth::Sinatra
+        set :environment, :test
+        better_auth at: "/" do |config|
+          config.secret = "sinatra-secret-that-is-long-enough-for-validation"
+          config.base_url = "http://example.org"
+          config.database = :memory
+        end
+      end
+    }.to raise_error(ArgumentError, /better_auth mount path cannot be/)
+  end
+
+  it "warns when better_auth is configured twice on the same app class" do
+    secret = "sinatra-secret-that-is-long-enough-for-validation"
+
+    expect {
+      Class.new(Sinatra::Base) do
+        register BetterAuth::Sinatra
+        set :environment, :test
+        better_auth at: "/api/auth" do |config|
+          config.secret = secret
+          config.base_url = "http://example.org"
+          config.database = :memory
+        end
+        better_auth at: "/auth2" do |config|
+          config.secret = secret
+          config.base_url = "http://example.org"
+          config.database = :memory
+        end
+      end
+    }.to output(/better_auth-sinatra.*already configured/).to_stderr
   end
 
   def build_app(mount_path: "/api/auth", plugins: [], overrides: {})

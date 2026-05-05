@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "json"
+
 module BetterAuth
   module Sinatra
     module Helpers
@@ -20,10 +22,28 @@ module BetterAuth
       def require_authentication
         return true if authenticated?
 
+        if prefers_json_response?
+          error = BetterAuth::APIError.new("UNAUTHORIZED")
+          halt 401, {"content-type" => "application/json"}, JSON.generate(error.to_h)
+        end
+
         halt 401, ""
       end
 
       private
+
+      def prefers_json_response?
+        accept = request.env["HTTP_ACCEPT"].to_s
+        return false if accept.empty? || accept == "*/*"
+
+        preferred = request.preferred_type(["application/json", "text/html"]) if request.respond_to?(:preferred_type)
+        return preferred.to_s == "application/json" if preferred
+
+        accept.split(",").any? do |entry|
+          media_type = entry.split(";", 2).first.to_s.strip
+          media_type == "application/json" || media_type.end_with?("+json")
+        end
+      end
 
       def better_auth_session_data
         return request.env["better_auth.session"] if request.env.key?("better_auth.session")
