@@ -281,7 +281,7 @@ class BetterAuthPluginsScimTest < Minitest::Test
     assert_equal "formatted@example.com", formatted.fetch(:externalId)
   end
 
-  def test_scim_create_user_keeps_ruby_email_canonicalization_and_verified_flag
+  def test_scim_create_user_keeps_ruby_email_canonicalization_and_upstream_verified_default
     auth = build_auth
     cookie = sign_up_cookie(auth)
     token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "okta"}).fetch(:scimToken)
@@ -298,7 +298,7 @@ class BetterAuthPluginsScimTest < Minitest::Test
 
     assert_equal "mixed-email@example.com", created.fetch(:userName)
     assert_equal "mixed-email@example.com", created.fetch(:emails).first.fetch(:value)
-    assert_equal true, stored_user.fetch("emailVerified")
+    assert_equal false, stored_user.fetch("emailVerified")
   end
 
   def test_scim_update_and_patch_reject_anonymous_and_missing_users

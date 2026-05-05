@@ -106,8 +106,7 @@ module BetterAuth
           user = ctx.context.internal_adapter.find_user_by_email(email)&.fetch(:user)
           user ||= ctx.context.internal_adapter.create_user(
             email: email,
-            name: scim_display_name(body, email),
-            emailVerified: true
+            name: scim_display_name(body, email)
           )
           account = ctx.context.internal_adapter.create_account(
             userId: user.fetch("id"),
