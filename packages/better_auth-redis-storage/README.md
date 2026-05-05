@@ -60,6 +60,12 @@ default. Any other value, including the empty string, is honored verbatim.
 Redis databases are not isolation boundaries for shared clients; applications
 sharing a Redis instance should use distinct prefixes.
 
+> **Warning:** Passing `key_prefix: ""` puts Better Auth keys at the root of
+> the selected Redis logical namespace. `list_keys` and `clear` then match `*`,
+> so collisions across apps or tenants are possible and `clear` deletes every
+> key in that Redis database. Use an application-specific prefix unless the
+> Redis database is fully dedicated to Better Auth.
+
 `scan_count` is a Ruby-only opt-in for large Redis databases. By default the gem
 uses `KEYS "#{key_prefix}*"` to match upstream exactly. Set `scan_count:` to a
 positive count such as `100`, `500`, or `1000` to use `SCAN` instead:
@@ -82,13 +88,18 @@ storage.clear
 
 `listKeys` is available as a camelCase alias for upstream parity.
 
+`list_keys` returns every matching logical key but Redis does not guarantee key
+order for `KEYS` or `SCAN`. Sort the returned array in application code when a
+stable order matters.
+
 TTL handling for `set(key, value, ttl)`:
 
 | TTL value | Redis command |
 | --- | --- |
-| `nil`, non-numeric strings, `0`, negative numbers | `set(prefixed_key, value)` |
+| `nil`, non-numeric strings, `0`, negative numbers, non-finite numbers | `set(prefixed_key, value)` |
 | Positive `Integer` | `setex(prefixed_key, ttl, value)` |
-| Positive `Float` | `setex(prefixed_key, ttl.to_i, value)` |
+| Positive finite `Float` | `setex(prefixed_key, ttl.to_i, value)` |
+| Other positive finite `Numeric` values | `setex(prefixed_key, ttl.to_i, value)` |
 | Positive numeric `String` | `setex(prefixed_key, ttl.to_i, value)` |
 
 `set`, `delete`, and `clear` return `nil`, mirroring upstream's `Promise<void>`
@@ -98,6 +109,15 @@ contract in Ruby form. Tests and applications should assert stored values via
 `clear` intentionally differs from upstream when there are no matching keys:
 upstream calls `del(...keys)` even when `keys` is empty, while this Ruby gem
 skips `del` to avoid Redis `ERR wrong number of arguments for 'del'`.
+When keys do exist, `clear` deletes them in batches of
+`BetterAuth::RedisStorage::DELETE_CHUNK_SIZE` keys per `del` call to avoid very
+large Redis argument lists.
+
+Redis Cluster users should treat `list_keys` and `clear` as operationally
+constrained helpers. This adapter does not scan every cluster node, and
+multi-key `del` calls require keys to live in a compatible hash slot. Prefer a
+single-slot prefix strategy such as Redis hash tags when using these helpers in
+clustered deployments.
 
 ## Better Auth Usage
 

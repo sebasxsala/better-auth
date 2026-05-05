@@ -85,7 +85,15 @@ Ruby uses hashes for the upstream TypeScript contracts:
 - `resolve_user` receives `{ ctx:, context: }` and must return at least `id` and `name`; it may also return `display_name` and `email`.
 - Registration `after_verification` receives `{ ctx:, verification:, user:, client_data:, context: }`.
 - Authentication `after_verification` receives `{ ctx:, verification:, client_data: }`.
+- Callback `verification` values are objects from the Ruby `webauthn` gem. They are not the TypeScript `VerifiedRegistrationResponse` or `VerifiedAuthenticationResponse` structs from upstream's Node implementation.
 - Passkey records use upstream wire keys including `userId`, `credentialID`, `publicKey`, `deviceType`, `backedUp`, `createdAt`, and optional `aaguid`.
+
+### Ruby vs TypeScript callback shapes
+
+Callback parity is behavioral at the HTTP JSON boundary, not a static export of
+the TypeScript interfaces from `@better-auth/passkey`. Treat
+`data[:verification]` as the Ruby `webauthn` verification result or hash-like
+object produced by this gem, not as a SimpleWebAuthn DTO.
 
 ## WebAuthn extensions
 

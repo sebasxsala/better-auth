@@ -43,3 +43,11 @@ SAML SLO follows upstream route shapes when `saml.enableSingleLogout` is enabled
 Ruby keeps the lightweight JSON/base64 fallback used by the local SAML test adapter, and real XML deployments should configure `BetterAuth::SSO::SAML.sso_options` or compatible SAML hooks.
 
 SCIM is a separate provisioning feature and lives in `better_auth-scim`.
+
+## Scope and Non-Goals
+
+This package does not currently imply support for advanced enterprise features
+such as `private_key_jwt`, mTLS client authentication, every SAML XML edge case,
+or large internal SSO refactors. Those items are tracked in the
+[upstream and product alignment backlog](../../.docs/backlog/upstream-product-alignment.md)
+until they have explicit product scope and upstream parity decisions.

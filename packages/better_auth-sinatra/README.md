@@ -39,9 +39,26 @@ class App < Sinatra::Base
 end
 ```
 
-The extension mounts the core Rack app at `/api/auth` by default. The core app
-still owns routes such as `/ok`, `/sign-up/email`, `/sign-in/email`, and plugin
-endpoints.
+The extension mounts the core Rack app at `/api/auth` by default. The mount path
+cannot be `/`, because that would capture every Sinatra route before the app can
+handle it. The core app still owns routes such as `/ok`, `/sign-up/email`,
+`/sign-in/email`, and plugin endpoints.
+
+`better_auth at:` sets the path prefix that Better Auth uses as its core
+`base_path`. The adapter supports two common Rack mount patterns:
+
+- Natural Sinatra nesting: mount the Sinatra app under a parent `Rack::URLMap`,
+  for example at `/api`, and configure `better_auth at: "/auth"`. Auth routes
+  are available at `/api/auth/*`.
+- Shared auth mount: mount the Sinatra app itself at the same path as auth, for
+  example `/api/auth`, and configure `better_auth at: "/api/auth"`. The adapter
+  reconstructs the logical path from Rack `SCRIPT_NAME` and `PATH_INFO`.
+
+When using reverse proxies, `Rack::URLMap`, or another parent app, make sure the
+`PATH_INFO` visible to Sinatra still aligns with the configured auth prefix.
+`SCRIPT_NAME` handling depends on the Rack server and mount stack, so verify
+redirect URLs and cookie paths in integration tests when mounting below a
+sub-path.
 
 ## Helpers
 
@@ -51,6 +68,13 @@ endpoints.
 - `require_authentication`
 
 `require_authentication` halts with `401` when no Better Auth user is present.
+Requests that prefer JSON receive the same JSON error shape used by the core
+router.
+
+Custom Sinatra routes resolve sessions from Better Auth cookies. Bearer-heavy
+clients should prefer Better Auth API routes or application-specific auth
+middleware. Attaching Bearer or JWT validation to arbitrary app routes is not
+promised by `require_authentication` alone.
 
 ## Rake Tasks
 
@@ -77,6 +101,11 @@ generated under `db/better_auth/migrate`.
 Sinatra does not include a Rails-style database layer or migration command.
 This adapter uses Better Auth core SQL adapters for migrations. Set
 `BETTER_AUTH_DIALECT=postgres`, `mysql`, or `sqlite` when generating SQL.
+
+Generated SQL should keep one statement per line ending with `;`. The migration
+runner handles simple single-line multi-statement files, but hand-edited SQL
+with semicolons inside string literals can confuse the splitter. DDL rollback
+behavior depends on the database, so back up production data before migrating.
 
 ActiveRecord-backed Sinatra migrations are not supported yet. Apps that already
 use `sinatra-activerecord` can still configure Better Auth manually, but the v1

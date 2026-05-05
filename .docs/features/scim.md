@@ -25,11 +25,21 @@ To match upstream `@better-auth/scim`, Ruby SCIM lives in `better_auth-scim`.
 - Creates SCIM provider accounts for provisioned users, links existing users by email, scopes list/get/update/patch/delete by provider, and enforces organization membership for organization-scoped tokens.
 - Enforces upstream role-gated organization token generation and provider management. The default privileged roles are `admin` and the organization creator role. `provider_ownership: {enabled: true}` restricts personal provider management to the owner while leaving legacy ownerless providers readable for compatibility.
 - Supports primary email selection, formatted/given/family name mapping, external ID/account ID mapping, slash and dot PATCH paths, and no-path value object PATCH operations.
+- New SCIM-created users keep the core default `emailVerified: false`, matching upstream; existing users linked by SCIM keep their current verification state.
 
 ## Key Differences
 
 - Filter support follows upstream server behavior for `userName eq`, including intentional SCIM-style errors for unsupported attributes such as `externalId` and unsupported operators (`ne`, `co`, `sw`, `ew`, and `pr`).
 - Organization-scoped provisioning requires the organization plugin and rejects token generation or resource access when the authenticated user/resource is outside the organization.
+
+## Operational Database Recommendations
+
+SCIM provisioning maps IdP identities through Better Auth account rows using the
+provider id and external account id. Production apps should enforce uniqueness
+for that identity pair, for example a unique SQL index on `providerId` and
+`accountId` for account rows, or the equivalent invariant in MongoDB. Concrete
+DDL belongs in the application's migration for its selected adapter; the SCIM
+gem documents the invariant but does not install every adapter-specific index.
 
 ## Testing
 

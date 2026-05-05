@@ -378,6 +378,18 @@ The gem is available as open source under the terms of the [MIT License](https:/
 
 ## Security
 
+### Trusted origins
+
+`trusted_origins` is merged with the resolved application origin and deployment
+configuration rather than acting as an adapter-local CORS switch. Upstream
+Better Auth also incorporates environment-driven origins and dynamic
+configuration, so an explicit empty array should not be assumed to mean "reject
+every browser origin" unless the deployed core configuration documents that full
+merge contract. Configure concrete origins for each environment and keep browser
+CORS headers in the host Rack stack or reverse proxy. See
+[`host-app-responsibilities.md`](../../.docs/features/host-app-responsibilities.md)
+for the boundary between origin validation, CORS, and CSRF ownership.
+
 If you discover a security vulnerability within Better Auth Ruby, please send an e-mail to [security@openparcel.dev](mailto:security@openparcel.dev).
 
 All reports will be promptly addressed, and you'll be credited accordingly.

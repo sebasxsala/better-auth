@@ -65,6 +65,7 @@ Hanami.app.register_provider(:better_auth) do
       config.database = ->(options) {
         BetterAuth::Hanami::SequelAdapter.from_container(target, options)
       }
+      config.trusted_origins = [target["settings"].better_auth_url].compact
       config.email_and_password = {enabled: true}
       config.plugins = []
     end
@@ -74,6 +75,37 @@ Hanami.app.register_provider(:better_auth) do
     register "better_auth.rack_app", BetterAuth::Hanami::MountedApp.new(auth, mount_path: BetterAuth::Hanami.configuration.base_path)
   end
 end
+```
+
+`trusted_origins` controls Better Auth origin and redirect URL validation. If
+your browser client calls the auth endpoints from another origin, configure Rack
+CORS middleware in your Hanami app as well so preflight requests and
+`Access-Control-*` response headers match your frontend origin and credentials
+policy. For the shared Rack/CORS/CSRF boundary, see
+[`host-app-responsibilities.md`](../../.docs/features/host-app-responsibilities.md).
+
+Do not rely on a Hanami-only empty `trusted_origins` list as a strict
+deny-all-origin policy; set real deployment URLs in app settings. Keep
+`BetterAuth::Hanami::MountedApp` behavior aligned with Hanami's router instead
+of copying Rails mount internals without integration tests. Be cautious with
+relation or inflector overrides generated for an app, because overwriting
+application-specific Hanami relations can be destructive.
+
+## Regenerating Migrations
+
+The migration generator skips an existing `*_create_better_auth_tables.rb` file
+by default so user-edited migrations are not overwritten. To intentionally
+regenerate the base migration for a new app or after changing plugin schemas,
+call the Ruby API with `force: true`:
+
+```ruby
+BetterAuth::Hanami::Generators::MigrationGenerator.new.run(force: true)
+```
+
+The generated rake task keeps the non-overwriting behavior:
+
+```bash
+bundle exec rake better_auth:generate:migration
 ```
 
 ## Routes
@@ -97,6 +129,11 @@ By default this mounts Better Auth at `/api/auth`. Customize the path:
 ```ruby
 better_auth at: "/auth"
 ```
+
+`BetterAuth::Hanami::MountedApp` expects `PATH_INFO` in the shape produced by
+Hanami's router; see `spec/better_auth/hanami/routing_spec.rb`. Custom Rack
+stacks with different `SCRIPT_NAME` conventions may need application-level path
+rewriting.
 
 ## Action Helpers
 
