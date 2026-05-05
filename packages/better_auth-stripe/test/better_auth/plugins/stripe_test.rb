@@ -726,6 +726,16 @@ class BetterAuthPluginsStripeTest < Minitest::Test
     assert_equal BetterAuth::Stripe::ERROR_CODES.fetch("STRIPE_WEBHOOK_SECRET_NOT_FOUND"), error.message
   end
 
+  def test_webhook_rejects_client_without_construct_event
+    auth = build_auth(stripe_client: Object.new, stripe_webhook_secret: "whsec_test")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.stripe_webhook(headers: {"stripe-signature" => "valid"}, body: {type: "invoice.paid"})
+    end
+
+    assert_equal BetterAuth::Stripe::ERROR_CODES.fetch("FAILED_TO_CONSTRUCT_STRIPE_EVENT"), error.message
+  end
+
   def test_webhook_rejects_null_constructed_event
     stripe = FakeStripeClient.new
     stripe.webhooks.async_event = false

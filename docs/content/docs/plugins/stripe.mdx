@@ -495,6 +495,9 @@ The plugin automatically handles these Stripe events:
 - `customer.subscription.deleted`: Marks a subscription canceled and clears pending schedules.
 
 You can also handle any Stripe event with `on_event`.
+The configured Stripe client must expose `webhooks.construct_event_async` or
+`webhooks.construct_event`; Ruby rejects webhook requests instead of processing
+unverified payloads when no verifier is available.
 
 ```ruby title="config/auth.rb"
 BetterAuth::Plugins.stripe(

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Changed Stripe webhooks to reject requests when the configured Stripe client does not expose `webhooks.construct_event_async` or `webhooks.construct_event`, preventing unverified payload processing.
+
 ## [0.6.0] - 2026-05-02
 
 - Modularized the Stripe plugin into upstream-aligned client, schema, middleware, hooks, route, metadata, type, and utility modules while keeping the existing public facade.
