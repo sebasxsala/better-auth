@@ -188,7 +188,7 @@ class OAuthProviderEndpointPairwiseTest < Minitest::Test
 
     client = with_secret.api.admin_create_o_auth_client(body: pairwise_client_body("https://app.example.com/cb"))
     tokens = issue_authorization_code_tokens(with_secret, secret_cookie, client, scope: "openid", redirect_uri: "https://app.example.com/cb")
-    payload = JWT.decode(tokens[:id_token], client[:client_id], true, algorithm: "HS256").first
+    payload = decode_id_token(tokens[:id_token], client)
 
     refute_equal with_secret.context.adapter.find_one(model: "user", where: [{field: "email", value: "oauth-provider@example.com"}]).fetch("id"), payload.fetch("sub")
   end
@@ -201,8 +201,8 @@ class OAuthProviderEndpointPairwiseTest < Minitest::Test
 
     tokens_a = issue_authorization_code_tokens(auth, cookie, client_a, scope: "openid", redirect_uri: "https://sector.example.com/a/callback")
     tokens_b = issue_authorization_code_tokens(auth, cookie, client_b, scope: "openid", redirect_uri: "https://sector.example.com/b/callback")
-    sub_a = JWT.decode(tokens_a[:id_token], client_a[:client_id], true, algorithm: "HS256").first.fetch("sub")
-    sub_b = JWT.decode(tokens_b[:id_token], client_b[:client_id], true, algorithm: "HS256").first.fetch("sub")
+    sub_a = decode_id_token(tokens_a[:id_token], client_a).fetch("sub")
+    sub_b = decode_id_token(tokens_b[:id_token], client_b).fetch("sub")
 
     assert_equal sub_a, sub_b
   end
@@ -219,8 +219,8 @@ class OAuthProviderEndpointPairwiseTest < Minitest::Test
 
     tokens = issue_authorization_code_tokens(auth, cookie, client, scope: "openid offline_access", redirect_uri: "https://app.example.com/cb")
     refreshed = auth.api.o_auth2_token(body: refresh_grant_body(client, tokens[:refresh_token]))
-    original_sub = JWT.decode(tokens[:id_token], client[:client_id], true, algorithm: "HS256").first.fetch("sub")
-    refreshed_sub = JWT.decode(refreshed[:id_token], client[:client_id], true, algorithm: "HS256").first.fetch("sub")
+    original_sub = decode_id_token(tokens[:id_token], client).fetch("sub")
+    refreshed_sub = decode_id_token(refreshed[:id_token], client).fetch("sub")
 
     assert_equal original_sub, refreshed_sub
   end
@@ -235,7 +235,7 @@ class OAuthProviderEndpointPairwiseTest < Minitest::Test
     client = auth.api.admin_create_o_auth_client(body: pairwise_client_body("https://app.example.com/cb").merge(scope: "openid read"))
 
     tokens = issue_authorization_code_tokens(auth, cookie, client, scope: "openid read", redirect_uri: "https://app.example.com/cb", resource: "https://api.example")
-    id_payload = JWT.decode(tokens[:id_token], client[:client_id], true, algorithm: "HS256").first
+    id_payload = decode_id_token(tokens[:id_token], client)
     access_payload = JWT.decode(tokens[:access_token], SECRET, true, algorithm: "HS256").first
     user = auth.context.adapter.find_one(model: "user", where: [{field: "email", value: "oauth-provider@example.com"}])
 

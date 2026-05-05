@@ -22,7 +22,7 @@ class OAuthProviderTokenPkceTest < Minitest::Test
     )
 
     openid = issue_authorization_code_tokens(auth, cookie, client, scope: "openid")
-    openid_payload = JWT.decode(openid[:id_token], client[:client_id], true, algorithm: "HS256").first
+    openid_payload = decode_id_token(openid[:id_token], client)
     assert openid[:access_token]
     assert openid[:id_token]
     assert_kind_of Integer, openid[:expires_at]
@@ -33,13 +33,13 @@ class OAuthProviderTokenPkceTest < Minitest::Test
     refute openid_payload.key?("email")
 
     profile = issue_authorization_code_tokens(auth, cookie, client, scope: "openid profile")
-    profile_payload = JWT.decode(profile[:id_token], client[:client_id], true, algorithm: "HS256").first
+    profile_payload = decode_id_token(profile[:id_token], client)
     assert_equal "openid profile", profile[:scope]
     assert_equal "OAuth Owner", profile_payload["name"]
     refute profile_payload.key?("email")
 
     email = issue_authorization_code_tokens(auth, cookie, client, scope: "openid email")
-    email_payload = JWT.decode(email[:id_token], client[:client_id], true, algorithm: "HS256").first
+    email_payload = decode_id_token(email[:id_token], client)
     assert_equal "openid email", email[:scope]
     assert_equal "oauth-provider@example.com", email_payload["email"]
     assert_equal false, email_payload["email_verified"]
@@ -410,7 +410,7 @@ class OAuthProviderTokenPkceTest < Minitest::Test
     client = create_client(auth, cookie, scope: "openid profile email", skip_consent: true)
 
     tokens = issue_authorization_code_tokens(auth, cookie, client, scope: "openid profile email", nonce: "real-nonce")
-    payload = JWT.decode(tokens[:id_token], client[:client_id], true, algorithm: "HS256").first
+    payload = decode_id_token(tokens[:id_token], client)
 
     assert_equal "Custom Name", payload["name"]
     assert_equal "custom@example.com", payload["email"]

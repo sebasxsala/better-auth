@@ -179,6 +179,10 @@ module OAuthProviderFlowHelpers
     }.compact
   end
 
+  def decode_id_token(token, client)
+    JWT.decode(token, client[:client_secret], true, algorithm: "HS256").first
+  end
+
   def rack_env(method, path, body: nil, headers: {})
     Rack::MockRequest.env_for(
       path,

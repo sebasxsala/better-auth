@@ -43,6 +43,15 @@ class OAuthProviderRateLimitTest < Minitest::Test
     assert_equal [200] * 10, statuses
   end
 
+  def test_provider_rate_limits_include_continue_consent_and_end_session
+    rules = BetterAuth::Plugins.oauth_provider(rate_limit: {}).rate_limit
+    paths = ["/oauth2/continue", "/oauth2/consent", "/oauth2/end-session"]
+
+    paths.each do |path|
+      assert rules.any? { |rule| rule[:path_matcher].call(path) }, "expected rate limit for #{path}"
+    end
+  end
+
   private
 
   def build_rate_limited_auth(oauth_rate_limit)

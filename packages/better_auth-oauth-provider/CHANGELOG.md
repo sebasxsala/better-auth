@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed OAuth provider consent approval, metadata, issuer normalization, revocation persistence, and endpoint-specific rate limits for hardening parity.
+- Changed RP-initiated logout ID token validation to use the hardened HS256 ID token key; old ID tokens signed only with the public client id will no longer validate.
+
 ## 0.3.0 - 2026-04-30
 
 - Added upstream-parity support for provider init validation, request URI resolution, prompt handling, consent reference IDs, client references, custom token/id-token claims, scope-specific access-token expiry, M2M token defaults, userinfo JWT verification, and expanded introspection fields.
