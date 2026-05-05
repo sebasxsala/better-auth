@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Changed generated SCIM provider tokens to use hashed storage by default. Set `store_scim_token: "plain"` only when plaintext database storage is intentionally required.
+
 ## 0.2.0 - 2026-04-29
 
 - Aligned SCIM user and group provisioning behavior with upstream Better Auth v1.6.9, including filtering, patch operations, schema responses, error shapes, and token handling.

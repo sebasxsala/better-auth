@@ -15,7 +15,6 @@ require "better_auth/scim"
 BetterAuth.auth(
   plugins: [
     BetterAuth::Plugins.scim(
-      store_scim_token: "hashed",
       provider_ownership: { enabled: true }
     )
   ]
@@ -41,6 +40,8 @@ Implemented API methods include token generation, provider connection management
 - `get_scim_resource_type`
 
 Options use Ruby snake_case names: `store_scim_token`, `default_scim`, `provider_ownership`, `required_role`, `before_scim_token_generated`, and `after_scim_token_generated`.
+`store_scim_token` defaults to `"hashed"` so generated SCIM provider tokens are
+not stored in plaintext.
 
 The plugin exposes upstream-style surface metadata:
 

@@ -71,7 +71,7 @@ Current Ruby options accepted by `BetterAuth::Plugins.scim`:
 - `before_scim_token_generated`
 - `after_scim_token_generated`
 
-`store_scim_token` accepts `"plain"`, `"hashed"`, `"encrypted"`, `{ hash: ->(token) { ... } }`, or `{ encrypt: ->(token) { ... }, decrypt: ->(stored) { ... } }`.
+`store_scim_token` defaults to `"hashed"` and accepts `"plain"`, `"hashed"`, `"encrypted"`, `{ hash: ->(token) { ... } }`, or `{ encrypt: ->(token) { ... }, decrypt: ->(stored) { ... } }`.
 
 `provider_ownership: { enabled: true }` stores the user that generated non-organization provider tokens and restricts provider connection management to that owner.
 

@@ -26,6 +26,17 @@ class BetterAuthPluginsScimManagementTest < Minitest::Test
     assert custom.api.create_scim_user(headers: bearer(custom_token.fetch(:scimToken)), body: {userName: "custom@example.com"})
   end
 
+  def test_default_scim_token_storage_is_hashed
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    response = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "default-hashed-provider"})
+    stored = auth.context.adapter.find_one(model: "scimProvider", where: [{field: "providerId", value: "default-hashed-provider"}])
+
+    refute_equal response.fetch(:scimToken), stored.fetch("scimToken")
+    assert_match(/\A[A-Za-z0-9_-]{43}\z/, stored.fetch("scimToken"))
+    assert auth.api.create_scim_user(headers: bearer(response.fetch(:scimToken)), body: {userName: "default-hashed@example.com"})
+  end
+
   def test_scim_tokens_use_upstream_envelope_storage_and_encrypted_modes
     encrypted = build_auth(store_scim_token: "encrypted")
     encrypted_cookie = sign_up_cookie(encrypted)
