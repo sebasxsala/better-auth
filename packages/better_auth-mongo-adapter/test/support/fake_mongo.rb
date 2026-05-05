@@ -180,14 +180,21 @@ module BetterAuthMongoAdapterTestSupport
 
     def matches_filter?(document, filter)
       return true if filter.empty?
-      return filter.fetch("$and").all? { |entry| matches_filter?(document, entry) } if filter.key?("$and")
-      return filter.fetch("$or").any? { |entry| matches_filter?(document, entry) } if filter.key?("$or")
-      return filter.fetch("$nor").none? { |entry| matches_filter?(document, entry) } if filter.key?("$nor")
-      return filter.dig("$expr", "$eq") == [1, 0] if filter.key?("$expr")
 
       filter.all? do |field, expected|
-        current = document[field.to_s]
-        matches_value?(current, expected)
+        case field
+        when "$and"
+          expected.all? { |entry| matches_filter?(document, entry) }
+        when "$or"
+          expected.any? { |entry| matches_filter?(document, entry) }
+        when "$nor"
+          expected.none? { |entry| matches_filter?(document, entry) }
+        when "$expr"
+          expected.fetch("$eq") == [1, 0]
+        else
+          current = document[field.to_s]
+          matches_value?(current, expected)
+        end
       end
     end
 

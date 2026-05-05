@@ -111,7 +111,7 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     matches = @adapter.find_many(
       model: "user",
       where: [
-        {field: "email", operator: "ends_with", value: "example.net"},
+        {field: "email", operator: "ends_with", value: "example.net", connector: "OR"},
         {field: "name", connector: "OR", value: "Grace"}
       ],
       sort_by: {field: "email", direction: "desc"},
@@ -120,6 +120,70 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
 
     assert_equal ["user-3", "user-2"], matches.map { |user| user["id"] }
     assert_equal 2, @adapter.count(model: "user", where: [{field: "email", operator: "ends_with", value: "example.com"}])
+  end
+
+  def test_mongodb_find_many_applies_default_limit_when_omitted
+    5.times do |index|
+      @adapter.create(model: "user", data: {id: "user-#{index}", name: "User #{index}", email: "user-#{index}@example.com"}, force_allow_id: true)
+    end
+
+    @adapter.find_many(model: "user", where: [])
+
+    pipeline = @database.collection("user").aggregate_pipelines.last.first
+    assert_equal({"$limit" => 100}, pipeline.last)
+
+    database = FakeMongoDatabase.new
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, advanced: {database: {default_find_many_limit: 3}})
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: database)
+    5.times do |index|
+      adapter.create(model: "user", data: {id: "limited-user-#{index}", name: "User #{index}", email: "limited-#{index}@example.com"}, force_allow_id: true)
+    end
+
+    matches = adapter.find_many(model: "user", where: [])
+
+    assert_equal 3, matches.length
+    assert_equal({"$limit" => 3}, database.collection("user").aggregate_pipelines.last.first.last)
+  end
+
+  def test_mongodb_join_one_to_many_uses_default_find_many_limit
+    database = FakeMongoDatabase.new
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, advanced: {database: {default_find_many_limit: 3}})
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: database)
+    user = adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    5.times do |index|
+      adapter.create(model: "session", data: {id: "session-#{index}", token: "token-#{index}", userId: user.fetch("id"), expiresAt: Time.now + 60}, force_allow_id: true)
+    end
+
+    found = adapter.find_one(model: "user", where: [{field: "id", value: user.fetch("id")}], join: {session: true})
+
+    assert_equal 3, found.fetch("session").length
+    lookup = database.collection("user").aggregate_pipelines.last.first.find { |stage| stage.key?("$lookup") }.fetch("$lookup")
+    assert_equal({"$limit" => 3}, lookup.fetch("pipeline").last)
+  end
+
+  def test_mongodb_where_connectors_use_upstream_and_or_buckets
+    @adapter.find_many(
+      model: "user",
+      where: [
+        {field: "email", operator: "ends_with", value: "example.com"},
+        {field: "name", connector: "OR", value: "Grace"},
+        {field: "emailVerified", value: false, connector: "AND"}
+      ]
+    )
+
+    match = @database.collection("user").aggregate_pipelines.last.first.first.fetch("$match")
+    assert_equal(
+      {
+        "$and" => [
+          {"email" => Regexp.new("example\\.com\\z")},
+          {"email_verified" => false}
+        ],
+        "$or" => [
+          {"name" => "Grace"}
+        ]
+      },
+      match
+    )
   end
 
   def test_mongodb_adapter_supports_case_insensitive_where_modes_and_regex_escaping
@@ -458,10 +522,11 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     adapter.find_many(model: "typedModel", where: [{field: "score", operator: "in", value: ["7", "8"]}])
     assert_equal({"score" => {"$in" => [7, 8]}}, @database.collection("typedModel").aggregate_pipelines.last.first.first.fetch("$match"))
 
-    error = assert_raises(BetterAuth::Adapters::MongoDB::MongoAdapterError) do
-      adapter.find_many(model: "typedModel", where: [{field: "score", operator: "in", value: "7"}])
-    end
-    assert_equal "UNSUPPORTED_OPERATOR", error.code
+    adapter.find_many(model: "typedModel", where: [{field: "score", operator: "in", value: "7"}])
+    assert_equal({"score" => {"$in" => [7]}}, @database.collection("typedModel").aggregate_pipelines.last.first.first.fetch("$match"))
+
+    adapter.find_many(model: "typedModel", where: [{field: "score", operator: "not_in", value: "8"}])
+    assert_equal({"score" => {"$nin" => [8]}}, @database.collection("typedModel").aggregate_pipelines.last.first.first.fetch("$match"))
   end
 
   def test_mongodb_adapter_infers_schema_driven_one_to_one_joins_and_empty_join_values
@@ -758,14 +823,21 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
 
     def matches_filter?(document, filter)
       return true if filter.empty?
-      return filter.fetch("$and").all? { |entry| matches_filter?(document, entry) } if filter.key?("$and")
-      return filter.fetch("$or").any? { |entry| matches_filter?(document, entry) } if filter.key?("$or")
-      return filter.fetch("$nor").none? { |entry| matches_filter?(document, entry) } if filter.key?("$nor")
-      return filter.dig("$expr", "$eq") == [1, 0] if filter.key?("$expr")
 
       filter.all? do |field, expected|
-        current = document[field.to_s]
-        matches_value?(current, expected)
+        case field
+        when "$and"
+          expected.all? { |entry| matches_filter?(document, entry) }
+        when "$or"
+          expected.any? { |entry| matches_filter?(document, entry) }
+        when "$nor"
+          expected.none? { |entry| matches_filter?(document, entry) }
+        when "$expr"
+          expected.fetch("$eq") == [1, 0]
+        else
+          current = document[field.to_s]
+          matches_value?(current, expected)
+        end
       end
     end
 
