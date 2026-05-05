@@ -121,6 +121,42 @@ RSpec.describe "BetterAuth::Rails PostgreSQL integration" do
     expect(ActiveRecord::Base.connection.foreign_keys("audit_logs").map(&:to_table)).to include("users")
   end
 
+  it "supports OR connectors and case-insensitive string predicates" do
+    run_generated_migration(plugin_config)
+    active_record_adapter = BetterAuth::Rails::ActiveRecordAdapter.new(plugin_config, connection: ActiveRecord::Base)
+
+    active_record_adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    active_record_adapter.create(model: "user", data: {id: "user-2", name: "Grace", email: "grace@example.com"}, force_allow_id: true)
+    active_record_adapter.create(model: "user", data: {id: "user-3", name: "Linus", email: "linus@example.com"}, force_allow_id: true)
+    active_record_adapter.create(model: "auditLog", data: {id: "audit-1", userId: "user-1", action: "PrefixContainsSuffix"}, force_allow_id: true)
+    active_record_adapter.create(model: "auditLog", data: {id: "audit-2", userId: "user-2", action: "OtherAction"}, force_allow_id: true)
+
+    or_users = active_record_adapter.find_many(
+      model: "user",
+      where: [
+        {field: "email", value: "ada@example.com"},
+        {field: "email", value: "grace@example.com", connector: "OR"}
+      ],
+      sort_by: {field: "email", direction: "asc"}
+    )
+    eq_user = active_record_adapter.find_one(model: "user", where: [{field: "email", value: "ADA@EXAMPLE.COM", mode: "insensitive"}])
+    in_users = active_record_adapter.find_many(model: "user", where: [{field: "email", operator: "in", value: ["ADA@EXAMPLE.COM", "GRACE@EXAMPLE.COM"], mode: "insensitive"}])
+    not_in_users = active_record_adapter.find_many(model: "user", where: [{field: "email", operator: "not_in", value: ["ADA@EXAMPLE.COM", "GRACE@EXAMPLE.COM"], mode: "insensitive"}])
+    contains = active_record_adapter.find_many(model: "auditLog", where: [{field: "action", operator: "contains", value: "contains", mode: "insensitive"}])
+    starts_with = active_record_adapter.find_many(model: "auditLog", where: [{field: "action", operator: "starts_with", value: "prefix", mode: "insensitive"}])
+    ends_with = active_record_adapter.find_many(model: "auditLog", where: [{field: "action", operator: "ends_with", value: "suffix", mode: "insensitive"}])
+    ne_users = active_record_adapter.find_many(model: "user", where: [{field: "email", operator: "ne", value: "ADA@EXAMPLE.COM", mode: "insensitive"}])
+
+    expect(or_users.map { |user| user.fetch("email") }).to eq(["ada@example.com", "grace@example.com"])
+    expect(eq_user.fetch("id")).to eq("user-1")
+    expect(in_users.map { |user| user.fetch("id") }).to contain_exactly("user-1", "user-2")
+    expect(not_in_users.map { |user| user.fetch("id") }).to eq(["user-3"])
+    expect(contains.map { |row| row.fetch("id") }).to eq(["audit-1"])
+    expect(starts_with.map { |row| row.fetch("id") }).to eq(["audit-1"])
+    expect(ends_with.map { |row| row.fetch("id") }).to eq(["audit-1"])
+    expect(ne_users.map { |user| user.fetch("id") }).to contain_exactly("user-2", "user-3")
+  end
+
   it "uses native ActiveRecord eager loading for supported joins" do
     run_generated_migration
     active_record_adapter = BetterAuth::Rails::ActiveRecordAdapter.new(config, connection: ActiveRecord::Base)
