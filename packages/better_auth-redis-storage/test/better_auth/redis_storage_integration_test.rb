@@ -179,6 +179,21 @@ class RedisStorageIntegrationTest < Minitest::Test
     assert_equal 1, stored.fetch("count")
   end
 
+  def test_scan_count_round_trip_lists_keys
+    storage = BetterAuth::RedisStorage.new(
+      client: @client,
+      key_prefix: "#{@prefix_root}:scan:",
+      scan_count: 50
+    )
+    storage.clear
+    storage.set("x", "1")
+    storage.set("y", "2")
+
+    assert_equal ["x", "y"], storage.list_keys.sort
+  ensure
+    storage&.clear
+  end
+
   private
 
   def isolated_storage(name)

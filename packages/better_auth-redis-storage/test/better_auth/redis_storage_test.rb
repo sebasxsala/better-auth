@@ -67,12 +67,34 @@ class RedisStorageTest < Minitest::Test
     assert_equal [["better-auth:float-ttl", 1, "payload"]], @client.setex_calls
   end
 
+  def test_set_with_rational_ttl_uses_setex
+    @storage.set("rational-ttl", "payload", Rational(241, 2))
+
+    assert_equal [["better-auth:rational-ttl", 120, "payload"]], @client.setex_calls
+  end
+
+  def test_non_finite_numeric_ttl_falls_back_to_set
+    @storage.set("nan-ttl", "payload", Float::NAN)
+    @storage.set("infinite-ttl", "payload", Float::INFINITY)
+
+    assert_equal [
+      ["better-auth:nan-ttl", "payload"],
+      ["better-auth:infinite-ttl", "payload"]
+    ], @client.set_calls
+  end
+
   def test_delete_removes_prefixed_key
     @storage.set("session-token", "payload")
     result = @storage.delete("session-token")
 
     assert_nil result
     refute @client.data.key?("better-auth:session-token")
+  end
+
+  def test_nil_logical_key_raises
+    assert_raises(ArgumentError) { @storage.get(nil) }
+    assert_raises(ArgumentError) { @storage.set(nil, "v") }
+    assert_raises(ArgumentError) { @storage.delete(nil) }
   end
 
   def test_list_keys_returns_unprefixed_keys_for_configured_prefix
@@ -103,12 +125,23 @@ class RedisStorageTest < Minitest::Test
     assert_empty @client.del_calls
   end
 
-  def test_list_keys_preserves_public_write_order
+  def test_clear_deletes_in_chunks_when_many_keys
+    client = FakeRedisClient.new
+    storage = BetterAuth::RedisStorage.new(client: client)
+    600.times { |i| storage.set("k#{i}", "v") }
+
+    storage.clear
+
+    assert_operator client.del_calls.length, :>=, 2
+    assert_equal 0, client.data.keys.count { |key| key.start_with?("better-auth:") }
+  end
+
+  def test_list_keys_returns_all_logical_keys
     @storage.set("first", "one")
     @storage.set("second", "two")
     @storage.set("third", "three")
 
-    assert_equal ["first", "second", "third"], @storage.list_keys
+    assert_equal ["first", "second", "third"].sort, @storage.list_keys.sort
   end
 
   def test_prefixed_storage_never_bleeds_into_unprefixed_keys
@@ -132,6 +165,31 @@ class RedisStorageTest < Minitest::Test
     assert_equal ["a", "b"], storage.list_keys.sort
     assert_empty scan_client.keys_calls
     assert_equal [["0", {match: "better-auth:*", count: 50}]], scan_client.scan_calls.first(1)
+  end
+
+  def test_scan_count_must_be_nil_or_positive_integer
+    [0, -1, "100"].each do |scan_count|
+      error = assert_raises(ArgumentError) do
+        BetterAuth::RedisStorage.new(client: FakeRedisClient.new, scan_count: scan_count)
+      end
+      assert_match(/scan_count/i, error.message)
+    end
+  end
+
+  def test_scan_count_accepts_positive_integer
+    storage = BetterAuth::RedisStorage.new(client: FakeRedisClient.new, scan_count: 100)
+
+    assert_equal 100, storage.scan_count
+  end
+
+  def test_scan_count_nil_uses_keys_not_scan
+    client = FakeRedisClient.new
+    storage = BetterAuth::RedisStorage.new(client: client, scan_count: nil)
+
+    storage.set("a", "1")
+    storage.list_keys
+
+    assert_equal ["better-auth:*"], client.keys_calls
   end
 
   def test_build_returns_storage_instance
