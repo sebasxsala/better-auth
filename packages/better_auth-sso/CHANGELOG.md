@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Fixed SAML config validation for `singleSignOnService` and added validation for `singleLogoutService`.
+- Hardened OIDC callbacks by binding signed state `providerId` to the callback route and verifying `nonce` on JWKS-backed ID tokens.
+- Changed SSO domain verification to require exact TXT record matches and corrected the insufficient access error code to `INSUFFICIENT_ACCESS`.
+- Declared `jwt` as a direct runtime dependency for the SSO gem.
+- Added regression coverage for SAML SP metadata XML responses.
+
 ## 0.2.0 - 2026-04-29
 
 - Improved SSO upstream parity for OIDC and SAML provider flows, organization handling, callback behavior, metadata parsing, account linking, and response/error shapes.

@@ -70,7 +70,7 @@ class BetterAuthSSODomainVerificationTest < Minitest::Test
     end
 
     assert_equal 403, error.status_code
-    assert_equal "INSUFICCIENT_ACCESS", error.code
+    assert_equal "INSUFFICIENT_ACCESS", error.code
   end
 
   def test_request_domain_verification_rejects_user_outside_provider_organization
@@ -88,7 +88,7 @@ class BetterAuthSSODomainVerificationTest < Minitest::Test
     end
 
     assert_equal 403, error.status_code
-    assert_equal "INSUFICCIENT_ACCESS", error.code
+    assert_equal "INSUFFICIENT_ACCESS", error.code
   end
 
   def test_request_domain_verification_returns_new_token_after_active_token_expires
@@ -176,7 +176,7 @@ class BetterAuthSSODomainVerificationTest < Minitest::Test
     end
 
     assert_equal 403, error.status_code
-    assert_equal "INSUFICCIENT_ACCESS", error.code
+    assert_equal "INSUFFICIENT_ACCESS", error.code
   end
 
   def test_verify_domain_rejects_non_owner
@@ -190,7 +190,7 @@ class BetterAuthSSODomainVerificationTest < Minitest::Test
     end
 
     assert_equal 403, error.status_code
-    assert_equal "INSUFICCIENT_ACCESS", error.code
+    assert_equal "INSUFFICIENT_ACCESS", error.code
   end
 
   def test_verify_domain_uses_custom_token_prefix_from_camel_case_config
@@ -268,6 +268,25 @@ class BetterAuthSSODomainVerificationTest < Minitest::Test
     auth = build_auth(domain_verification: {enabled: true, dns_txt_resolver: ->(_hostname) { [["google-site-verification=the-token"]] }})
     cookie = sign_up_cookie(auth)
     provider = register_sso_provider(auth, cookie)
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_domain(headers: {"cookie" => cookie}, body: {providerId: provider.fetch("providerId")})
+    end
+
+    assert_equal 502, error.status_code
+    assert_equal "DOMAIN_VERIFICATION_FAILED", error.code
+  end
+
+  def test_verify_domain_rejects_txt_record_that_only_contains_expected_value_as_substring
+    auth = build_auth(
+      domain_verification: {
+        enabled: true,
+        dns_txt_resolver: ->(_hostname) { [["_better-auth-token-saml-provider-1=#{@domain_verification_token}-attacker"]] }
+      }
+    )
+    cookie = sign_up_cookie(auth)
+    provider = register_sso_provider(auth, cookie)
+    @domain_verification_token = provider.fetch(:domainVerificationToken)
 
     error = assert_raises(BetterAuth::APIError) do
       auth.api.verify_domain(headers: {"cookie" => cookie}, body: {providerId: provider.fetch("providerId")})

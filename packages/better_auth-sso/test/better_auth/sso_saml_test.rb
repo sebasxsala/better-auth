@@ -655,6 +655,26 @@ class BetterAuthPluginsSSOSAMLTest < Minitest::Test
     refute_includes disabled_metadata, "SingleLogoutService"
   end
 
+  def test_saml_sp_metadata_returns_xml_body_and_content_type
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    auth.api.register_sso_provider(
+      headers: {"cookie" => cookie},
+      body: {
+        providerId: "saml",
+        issuer: "https://idp.example.com",
+        domain: "example.com",
+        samlConfig: {entryPoint: "https://idp.example.com/sso", cert: "test-cert", audience: "better-auth-ruby"}
+      }
+    )
+
+    status, headers, body = auth.api.sp_metadata(query: {providerId: "saml"}, as_response: true)
+
+    assert_equal 200, status
+    assert_includes headers.fetch("content-type"), "xml"
+    assert_match(/\A(?:<\?xml[^>]*>\s*)?<EntityDescriptor\b/, body.join)
+  end
+
   def test_signed_authn_request_includes_signature_params_and_verifies_relay_state
     private_key = saml_sp_private_key
     auth = build_auth
