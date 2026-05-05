@@ -106,6 +106,26 @@ module BetterAuth
         (row["total"] || row[:total] || 0).to_i
       end
 
+      def ensure_indexes!
+        Schema.auth_tables(options).flat_map do |model, table|
+          table.fetch(:fields).filter_map do |field, attributes|
+            next if field == "id"
+            next unless attributes[:unique] || attributes[:index]
+
+            collection = collection_for(model)
+            key = storage_field(model, field)
+            index_options = attributes[:unique] ? {unique: true} : {}
+            collection.indexes.create_one({key => 1}, index_options)
+            {
+              collection: collection_name(model),
+              field: field,
+              keys: {key => 1},
+              unique: attributes[:unique] == true
+            }
+          end
+        end
+      end
+
       def transaction
         return yield self unless client && @transaction_enabled && client.respond_to?(:start_session)
 

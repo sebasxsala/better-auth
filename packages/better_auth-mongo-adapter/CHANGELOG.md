@@ -2,9 +2,12 @@
 
 ## Unreleased
 
+- Added explicit `ensure_indexes!` setup helper for Mongo indexes derived from Better Auth schema metadata.
+- Updated MongoDB setup docs to use the lambda adapter form, clearer standalone/replica-set transaction guidance, and production index guidance.
+- Consolidated Mongo fake test support and strengthened transaction rollback coverage for staged mutations.
 - Apply `advanced[:database][:default_find_many_limit]` to uncapped `find_many` calls and one-to-many Mongo `$lookup` joins, defaulting to 100 when omitted.
 - Match upstream Mongo where-clause semantics for mixed connectors by bucketing multi-clause filters into `$and` and `$or` arrays instead of left-fold nesting.
-- Allow scalar values for `in` and `not_in` filters, matching upstream's single-value array coercion.
+- Allow scalar values for `in` and `not_in` filters as an intentional Ruby adapter-family adaptation.
 
 ## 0.1.1 - 2026-04-30
 
