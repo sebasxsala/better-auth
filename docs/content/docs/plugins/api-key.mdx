@@ -78,6 +78,12 @@ For default permissions, pass `permissions: { default_permissions: ... }` to
 match the upstream `permissions.defaultPermissions` option while keeping Ruby
 snake_case keys.
 
+When `enable_session_for_api_keys` is enabled, Ruby creates an in-memory session
+for user-owned API keys but does not place the raw API key in
+`session["token"]`. The session includes `tokenFingerprint`, an irreversible
+SHA-256 fingerprint of the presented key, for correlation without persisting the
+secret.
+
 ## Plugin metadata
 
 The plugin object exposes the gem version, mirroring upstream

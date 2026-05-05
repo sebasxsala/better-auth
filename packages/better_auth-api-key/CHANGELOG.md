@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Changed API-key-backed sessions to expose `tokenFingerprint` instead of storing the raw API key in `session["token"]`.
+
 ## 0.2.1 - 2026-04-30
 
 - Fixed API key metadata normalization so symbol and string metadata keys preserve nested metadata payloads.
