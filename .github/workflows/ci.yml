@@ -288,6 +288,13 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
         run: bundle exec rake test
 
+      - name: Run Redis integration tests
+        working-directory: packages/better_auth-redis-storage
+        env:
+          REDIS_INTEGRATION: "1"
+          REDIS_URL: redis://localhost:6379/0
+        run: bundle exec rake test:integration
+
   test-mongo-adapter:
     name: Test better_auth-mongo-adapter (MongoDB Adapter)
     runs-on: ubuntu-latest
