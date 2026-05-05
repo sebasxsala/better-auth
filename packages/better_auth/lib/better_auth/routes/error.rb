@@ -8,7 +8,26 @@ module BetterAuth
       Endpoint.new(
         path: "/error",
         method: "GET",
-        metadata: {hide: true}
+        metadata: {
+          hide: true,
+          openapi: {
+            description: "Displays an error page",
+            responses: {
+              "200" => OpenAPI.json_response(
+                "Success",
+                OpenAPI.object_schema(
+                  {
+                    html: {
+                      type: "string",
+                      description: "The HTML content of the error page"
+                    }
+                  },
+                  required: ["html"]
+                )
+              )
+            }
+          }
+        }
       ) do |ctx|
         query = ctx.query || {}
         raw_code = query["error"] || query[:error] || "UNKNOWN"

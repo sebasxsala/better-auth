@@ -51,6 +51,107 @@ class BetterAuthPluginsOpenAPITest < Minitest::Test
     )
   end
 
+  def test_open_api_base_path_inventory_matches_upstream_snapshot
+    auth = build_auth(plugins: [BetterAuth::Plugins.open_api])
+
+    schema = auth.api.generate_open_api_schema
+
+    assert_equal(
+      [
+        "/account-info",
+        "/callback/{id}",
+        "/change-email",
+        "/change-password",
+        "/delete-user",
+        "/delete-user/callback",
+        "/error",
+        "/get-access-token",
+        "/get-session",
+        "/link-social",
+        "/list-accounts",
+        "/list-sessions",
+        "/ok",
+        "/refresh-token",
+        "/request-password-reset",
+        "/reset-password",
+        "/reset-password/{token}",
+        "/revoke-other-sessions",
+        "/revoke-session",
+        "/revoke-sessions",
+        "/send-verification-email",
+        "/sign-in/email",
+        "/sign-in/social",
+        "/sign-out",
+        "/sign-up/email",
+        "/unlink-account",
+        "/update-session",
+        "/update-user",
+        "/verify-email",
+        "/verify-password"
+      ],
+      schema[:paths].keys.sort
+    )
+  end
+
+  def test_open_api_base_routes_have_upstream_rich_schemas
+    auth = build_auth(plugins: [BetterAuth::Plugins.open_api])
+
+    schema = auth.api.generate_open_api_schema
+
+    assert_equal(
+      {
+        type: "object",
+        properties: {
+          ok: {
+            type: "boolean",
+            description: "Indicates if the API is working"
+          }
+        },
+        required: ["ok"]
+      },
+      json_schema(schema, "/ok", :get, "200")
+    )
+    assert_equal(
+      {
+        type: "object",
+        properties: {
+          user: {
+            type: "object",
+            properties: {
+              id: {type: "string"},
+              name: {type: "string"},
+              email: {type: "string"},
+              image: {type: "string"},
+              emailVerified: {type: "boolean"}
+            },
+            required: ["id", "emailVerified"]
+          },
+          data: {
+            type: "object",
+            properties: {},
+            additionalProperties: true
+          }
+        },
+        required: ["user", "data"],
+        additionalProperties: false
+      },
+      json_schema(schema, "/account-info", :get, "200")
+    )
+    assert_equal(
+      {
+        type: "object",
+        properties: {
+          html: {
+            type: "string",
+            description: "The HTML content of the error page"
+          }
+        },
+        required: ["html"]
+      },
+      json_schema(schema, "/error", :get, "200")
+    )
+  end
+
   def test_open_api_model_schema_matches_upstream_field_metadata
     auth = build_auth(plugins: [BetterAuth::Plugins.open_api])
 
@@ -480,6 +581,12 @@ class BetterAuthPluginsOpenAPITest < Minitest::Test
     assert_equal "text/html", headers["content-type"]
     assert_includes body.join, "Scalar API Reference"
     assert_includes body.join, "nonce=\"abc123\""
+    assert_includes body.join, "var configuration = {"
+    assert_includes body.join, "favicon: \"data:image/svg+xml;utf8,"
+    assert_includes body.join, "theme: \"moon\""
+    assert_includes body.join, "metaData: {"
+    assert_includes body.join, "title: \"Better Auth API\""
+    assert_includes body.join, "document.getElementById('api-reference').dataset.configuration"
   end
 
   def test_open_api_reference_can_be_disabled
@@ -503,10 +610,71 @@ class BetterAuthPluginsOpenAPITest < Minitest::Test
     refute_includes schema[:paths].keys, "/sign-in/social"
   end
 
+  def test_visible_core_plugin_endpoints_have_rich_open_api_metadata
+    plugins = [
+      BetterAuth::Plugins.admin,
+      BetterAuth::Plugins.anonymous,
+      BetterAuth::Plugins.device_authorization,
+      BetterAuth::Plugins.dub,
+      BetterAuth::Plugins.email_otp,
+      BetterAuth::Plugins.expo,
+      BetterAuth::Plugins.generic_oauth(config: []),
+      BetterAuth::Plugins.jwt,
+      BetterAuth::Plugins.magic_link,
+      BetterAuth::Plugins.mcp,
+      BetterAuth::Plugins.multi_session,
+      BetterAuth::Plugins.oauth_proxy,
+      BetterAuth::Plugins.oidc_provider(__skip_deprecation_warning: true),
+      BetterAuth::Plugins.one_tap,
+      BetterAuth::Plugins.one_time_token,
+      BetterAuth::Plugins.organization(teams: {enabled: true}, dynamic_access_control: {enabled: true}),
+      BetterAuth::Plugins.phone_number,
+      BetterAuth::Plugins.siwe,
+      BetterAuth::Plugins.two_factor,
+      BetterAuth::Plugins.username
+    ]
+
+    missing = plugins.flat_map do |plugin|
+      plugin.endpoints.filter_map do |key, endpoint|
+        next unless endpoint.path
+        next if endpoint.metadata[:hide] || endpoint.metadata[:SERVER_ONLY] || endpoint.metadata[:server_only]
+
+        openapi = endpoint.metadata[:openapi]
+        responses = openapi && openapi[:responses]
+        next if openapi && openapi[:operationId].to_s != "" && openapi[:description].to_s != "" && meaningful_responses?(responses)
+
+        "#{plugin.id}.#{key}"
+      end
+    end
+
+    assert_empty missing
+  end
+
   private
 
   def build_auth(options = {})
     email_and_password = {enabled: true}.merge(options.fetch(:email_and_password, {}))
     BetterAuth.auth({base_url: "http://localhost:3000", secret: SECRET, database: :memory}.merge(options).merge(email_and_password: email_and_password))
+  end
+
+  def json_schema(schema, path, method, status)
+    schema.dig(:paths, path, method, :responses, status, :content, "application/json", :schema)
+  end
+
+  def meaningful_schema?(schema)
+    return false unless schema.is_a?(Hash)
+    return true if schema[:additionalProperties] || schema[:$ref]
+    return true if schema[:items]
+    return true if schema[:properties]&.any?
+    Array(schema[:type]).include?("null") && Array(schema[:type]).length > 1
+  end
+
+  def meaningful_responses?(responses)
+    return false unless responses.is_a?(Hash) && responses.any?
+
+    responses.any? do |status, response|
+      schema = response.dig(:content, "application/json", :schema)
+      meaningful_schema?(schema) || (status.to_s.start_with?("3") && response[:description].to_s != "")
+    end
   end
 end
