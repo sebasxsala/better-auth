@@ -25,6 +25,15 @@ STANDARD_PATHS = [
   "packages/better_auth-stripe/Rakefile",
   "packages/better_auth-stripe/lib",
   "packages/better_auth-stripe/test",
+  "packages/better_auth-oauth-provider/Rakefile",
+  "packages/better_auth-oauth-provider/lib",
+  "packages/better_auth-oauth-provider/test",
+  "packages/better_auth-scim/Rakefile",
+  "packages/better_auth-scim/lib",
+  "packages/better_auth-scim/test",
+  "packages/better_auth-sso/Rakefile",
+  "packages/better_auth-sso/lib",
+  "packages/better_auth-sso/test",
   "packages/better_auth-rails/Rakefile",
   "packages/better_auth-rails/lib",
   "packages/better_auth-rails/spec",
@@ -54,6 +63,10 @@ task :ci do
   puts "\n🧪 Running tests in packages/better_auth-redis-storage..."
   cd "packages/better_auth-redis-storage" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec rake"
+    # Run real-Redis integration only when a local/CI Redis URL is configured.
+    if ENV["REDIS_URL"] || ENV["RUN_REDIS_INTEGRATION"] == "1"
+      sh "REDIS_INTEGRATION=1 BUNDLE_GEMFILE=Gemfile bundle exec rake test:integration"
+    end
   end
 
   puts "\n🧪 Running tests in packages/better_auth-mongo-adapter..."
@@ -74,6 +87,21 @@ task :ci do
   puts "\n🧪 Running tests in packages/better_auth-stripe..."
   cd "packages/better_auth-stripe" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec rake"
+  end
+
+  puts "\n🧪 Running tests in packages/better_auth-oauth-provider..."
+  cd "packages/better_auth-oauth-provider" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec rake test"
+  end
+
+  puts "\n🧪 Running tests in packages/better_auth-scim..."
+  cd "packages/better_auth-scim" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec rake test"
+  end
+
+  puts "\n🧪 Running tests in packages/better_auth-sso..."
+  cd "packages/better_auth-sso" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec rake test"
   end
 
   puts "\n🧪 Running tests in packages/better_auth-rails..."
@@ -129,6 +157,21 @@ task :install do
     sh "BUNDLE_GEMFILE=Gemfile bundle install"
   end
 
+  puts "\n📦 Installing packages/better_auth-oauth-provider dependencies..."
+  cd "packages/better_auth-oauth-provider" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle install"
+  end
+
+  puts "\n📦 Installing packages/better_auth-scim dependencies..."
+  cd "packages/better_auth-scim" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle install"
+  end
+
+  puts "\n📦 Installing packages/better_auth-sso dependencies..."
+  cd "packages/better_auth-sso" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle install"
+  end
+
   puts "\n📦 Installing packages/better_auth-rails dependencies..."
   cd "packages/better_auth-rails" do
     sh "BUNDLE_GEMFILE=Gemfile bundle install"
@@ -173,6 +216,18 @@ task :lint do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
   end
 
+  cd "packages/better_auth-oauth-provider" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
+  end
+
+  cd "packages/better_auth-scim" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
+  end
+
+  cd "packages/better_auth-sso" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
+  end
+
   cd "packages/better_auth-rails" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
   end
@@ -211,6 +266,18 @@ task "lint:fix" do
   end
 
   cd "packages/better_auth-stripe" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb --fix"
+  end
+
+  cd "packages/better_auth-oauth-provider" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb --fix"
+  end
+
+  cd "packages/better_auth-scim" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb --fix"
+  end
+
+  cd "packages/better_auth-sso" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb --fix"
   end
 
@@ -267,6 +334,18 @@ task :clean do
   end
 
   cd "packages/better_auth-stripe" do
+    sh "rm -rf Gemfile.lock *.gem coverage/"
+  end
+
+  cd "packages/better_auth-oauth-provider" do
+    sh "rm -rf Gemfile.lock *.gem coverage/"
+  end
+
+  cd "packages/better_auth-scim" do
+    sh "rm -rf Gemfile.lock *.gem coverage/"
+  end
+
+  cd "packages/better_auth-sso" do
     sh "rm -rf Gemfile.lock *.gem coverage/"
   end
 

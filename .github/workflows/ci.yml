@@ -11,6 +11,9 @@ on:
       - 'Gemfile'
       - 'Rakefile'
       - 'docker-compose.yml'
+      - '.ruby-version'
+      - 'docs/**'
+      - '.docs/**'
       - '.github/workflows/ci.yml'
       - '.github/workflows/release.yml'
   push:
@@ -22,6 +25,9 @@ on:
       - 'Gemfile'
       - 'Rakefile'
       - 'docker-compose.yml'
+      - '.ruby-version'
+      - 'docs/**'
+      - '.docs/**'
       - '.github/workflows/ci.yml'
       - '.github/workflows/release.yml'
   merge_group:

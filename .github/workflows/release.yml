@@ -709,6 +709,7 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Keep this in sync with the aggregate "ci" job name in ci.yml.
           expected_name="ci"
           max_attempts=30
           sleep_seconds=20
