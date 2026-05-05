@@ -12,6 +12,8 @@ require_relative "../scim/scim_filters"
 require_relative "../scim/patch_operations"
 require_relative "../scim/scim_tokens"
 require_relative "../scim/middlewares"
+require_relative "../scim/provider_management"
+require_relative "../scim/validation"
 require_relative "../scim/routes"
 
 module BetterAuth

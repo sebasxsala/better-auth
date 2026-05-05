@@ -42,6 +42,20 @@ class BetterAuthPluginsScimManagementTest < Minitest::Test
     assert custom.api.create_scim_user(headers: bearer(custom_token.fetch(:scimToken)), body: {userName: "custom-encrypted@example.com"})
   end
 
+  def test_scim_rejects_corrupted_stored_encrypted_token_as_invalid_token
+    auth = build_auth(store_scim_token: "encrypted")
+    cookie = sign_up_cookie(auth)
+    token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "corrupt-provider"}).fetch(:scimToken)
+    provider = auth.context.adapter.find_one(model: "scimProvider", where: [{field: "providerId", value: "corrupt-provider"}])
+    auth.context.adapter.update(model: "scimProvider", where: [{field: "id", value: provider.fetch("id")}], update: {scimToken: "not-encrypted"})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.create_scim_user(headers: bearer(token), body: {userName: "corrupt@example.com"})
+    end
+    assert_equal 401, error.status_code
+    assert_equal "Invalid SCIM token", error.message
+  end
+
   def test_scim_after_token_generation_hook_receives_stored_provider_and_usable_token
     hook_payloads = []
     auth = build_auth(
@@ -244,6 +258,26 @@ class BetterAuthPluginsScimManagementTest < Minitest::Test
       auth.api.create_scim_user(headers: bearer(token), body: {userName: "after-delete@example.com"})
     end
     assert_equal 401, invalid.status_code
+  end
+
+  def test_scim_blocks_duplicate_org_scoped_provider_ids_before_create
+    auth = build_auth(plugins: [BetterAuth::Plugins.organization, BetterAuth::Plugins.scim])
+    owner_cookie = sign_up_cookie(auth, "owner@example.com")
+    other_cookie = sign_up_cookie(auth, "other@example.com")
+    owner_org = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Owner Org", slug: "owner-org"})
+    other_org = auth.api.create_organization(headers: {"cookie" => other_cookie}, body: {name: "Other Org", slug: "other-org"})
+
+    auth.api.generate_scim_token(headers: {"cookie" => owner_cookie}, body: {providerId: "shared-provider", organizationId: owner_org.fetch("id")})
+
+    blocked = assert_raises(BetterAuth::APIError) do
+      auth.api.generate_scim_token(headers: {"cookie" => other_cookie}, body: {providerId: "shared-provider", organizationId: other_org.fetch("id")})
+    end
+    assert_equal 403, blocked.status_code
+    assert_equal "You must be a member of the organization to access this provider", blocked.message
+
+    providers = auth.context.adapter.find_many(model: "scimProvider", where: [{field: "providerId", value: "shared-provider"}])
+    assert_equal 1, providers.length
+    assert_equal owner_org.fetch("id"), providers.first.fetch("organizationId")
   end
 
   def test_scim_provider_management_returns_empty_list_without_memberships

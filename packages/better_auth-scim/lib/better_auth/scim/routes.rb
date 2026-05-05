@@ -32,9 +32,7 @@ module BetterAuth
           raise APIError.new("FORBIDDEN", message: "Insufficient role for this operation") unless scim_has_required_role?(member.fetch("role", ""), required_roles)
         end
 
-        where = [{field: "providerId", value: provider_id}]
-        where << {field: "organizationId", value: organization_id} if organization_id
-        existing = ctx.context.adapter.find_one(model: "scimProvider", where: where)
+        existing = ctx.context.adapter.find_one(model: "scimProvider", where: [{field: "providerId", value: provider_id}])
         if existing
           scim_assert_provider_access!(ctx, session.fetch(:user).fetch("id"), existing, required_roles)
           ctx.context.adapter.delete(model: "scimProvider", where: [{field: "id", value: existing.fetch("id")}])
@@ -160,8 +158,10 @@ module BetterAuth
         end
         raise scim_error("BAD_REQUEST", "No valid fields to update") if update.empty? && account_update.empty?
 
-        ctx.context.internal_adapter.update_user(user.fetch("id"), update.merge(updatedAt: Time.now)) unless update.empty?
-        ctx.context.internal_adapter.update_account(account.fetch("id"), account_update.merge(updatedAt: Time.now)) unless account_update.empty?
+        ctx.context.adapter.transaction do
+          ctx.context.internal_adapter.update_user(user.fetch("id"), update.merge(updatedAt: Time.now)) unless update.empty?
+          ctx.context.internal_adapter.update_account(account.fetch("id"), account_update.merge(updatedAt: Time.now)) unless account_update.empty?
+        end
         ctx.json(nil, status: 204)
       end
     end
@@ -292,142 +292,6 @@ module BetterAuth
       raise scim_error("NOT_FOUND", "User not found") unless user && account
 
       [user, account]
-    end
-
-    def scim_validate_user_body!(body)
-      raise scim_error("BAD_REQUEST", BASE_ERROR_CODES["VALIDATION_ERROR"]) unless body[:user_name].is_a?(String)
-      raise scim_error("BAD_REQUEST", BASE_ERROR_CODES["VALIDATION_ERROR"]) if body[:user_name].empty?
-      raise scim_error("BAD_REQUEST", BASE_ERROR_CODES["VALIDATION_ERROR"]) if body.key?(:external_id) && !body[:external_id].is_a?(String)
-      raise scim_error("BAD_REQUEST", BASE_ERROR_CODES["VALIDATION_ERROR"]) if body.key?(:name) && !body[:name].is_a?(Hash)
-      raise scim_error("BAD_REQUEST", BASE_ERROR_CODES["VALIDATION_ERROR"]) if body.key?(:emails) && !body[:emails].is_a?(Array)
-      normalize_hash(body[:name] || {}).each_value do |value|
-        raise scim_error("BAD_REQUEST", BASE_ERROR_CODES["VALIDATION_ERROR"]) unless value.is_a?(String)
-      end
-
-      Array(body[:emails]).each do |email|
-        email = normalize_hash(email)
-        value = email[:value]
-        raise scim_error("BAD_REQUEST", BASE_ERROR_CODES["VALIDATION_ERROR"]) if email.key?(:primary) && ![true, false].include?(email[:primary])
-        raise scim_error("BAD_REQUEST", BASE_ERROR_CODES["VALIDATION_ERROR"]) unless value.to_s.match?(/\A[^@\s]+@[^@\s]+\.[^@\s]+\z/)
-      end
-    end
-
-    def scim_validate_patch_body!(body)
-      schemas = Array(body[:schemas])
-      raise scim_error("BAD_REQUEST", "Invalid schemas for PatchOp") unless schemas.include?("urn:ietf:params:scim:api:messages:2.0:PatchOp")
-
-      Array(body[:operations]).each_with_index do |operation, index|
-        op = normalize_hash(operation)[:op]
-        next if op.nil? || op.to_s.empty?
-
-        unless op.is_a?(String)
-          raise scim_patch_validation_error("[body.Operations.#{index}.op] Invalid input: expected string")
-        end
-
-        next if %w[replace add remove].include?(op.downcase)
-
-        raise scim_patch_validation_error("[body.Operations.#{index}.op] Invalid option: expected one of \"replace\"|\"add\"|\"remove\"")
-      end
-    end
-
-    def scim_patch_validation_error(message)
-      APIError.new(
-        "BAD_REQUEST",
-        message: BASE_ERROR_CODES["VALIDATION_ERROR"],
-        body: {code: "VALIDATION_ERROR", message: message}
-      )
-    end
-
-    def scim_has_organization_plugin?(ctx)
-      Array(ctx.context.options.plugins).any? { |plugin| plugin.id == "organization" }
-    end
-
-    def scim_organization_plugin(ctx)
-      Array(ctx.context.options.plugins).find { |plugin| plugin.id == "organization" }
-    end
-
-    def scim_required_roles(ctx, config)
-      configured = config[:required_role] || config[:required_roles]
-      return Array(configured).map(&:to_s) if configured
-
-      creator_role = scim_organization_plugin(ctx)&.options&.fetch(:creator_role, nil)
-      ["admin", creator_role || "owner"].uniq
-    end
-
-    def scim_provider_ownership_enabled?(config)
-      normalize_hash(config[:provider_ownership] || {})[:enabled] == true
-    end
-
-    def scim_find_organization_member(ctx, user_id, organization_id)
-      ctx.context.adapter.find_one(
-        model: "member",
-        where: [
-          {field: "userId", value: user_id},
-          {field: "organizationId", value: organization_id}
-        ]
-      )
-    end
-
-    def scim_parse_roles(role)
-      Array(role).flat_map { |entry| entry.to_s.split(",") }.map(&:strip).reject(&:empty?)
-    end
-
-    def scim_has_required_role?(role, required_roles)
-      required = Array(required_roles).map(&:to_s)
-      required.empty? || scim_parse_roles(role).any? { |candidate| required.include?(candidate) }
-    end
-
-    def scim_user_org_memberships(ctx, user_id)
-      ctx.context.adapter.find_many(model: "member", where: [{field: "userId", value: user_id}]).each_with_object({}) do |member, result|
-        result[member.fetch("organizationId")] = member
-      end
-    end
-
-    def scim_assert_provider_access!(ctx, user_id, provider, required_roles)
-      return unless provider
-
-      organization_id = provider["organizationId"]
-      if organization_id
-        raise APIError.new("FORBIDDEN", message: "Organization plugin is required to access this SCIM provider") unless scim_has_organization_plugin?(ctx)
-
-        member = scim_find_organization_member(ctx, user_id, organization_id)
-        raise APIError.new("FORBIDDEN", message: "You must be a member of the organization to access this provider") unless member
-        raise APIError.new("FORBIDDEN", message: "Insufficient role for this operation") unless scim_has_required_role?(member.fetch("role", ""), required_roles)
-      elsif provider.key?("userId") && provider["userId"] && provider["userId"] != user_id
-        raise APIError.new("FORBIDDEN", message: "You must be the owner to access this provider")
-      end
-    end
-
-    def scim_provider_by_provider_id!(ctx, provider_id)
-      raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["VALIDATION_ERROR"]) unless provider_id.is_a?(String)
-
-      provider = ctx.context.adapter.find_one(model: "scimProvider", where: [{field: "providerId", value: provider_id.to_s}])
-      raise APIError.new("NOT_FOUND", message: "SCIM provider not found") unless provider
-
-      provider
-    end
-
-    def scim_provider_id_query(ctx)
-      ctx.query[:providerId] || ctx.query[:provider_id] || ctx.query["providerId"] || ctx.query["provider_id"]
-    end
-
-    def scim_normalized_provider(provider)
-      {
-        id: provider.fetch("id"),
-        providerId: provider.fetch("providerId"),
-        organizationId: provider["organizationId"]
-      }
-    end
-
-    def scim_call_token_hook(callback, payload)
-      callback.call(payload) if callback.respond_to?(:call)
-    end
-
-    def scim_create_org_membership(ctx, user_id, organization_id)
-      return unless organization_id
-      return if ctx.context.adapter.find_one(model: "member", where: [{field: "organizationId", value: organization_id}, {field: "userId", value: user_id}])
-
-      ctx.context.adapter.create(model: "member", data: {userId: user_id, organizationId: organization_id, role: "member", createdAt: Time.now})
     end
   end
 end

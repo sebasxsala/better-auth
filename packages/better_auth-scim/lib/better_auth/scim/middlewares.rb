@@ -14,7 +14,7 @@ module BetterAuth
         if provider
           stored = provider.fetch("scimToken").to_s
           provided = token.to_s
-          unless stored.bytesize == provided.bytesize && BetterAuth::Crypto.constant_time_compare(stored, provided)
+          unless scim_token_string_matches?(stored, provided)
             raise scim_error("UNAUTHORIZED", "Invalid SCIM token")
           end
         else

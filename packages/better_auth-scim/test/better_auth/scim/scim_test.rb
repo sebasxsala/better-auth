@@ -24,6 +24,23 @@ class BetterAuthPluginsScimTest < Minitest::Test
     refute paths.key?("/scim/v2/ServiceProviderConfig")
   end
 
+  def test_scim_sql_schema_declares_global_provider_uniqueness
+    auth = build_auth
+    postgres = BetterAuth::Schema::SQL.create_statements(auth.context.options, dialect: :postgres).grep(/scim_provider/).join("\n")
+    sqlite = BetterAuth::Schema::SQL.create_statements(auth.context.options, dialect: :sqlite).grep(/scim_provider/).join("\n")
+    mysql = BetterAuth::Schema::SQL.create_statements(auth.context.options, dialect: :mysql).grep(/scim_provider/).join("\n")
+    mssql = BetterAuth::Schema::SQL.create_statements(auth.context.options, dialect: :mssql).grep(/scim_provider/).join("\n")
+
+    assert_includes postgres, 'UNIQUE ("provider_id")'
+    assert_includes postgres, 'UNIQUE ("scim_token")'
+    assert_includes sqlite, 'UNIQUE ("provider_id")'
+    assert_includes sqlite, 'UNIQUE ("scim_token")'
+    assert_includes mysql, "UNIQUE KEY `uniq_scim_provider_provider_id` (`provider_id`)"
+    assert_includes mysql, "UNIQUE KEY `uniq_scim_provider_scim_token` (`scim_token`)"
+    assert_includes mssql, "CONSTRAINT [uniq_scim_provider_provider_id] UNIQUE ([provider_id])"
+    assert_includes mssql, "CONSTRAINT [uniq_scim_provider_scim_token] UNIQUE ([scim_token])"
+  end
+
   def test_scim_metadata_endpoints_match_scim_v2_shapes
     auth = build_auth
 

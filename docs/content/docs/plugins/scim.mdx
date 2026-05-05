@@ -54,6 +54,12 @@ user = auth.api.create_scim_user(headers: { "authorization" => "Bearer #{token[:
 | `GET` | `/scim/v2/ResourceTypes` | `auth.api.get_scim_resource_types` |
 | `GET` | `/scim/v2/ResourceTypes/:resourceTypeId` | `auth.api.get_scim_resource_type` |
 
+## Filters
+
+`auth.api.list_scim_users` and `GET /scim/v2/Users` support the upstream-compatible `userName eq "value"` filter. The filter value is matched against the canonicalized user email.
+
+Other SCIM filter attributes and operators are not supported in the Ruby port. Filters such as `externalId eq "id"` and operators such as `ne`, `co`, `sw`, `ew`, and `pr` return a SCIM `invalidFilter` error instead of silently widening the result set.
+
 ## Options
 
 Current Ruby options accepted by `BetterAuth::Plugins.scim`:
@@ -80,6 +86,17 @@ BetterAuth::Plugins.scim(
   ]
 )
 ```
+
+Static `default_scim` providers are checked before database-backed providers. If a static provider and a database provider share the same `providerId`, the static provider takes precedence and a bearer token generated for the database provider is rejected.
+
+## Ruby behavior notes
+
+Ruby canonicalizes SCIM email/userName values to lowercase before storing the user email and returning the SCIM user resource. When `externalId` is omitted, Ruby also stores the lowercase userName as the SCIM account id. Upstream preserves the original userName casing for that account id fallback.
+
+Production databases should enforce both of these uniqueness invariants:
+
+- `scimProvider.providerId` is globally unique.
+- SCIM account identity is unique by `(providerId, accountId)`.
 
 ## Plugin Surface
 
