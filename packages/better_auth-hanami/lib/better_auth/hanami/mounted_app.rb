@@ -2,6 +2,11 @@
 
 module BetterAuth
   module Hanami
+    # Rewrites PATH_INFO so the core router sees paths under +mount_path+.
+    # Hanami's +Slice::Router+ passes PATH_INFO as exercised in routing specs;
+    # custom Rack mounts that differ from that contract may need app-level
+    # rewriting adjustments. Compare the Rails adapter when debugging path
+    # behavior involving SCRIPT_NAME.
     class MountedApp
       def initialize(auth, mount_path:)
         @auth = auth

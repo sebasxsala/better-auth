@@ -7,25 +7,28 @@ module BetterAuth
   module Hanami
     module Generators
       class MigrationGenerator
-        def initialize(destination_root: Dir.pwd, configuration: nil)
+        def initialize(destination_root: Dir.pwd, configuration: nil, force: false)
           @destination_root = destination_root
           @configuration = configuration
+          @force = force
         end
 
-        def run
-          return migration_path if existing_migration?
+        def run(force: nil)
+          force = @force if force.nil?
+          return existing_migration_path if existing_migration_path && !force
 
-          FileUtils.mkdir_p(File.dirname(migration_path))
-          File.write(migration_path, BetterAuth::Hanami::Migration.render(generator_config))
-          migration_path
+          path = existing_migration_path || migration_path
+          FileUtils.mkdir_p(File.dirname(path))
+          File.write(path, BetterAuth::Hanami::Migration.render(generator_config))
+          path
         end
 
         private
 
         attr_reader :destination_root, :configuration
 
-        def existing_migration?
-          Dir[File.join(destination_root, "config/db/migrate/*_create_better_auth_tables.rb")].any?
+        def existing_migration_path
+          @existing_migration_path ||= Dir[File.join(destination_root, "config/db/migrate/*_create_better_auth_tables.rb")].min
         end
 
         def migration_path

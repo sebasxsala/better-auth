@@ -13,7 +13,7 @@ module BetterAuth
         if container.nil? && defined?(::Hanami) && ::Hanami.respond_to?(:app)
           container = ::Hanami.app
         end
-        return BetterAuth::Adapters::Memory.new(options) unless container
+        return memory_fallback(options) unless container
 
         from_container(container, options)
       end
@@ -24,7 +24,7 @@ module BetterAuth
         elsif container.respond_to?(:[]) && safe_fetch(container, "db.gateway")
           container["db.gateway"]
         end
-        return BetterAuth::Adapters::Memory.new(options) unless gateway
+        return memory_fallback(options) unless gateway
 
         connection = gateway.respond_to?(:connection) ? gateway.connection : gateway
         new(options, connection: connection)
@@ -34,6 +34,14 @@ module BetterAuth
         container[key]
       rescue KeyError
         nil
+      end
+
+      def self.memory_fallback(options)
+        Kernel.warn(
+          "[better_auth-hanami] SequelAdapter: using BetterAuth::Adapters::Memory " \
+          "(no Hanami container or db.gateway). Persisted auth data will not survive process restart."
+        )
+        BetterAuth::Adapters::Memory.new(options)
       end
 
       def initialize(options, connection:)

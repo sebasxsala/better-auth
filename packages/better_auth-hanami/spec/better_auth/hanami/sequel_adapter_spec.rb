@@ -60,6 +60,34 @@ RSpec.describe BetterAuth::Hanami::SequelAdapter do
     expect(matches.map { |user| user.fetch("id") }).to eq([unverified.fetch("id")])
   end
 
+  describe ".from_hanami" do
+    it "warns when no Hanami container is available and memory storage is used" do
+      expect(Kernel).to receive(:warn).with(/in-memory|Memory/i)
+
+      adapter = described_class.from_hanami(config, container: false)
+
+      expect(adapter).to be_a(BetterAuth::Adapters::Memory)
+    end
+  end
+
+  describe ".from_container" do
+    it "warns when db.gateway is missing and memory storage is used" do
+      container = Class.new do
+        def key?(_key) = false
+
+        def [](_key)
+          raise KeyError
+        end
+      end.new
+
+      expect(Kernel).to receive(:warn).with(/in-memory|Memory/i)
+
+      adapter = described_class.from_container(container, config)
+
+      expect(adapter).to be_a(BetterAuth::Adapters::Memory)
+    end
+  end
+
   # rubocop:disable Security/Eval
   def apply_migration(db, config)
     require "rom-sql"
