@@ -802,21 +802,14 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
       body: {
         redirect_uris: ["https://resource.example/callback"],
         token_endpoint_auth_method: "client_secret_post",
-        grant_types: ["client_credentials"],
-        response_types: [],
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
         client_name: "Machine Client",
         scope: "profile email"
       }
     )
 
-    tokens = auth.api.o_auth2_token(
-      body: {
-        grant_type: "client_credentials",
-        client_id: client[:client_id],
-        client_secret: client[:client_secret],
-        scope: "profile email"
-      }
-    )
+    tokens = issue_authorization_code_tokens(auth, cookie, client, scope: "profile email")
 
     error = assert_raises(BetterAuth::APIError) do
       auth.api.o_auth2_user_info(headers: {"authorization" => "Bearer #{tokens[:access_token]}"})
@@ -1084,7 +1077,7 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
   end
 
   def test_token_endpoint_rejects_grants_not_registered_for_client
-    auth = build_auth
+    auth = build_auth(allow_public_client_prelogin: true)
     cookie = sign_up_cookie(auth)
     client = auth.api.register_o_auth_client(
       headers: {"cookie" => cookie},
@@ -1531,7 +1524,7 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
   end
 
   def test_public_client_prelogin_returns_only_public_client_fields
-    auth = build_auth
+    auth = build_auth(allow_public_client_prelogin: true)
     cookie = sign_up_cookie(auth)
     client = auth.api.register_o_auth_client(
       headers: {"cookie" => cookie},
@@ -1546,8 +1539,17 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
         scope: "read"
       }
     )
+    signed_query = BetterAuth::Plugins.oauth_signed_query(
+      Struct.new(:context, keyword_init: true).new(context: auth.context),
+      {
+        client_id: client[:client_id],
+        redirect_uri: "https://resource.example/callback",
+        response_type: "code",
+        scope: "read"
+      }
+    )
 
-    public_client = auth.api.get_o_auth_client_public_prelogin(query: {client_id: client[:client_id]})
+    public_client = auth.api.get_o_auth_client_public_prelogin(body: {client_id: client[:client_id], oauth_query: signed_query})
 
     assert_equal client[:client_id], public_client[:client_id]
     assert_equal "Public View Client", public_client[:client_name]

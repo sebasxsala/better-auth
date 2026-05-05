@@ -29,4 +29,20 @@ class OAuthProviderRevokeTest < Minitest::Test
     record = auth.context.adapter.find_one(model: "oauthAccessToken", where: [{field: "token", value: token_value}])
     assert record["revoked"]
   end
+
+  def test_revoke_does_not_revoke_tokens_owned_by_another_client
+    auth = build_auth(scopes: ["openid", "offline_access"])
+    cookie = sign_up_cookie(auth)
+    owner = create_client(auth, cookie, scope: "openid offline_access", skip_consent: true)
+    other = create_client(auth, cookie, scope: "openid offline_access", skip_consent: true)
+    tokens = issue_authorization_code_tokens(auth, cookie, owner, scope: "openid offline_access")
+
+    assert_equal({revoked: true}, auth.api.o_auth2_revoke(body: revoke_body(other, tokens[:access_token], hint: "access_token")))
+    assert_equal({revoked: true}, auth.api.o_auth2_revoke(body: revoke_body(other, tokens[:refresh_token], hint: "refresh_token")))
+
+    access = auth.api.o_auth2_introspect(body: introspect_body(owner, tokens[:access_token], hint: "access_token"))
+    refresh = auth.api.o_auth2_introspect(body: introspect_body(owner, tokens[:refresh_token], hint: "refresh_token"))
+    assert_equal true, access[:active]
+    assert_equal true, refresh[:active]
+  end
 end

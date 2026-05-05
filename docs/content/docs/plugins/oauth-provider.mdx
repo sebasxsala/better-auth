@@ -79,7 +79,7 @@ tokens = auth.api.o_auth2_token(
 )
 ```
 
-Opaque access tokens are returned by default. If a valid `resource` is supplied, the access token is a JWT and the resource becomes the JWT `aud`.
+Opaque access tokens are returned by default. If a valid `resource` is supplied, the access token is a JWT and the resource becomes the JWT `aud`. The default valid audience is the provider issuer URL; when `openid` is granted, the UserInfo endpoint is also allowed.
 
 ## Routes
 
@@ -89,25 +89,29 @@ Opaque access tokens are returned by default. If a valid `resource` is supplied,
 | `GET` | `/.well-known/openid-configuration` | `auth.api.get_open_id_config` |
 | `POST` | `/oauth2/register` | `auth.api.register_o_auth_client` |
 | `POST` | `/oauth2/create-client` | `auth.api.create_o_auth_client` |
-| `GET` | `/oauth2/client/:id` | `auth.api.get_o_auth_client` |
-| `GET` | `/oauth2/client` | `auth.api.get_o_auth_client_public` |
-| `GET` | `/oauth2/public-client-prelogin` | `auth.api.get_o_auth_client_public_prelogin` |
-| `GET` | `/oauth2/clients` | `auth.api.list_o_auth_clients` |
-| `PATCH` | `/oauth2/client` | `auth.api.update_o_auth_client` |
-| `DELETE` | `/oauth2/client` | `auth.api.delete_o_auth_client` |
+| `POST` | `/admin/oauth2/create-client` | `auth.api.admin_create_o_auth_client` |
+| `PATCH` | `/admin/oauth2/update-client` | `auth.api.admin_update_o_auth_client` |
+| `GET` | `/oauth2/get-client?client_id=...` | `auth.api.get_o_auth_client` |
+| `GET` | `/oauth2/get-clients` | `auth.api.get_o_auth_clients` |
+| `POST` | `/oauth2/update-client` | `auth.api.update_o_auth_client` |
+| `POST` | `/oauth2/delete-client` | `auth.api.delete_o_auth_client` |
+| `GET` | `/oauth2/public-client?client_id=...` | `auth.api.get_o_auth_client_public` |
+| `POST` | `/oauth2/public-client-prelogin` | `auth.api.get_o_auth_client_public_prelogin` |
 | `POST` | `/oauth2/client/rotate-secret` | `auth.api.rotate_o_auth_client_secret` |
 | `GET` | `/oauth2/authorize` | `auth.api.o_auth2_authorize` |
 | `POST` | `/oauth2/continue` | `auth.api.o_auth2_continue` |
 | `POST` | `/oauth2/consent` | `auth.api.o_auth2_consent` |
-| `GET` | `/oauth2/consents` | `auth.api.list_o_auth_consents` |
-| `GET` | `/oauth2/consent` | `auth.api.get_o_auth_consent` |
-| `PATCH` | `/oauth2/consent` | `auth.api.update_o_auth_consent` |
-| `DELETE` | `/oauth2/consent` | `auth.api.delete_o_auth_consent` |
+| `GET` | `/oauth2/get-consent?id=...` | `auth.api.get_o_auth_consent` |
+| `GET` | `/oauth2/get-consents` | `auth.api.get_o_auth_consents` |
+| `POST` | `/oauth2/update-consent` | `auth.api.update_o_auth_consent` |
+| `POST` | `/oauth2/delete-consent` | `auth.api.delete_o_auth_consent` |
 | `POST` | `/oauth2/token` | `auth.api.o_auth2_token` |
 | `POST` | `/oauth2/introspect` | `auth.api.o_auth2_introspect` |
 | `POST` | `/oauth2/revoke` | `auth.api.o_auth2_revoke` |
 | `GET` | `/oauth2/userinfo` | `auth.api.o_auth2_user_info` |
 | `GET`, `POST` | `/oauth2/end-session` | `auth.api.o_auth2_end_session` |
+
+Deprecated aliases remain for one minor release: `GET /oauth2/client/:id`, `GET /oauth2/client`, `GET /oauth2/clients`, `PATCH /oauth2/client`, `DELETE /oauth2/client`, `GET /oauth2/consents`, and `GET/PATCH/DELETE /oauth2/consent`.
 
 ## Options
 
@@ -122,11 +126,18 @@ Opaque access tokens are returned by default. If a valid `resource` is supplied,
 | `allow_unauthenticated_client_registration` | Allows unauthenticated DCR and coerces clients to public. |
 | `client_registration_default_scopes` | Default scopes for DCR requests without `scope`. |
 | `client_registration_allowed_scopes` | Scope allow-list for DCR. |
+| `client_credential_grant_default_scopes` | Default scopes for `client_credentials` when the stored client has none. |
 | `store_client_secret` | `plain`, `hashed`, `encrypted`, or custom hash/encrypt callbacks. |
 | `prefix` | Prefixes for opaque access tokens, refresh tokens, and client secrets. |
+| `code_expires_in` | Authorization code lifetime in seconds. |
+| `id_token_expires_in` | ID token lifetime in seconds. |
 | `refresh_token_expires_in` | Refresh token lifetime in seconds. |
+| `access_token_expires_in` | User access token lifetime in seconds. |
+| `m2m_access_token_expires_in` | Client-credentials access token lifetime in seconds. |
+| `scope_expirations` | Per-scope shorter access token lifetimes. |
 | `advertised_metadata` | Overrides metadata fields such as `scopes_supported`, `claims_supported`, and `jwks_uri`. |
 | `valid_audiences` | Accepted `resource` values for JWT access tokens. |
+| `allow_public_client_prelogin` | Allows signed `/oauth2/public-client-prelogin` requests before login. |
 | `custom_token_response_fields` | Adds fields to token responses. |
 | `custom_access_token_claims` | Adds custom JWT access token claims before pinned OAuth claims. |
 | `custom_user_info_claims` | Adds claims to `/oauth2/userinfo`. |
@@ -136,6 +147,8 @@ Opaque access tokens are returned by default. If a valid `resource` is supplied,
 | `rate_limit` | Per-endpoint rate limit overrides or `false` to disable a rule. |
 | `jwks_uri` | Advertises a configured JWKS URL. |
 | `disable_jwt_plugin` | Keeps access tokens opaque even when `resource` is supplied. |
+
+When the JWT plugin is registered, JWT access tokens and ID tokens use its configured signing algorithm. Without the JWT plugin, Ruby falls back to HS256 for compatibility.
 
 ## Metadata
 

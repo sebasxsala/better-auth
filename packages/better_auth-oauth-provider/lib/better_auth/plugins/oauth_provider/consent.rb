@@ -48,7 +48,8 @@ module BetterAuth
         code_challenge: query["code_challenge"],
         code_challenge_method: query["code_challenge_method"],
         nonce: query["nonce"],
-        reference_id: reference_id || client_reference_id
+        reference_id: reference_id || client_reference_id,
+        expires_in: config[:code_expires_in]
       )
       OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], code: code, state: query["state"], iss: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx)))
     end

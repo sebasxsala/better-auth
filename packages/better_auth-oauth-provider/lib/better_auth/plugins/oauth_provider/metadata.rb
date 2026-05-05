@@ -85,6 +85,8 @@ module BetterAuth
       return ["HS256"] if config[:disable_jwt_plugin]
 
       jwt_plugin = ctx.context.options.plugins.find { |plugin| plugin.id == "jwt" }
+      return ["HS256"] unless jwt_plugin
+
       alg = config.dig(:jwt, :jwks, :key_pair_config, :alg) ||
         jwt_plugin&.options&.dig(:jwks, :key_pair_config, :alg)
       alg ? [alg] : ["EdDSA"]

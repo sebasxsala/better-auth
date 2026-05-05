@@ -53,9 +53,16 @@ module BetterAuth
       end
     end
 
-    def oauth_get_client_public_prelogin_endpoint(_config)
+    def oauth_get_client_public_prelogin_endpoint(config)
       Endpoint.new(path: "/oauth2/public-client-prelogin", method: "POST") do |ctx|
         input = OAuthProtocol.stringify_keys(ctx.body).merge(OAuthProtocol.stringify_keys(ctx.query))
+        unless config[:allow_public_client_prelogin] || config[:allowPublicClientPrelogin]
+          raise APIError.new("BAD_REQUEST")
+        end
+        unless OAuthProvider::Utils.verify_oauth_query_params(input["oauth_query"], ctx.context.secret)
+          raise APIError.new("UNAUTHORIZED", body: {error: "invalid_signature"})
+        end
+
         client = OAuthProtocol.find_client(ctx, "oauthClient", input["client_id"])
         raise APIError.new("NOT_FOUND", message: "client not found") unless client
         raise APIError.new("NOT_FOUND", message: "client not found") if OAuthProtocol.stringify_keys(client)["disabled"]
@@ -101,6 +108,7 @@ module BetterAuth
         oauth_assert_owned_client!(client, session, config)
 
         update_source = OAuthProtocol.stringify_keys(body["update"] || {})
+        oauth_validate_client_update!(client, update_source, config, admin: false)
         update = oauth_client_update_data(update_source)
         updated = update.empty? ? client : ctx.context.adapter.update(model: "oauthClient", where: [{field: "clientId", value: body["client_id"]}], update: update.merge(updatedAt: Time.now))
         ctx.json(OAuthProtocol.client_response(updated, include_secret: false))
@@ -136,13 +144,15 @@ module BetterAuth
       end
     end
 
-    def oauth_admin_update_client_endpoint(_config)
+    def oauth_admin_update_client_endpoint(config)
       Endpoint.new(path: "/admin/oauth2/update-client", method: "PATCH", metadata: {server_only: true}) do |ctx|
         body = OAuthProtocol.stringify_keys(ctx.body)
         client = OAuthProtocol.find_client(ctx, "oauthClient", body["client_id"])
         raise APIError.new("NOT_FOUND", message: "client not found") unless client
 
-        update = oauth_client_update_data(OAuthProtocol.stringify_keys(body["update"] || {}), admin: true)
+        update_source = OAuthProtocol.stringify_keys(body["update"] || {})
+        oauth_validate_client_update!(client, update_source, config, admin: true)
+        update = oauth_client_update_data(update_source, admin: true)
         updated = update.empty? ? client : ctx.context.adapter.update(model: "oauthClient", where: [{field: "clientId", value: body["client_id"]}], update: update.merge(updatedAt: Time.now))
         ctx.json(OAuthProtocol.client_response(updated, include_secret: false))
       end

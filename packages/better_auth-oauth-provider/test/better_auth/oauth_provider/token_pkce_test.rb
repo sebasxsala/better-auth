@@ -61,8 +61,8 @@ class OAuthProviderTokenPkceTest < Minitest::Test
     access_payload = JWT.decode(resource[:access_token], SECRET, true, algorithm: "HS256").first
     assert resource[:id_token]
     assert resource[:refresh_token]
-    assert_equal "https://myapi.example.com", resource[:audience]
-    assert_equal "https://myapi.example.com", access_payload["aud"]
+    assert_equal ["https://myapi.example.com", "http://localhost:3000/api/auth/oauth2/userinfo"], resource[:audience]
+    assert_equal ["https://myapi.example.com", "http://localhost:3000/api/auth/oauth2/userinfo"], access_payload["aud"]
     assert_equal client[:client_id], access_payload["azp"]
     assert_equal "openid offline_access", access_payload["scope"]
     assert_equal resource[:expires_at], access_payload["exp"]
@@ -151,8 +151,8 @@ class OAuthProviderTokenPkceTest < Minitest::Test
       body: refresh_grant_body(client, jwt_source[:refresh_token], resource: "https://myapi.example.com")
     )
     payload = JWT.decode(jwt_refresh[:access_token], SECRET, true, algorithm: "HS256").first
-    assert_equal "https://myapi.example.com", jwt_refresh[:audience]
-    assert_equal "https://myapi.example.com", payload["aud"]
+    assert_equal ["https://myapi.example.com", "http://localhost:3000/api/auth/oauth2/userinfo"], jwt_refresh[:audience]
+    assert_equal ["https://myapi.example.com", "http://localhost:3000/api/auth/oauth2/userinfo"], payload["aud"]
     assert_equal "openid offline_access", payload["scope"]
     assert_equal jwt_refresh[:expires_at], payload["exp"]
   end

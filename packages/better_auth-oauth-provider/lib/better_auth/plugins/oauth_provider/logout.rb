@@ -19,7 +19,12 @@ module BetterAuth
         raise APIError.new("BAD_REQUEST", message: "invalid_client") if client_data["disabled"]
         raise APIError.new("UNAUTHORIZED", message: "client unable to logout") unless client_data["enableEndSession"]
 
-        payload = Crypto.verify_jwt(id_token_hint, OAuthProtocol.id_token_hs256_key(ctx, client_data["clientId"], client_data["clientSecret"]))
+        payload = OAuthProtocol.verify_oauth_jwt(
+          ctx,
+          id_token_hint,
+          issuer: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx)),
+          hs256_secret: OAuthProtocol.id_token_hs256_key(ctx, client_data["clientId"], client_data["clientSecret"])
+        )
         raise APIError.new("UNAUTHORIZED", message: "invalid id token") unless payload
         raise APIError.new("BAD_REQUEST", message: "audience mismatch") if input["client_id"] && payload["aud"] != input["client_id"]
 

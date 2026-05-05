@@ -50,9 +50,12 @@ module BetterAuth
         post_login: {},
         store_client_secret: "plain",
         prefix: {},
+        code_expires_in: 600,
+        id_token_expires_in: 36_000,
         refresh_token_expires_in: 2_592_000,
         access_token_expires_in: 3600,
         m2m_access_token_expires_in: 3600,
+        client_credential_grant_default_scopes: nil,
         scope_expirations: {},
         store: OAuthProtocol.stores
       }.merge(normalize_hash(options))

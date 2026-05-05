@@ -6,7 +6,7 @@ module BetterAuth
 
     def oauth_userinfo_endpoint(config)
       Endpoint.new(path: "/oauth2/userinfo", method: "GET") do |ctx|
-        ctx.json(OAuthProtocol.userinfo(config[:store], ctx.headers["authorization"], additional_claim: config[:custom_user_info_claims] || config[:additional_claim], prefix: config[:prefix], jwt_secret: ctx.context.secret))
+        ctx.json(OAuthProtocol.userinfo(config[:store], ctx.headers["authorization"], additional_claim: config[:custom_user_info_claims] || config[:additional_claim], prefix: config[:prefix], jwt_secret: ctx.context.secret, ctx: ctx, issuer: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx))))
       end
     end
   end

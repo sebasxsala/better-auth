@@ -51,7 +51,7 @@ class OAuthProviderEndpointPairwiseTest < Minitest::Test
     assert_equal "openid offline_access", refresh_active[:scope]
     assert_equal true, jwt_active[:active]
     assert_equal "openid offline_access read", jwt_active[:scope]
-    assert_equal "https://api.example", jwt_active[:aud]
+    assert_equal ["https://api.example", "http://localhost:3000/api/auth/oauth2/userinfo"], jwt_active[:aud]
   end
 
   def test_introspection_remains_active_after_user_session_is_deleted
