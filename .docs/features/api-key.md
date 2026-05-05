@@ -30,3 +30,18 @@ Adds API key creation, verification, management, quotas, metadata, permissions, 
 cd packages/better_auth-api-key
 rbenv exec bundle exec ruby -Itest test/better_auth/api_key_test.rb
 ```
+
+## Operational notes
+
+Expired API key cleanup runs against the database when `storage` is `"database"`
+or `fallback_to_database` is true. Secondary-storage-only deployments should
+align Redis or KV TTLs with API key expiration because database cleanup does not
+purge secondary-only keys.
+
+The scheduled expired-key cleanup throttle is per Ruby process. It is not
+coordinated across web workers, hosts, or background job runners.
+
+When `defer_updates` is combined with `advanced.background_tasks.handler`, usage
+updates such as request counts, remaining limits, refill state, and scheduled
+cleanup can be reordered under concurrency. See
+`packages/better_auth-api-key/README.md` for package-level configuration notes.
