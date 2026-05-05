@@ -64,7 +64,10 @@ module BetterAuth
             ids = JSON.parse((storage_instance&.get(storage_key_by_reference(reference_id)) || storage_instance&.get("api-key:user:#{reference_id}")).to_s)
             records = ids.filter_map { |id| find_by_id(ctx, id, config) }
             return records unless records.empty? && config[:fallback_to_database]
-          rescue JSON::ParserError, NoMethodError
+          rescue JSON::ParserError, NoMethodError => error
+            if ctx.context.respond_to?(:logger) && ctx.context.logger.respond_to?(:warn)
+              ctx.context.logger.warn("[API KEY PLUGIN] Corrupt api-key reference index for #{reference_id.inspect}: #{error.class}: #{error.message}")
+            end
             return [] unless config[:fallback_to_database]
           end
         end

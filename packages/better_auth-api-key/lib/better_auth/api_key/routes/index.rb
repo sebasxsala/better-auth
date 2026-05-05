@@ -51,12 +51,14 @@ module BetterAuth
           @last_expired_check = now
         end
 
-        expired = context.adapter.find_many(model: BetterAuth::Plugins::API_KEY_TABLE_NAME).select do |record|
-          record["expiresAt"] && record["expiresAt"] < Time.now
-        end
-        expired.each do |record|
-          context.adapter.delete(model: BetterAuth::Plugins::API_KEY_TABLE_NAME, where: [{field: "id", value: record["id"]}])
-        end
+        now = Time.now
+        context.adapter.delete_many(
+          model: BetterAuth::Plugins::API_KEY_TABLE_NAME,
+          where: [
+            {field: "expiresAt", value: now, operator: "lt"},
+            {field: "expiresAt", value: nil, operator: "ne"}
+          ]
+        )
       end
 
       def schedule_cleanup(ctx, config)

@@ -14,7 +14,7 @@ module BetterAuth
             ctx.json({success: true, error: nil})
           rescue => error
             ctx.context.logger.error("[API KEY PLUGIN] Failed to delete expired API keys: #{error.message}") if ctx.context.logger.respond_to?(:error)
-            ctx.json({success: false, error: error})
+            ctx.json({success: false, error: {message: error.message.to_s, name: error.class.name}})
           end
         end
       end

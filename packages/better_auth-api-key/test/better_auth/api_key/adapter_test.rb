@@ -95,4 +95,32 @@ class BetterAuthAPIKeyAdapterTest < Minitest::Test
     storage.set(reference_key, "{")
     assert_equal [], BetterAuth::APIKey::Adapter.safe_parse_id_list(storage.get(reference_key))
   end
+
+  def test_list_for_reference_warns_on_corrupt_reference_index_json
+    storage = APIKeyTestSupport::MemoryStorage.new
+    ref = "user-corrupt"
+    storage.set(BetterAuth::APIKey::Adapter.storage_key_by_reference(ref), "{bad")
+
+    warnings = []
+    logger = Object.new
+    logger.define_singleton_method(:warn) { |msg| warnings << msg }
+
+    auth = build_api_key_auth(
+      storage: "secondary-storage",
+      secondary_storage: storage,
+      fallback_to_database: false,
+      default_key_length: 12
+    )
+    auth.context.define_singleton_method(:logger) { logger }
+
+    ctx = Struct.new(:context).new(auth.context)
+    config = BetterAuth::APIKey::Configuration.normalize({})[:configurations].first
+    config = config.merge(storage: "secondary-storage", fallback_to_database: false)
+
+    result = BetterAuth::APIKey::Adapter.list_for_reference(ctx, ref, config)
+
+    assert_equal [], result
+    assert_equal 1, warnings.length
+    assert_match(/Corrupt api-key reference index/i, warnings.first)
+  end
 end

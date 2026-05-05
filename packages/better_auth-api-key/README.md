@@ -44,6 +44,21 @@ export const authClient = createAuthClient({
 
 Ruby does not expose a separate `apiKeyClient()` equivalent; the public Ruby surface is the server plugin and route contract.
 
+## Operational notes
+
+Expired API key cleanup runs against the database when `storage` is `"database"`
+or `fallback_to_database` is true. Secondary-storage-only deployments should
+align Redis or KV TTLs with API key expiration because database cleanup does not
+purge secondary-only keys.
+
+The scheduled expired-key cleanup throttle is per Ruby process. It is not
+coordinated across web workers, hosts, or background job runners.
+
+When `defer_updates` is combined with `advanced.background_tasks.handler`, usage
+updates such as request counts, remaining limits, refill state, and scheduled
+cleanup can be reordered under concurrency. Use database transactions or
+deployment-level coordination if strict counters are required.
+
 ## Configuration
 
 ```ruby
