@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Modernized the MCP plugin to use OAuth Provider-style client, token, metadata, and protected-resource behavior while keeping legacy MCP routes as aliases.
 - Fixed OAuth refresh token rotation to reject refresh tokens presented by a different authenticated client.
 - Changed OAuth HS256 ID token signing to use non-public key material; existing ID tokens signed only with the public client id will no longer validate.
+- Fixed OAuth client-secret verification to use constant-time comparison for encrypted and custom-hashed storage modes.
 
 ## [0.4.0] - 2026-04-30
 

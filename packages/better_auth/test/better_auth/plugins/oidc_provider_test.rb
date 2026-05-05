@@ -519,6 +519,25 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
     end
   end
 
+  def test_custom_hashed_client_secret_uses_constant_time_compare
+    calls = []
+    original = BetterAuth::Crypto.method(:constant_time_compare)
+
+    BetterAuth::Crypto.stub(:constant_time_compare, lambda do |left, right|
+      calls << [left, right]
+      original.call(left, right)
+    end) do
+      assert BetterAuth::Plugins::OAuthProtocol.send(
+        :verify_client_secret,
+        nil,
+        "stored:client-secret",
+        "client-secret",
+        {hash: ->(secret) { "stored:#{secret}" }}
+      )
+    end
+    assert_equal [["stored:client-secret", "stored:client-secret"]], calls
+  end
+
   def test_jwt_plugin_negotiates_id_token_signing_algorithm
     auth = build_auth(use_jwt_plugin: true, extra_plugins: [BetterAuth::Plugins.jwt])
     cookie = sign_up_cookie(auth)
