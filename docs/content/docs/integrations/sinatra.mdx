@@ -63,6 +63,12 @@ Available helpers:
 `require_authentication` halts the Sinatra request with `401` when no Better
 Auth user is present.
 
+Sinatra helpers resolve sessions through the core `get-session` API path, so
+Better Auth plugin hooks that affect session lookup, such as the bearer plugin,
+run for `current_user` and `require_authentication`. Helper session lookup may
+emit Better Auth `Set-Cookie` headers when stale cookies need to be cleared or
+session cookies need to be refreshed.
+
 ## Rake Tasks
 
 Sinatra does not have a Rails-style generator or built-in migration command.

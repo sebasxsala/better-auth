@@ -12,7 +12,10 @@ module BetterAuth
       def call(env)
         return @app.call(env) unless mount_matches?(env)
 
-        auth.call(env.merge("PATH_INFO" => mounted_path_info(env)))
+        rewritten_path = mounted_path_info(env)
+        next_env = env.merge("PATH_INFO" => rewritten_path)
+        next_env["SCRIPT_NAME"] = "" if shared_mount_rewrite?(env, rewritten_path)
+        auth.call(next_env)
       end
 
       private
@@ -48,6 +51,14 @@ module BetterAuth
         return path_info if path_info == prefix || path_info.start_with?("#{prefix}/")
 
         normalize_path("#{prefix}/#{path_info.delete_prefix("/")}")
+      end
+
+      def shared_mount_rewrite?(env, rewritten_path)
+        script_name = normalize_path(env["SCRIPT_NAME"])
+        original_path = normalize_path(env["PATH_INFO"])
+        script_name != "/" &&
+          !original_path.start_with?("#{@mount_path}/") &&
+          rewritten_path.start_with?("#{@mount_path}/")
       end
 
       def normalize_path(path)

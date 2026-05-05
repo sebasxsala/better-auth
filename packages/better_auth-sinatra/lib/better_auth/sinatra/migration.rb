@@ -123,17 +123,104 @@ module BetterAuth
         normalized = sql.to_s.gsub("\r\n", "\n").strip
         return [] if normalized.empty?
 
-        chunks = normalized.split(/;\s*\n/)
-        chunks.flat_map do |chunk|
-          chunk = chunk.strip
-          next [] if chunk.empty?
+        split_sql_statements(normalized)
+      end
 
-          if chunk.include?(";") && !chunk.include?("\n")
-            chunk.split(";").map(&:strip).reject(&:empty?)
-          else
-            [chunk.delete_suffix(";")]
-          end
+      def split_sql_statements(sql)
+        output = []
+        buffer = +""
+        index = 0
+        quote = nil
+        line_comment = false
+        block_comment = false
+        dollar_tag = nil
+
+        while index < sql.length
+          state = {
+            quote: quote,
+            line_comment: line_comment,
+            block_comment: block_comment,
+            dollar_tag: dollar_tag
+          }
+          index, quote, line_comment, block_comment, dollar_tag = scan_sql_character(sql, buffer, index, state, output)
         end
+
+        tail = buffer.strip
+        output << tail unless tail.empty?
+        output
+      end
+
+      def scan_sql_character(sql, buffer, index, state, output)
+        char = sql[index]
+        next_char = sql[index + 1]
+        quote = state[:quote]
+        line_comment = state[:line_comment]
+        block_comment = state[:block_comment]
+        dollar_tag = state[:dollar_tag]
+
+        return scan_line_comment(buffer, index, char) + [quote, false, block_comment, dollar_tag] if line_comment && char == "\n"
+        return scan_line_comment(buffer, index, char) + [quote, true, block_comment, dollar_tag] if line_comment
+        return scan_block_comment(buffer, index, char, next_char, quote, line_comment, dollar_tag) if block_comment
+        return scan_dollar_quote(sql, buffer, index, char, quote, line_comment, block_comment, dollar_tag) if dollar_tag
+        return scan_quoted_string(sql, buffer, index, char, quote, line_comment, block_comment, dollar_tag) if quote
+        return [index + 2, quote, true, block_comment, dollar_tag].tap { buffer << char << next_char } if char == "-" && next_char == "-"
+        return [index + 2, quote, line_comment, true, dollar_tag].tap { buffer << char << next_char } if char == "/" && next_char == "*"
+
+        tag = dollar_quote_tag_at(sql, index)
+        return [index + tag.length, quote, line_comment, block_comment, tag].tap { buffer << tag } if tag
+        return [index + 1, char, line_comment, block_comment, dollar_tag].tap { buffer << char } if char == "'" || char == "\""
+
+        if char == ";"
+          statement = buffer.strip
+          output << statement unless statement.empty?
+          buffer.clear
+          return [index + 1, quote, line_comment, block_comment, dollar_tag]
+        end
+
+        buffer << char
+        [index + 1, quote, line_comment, block_comment, dollar_tag]
+      end
+
+      def scan_line_comment(buffer, index, char)
+        buffer << char
+        [index + 1]
+      end
+
+      def scan_block_comment(buffer, index, char, next_char, quote, line_comment, dollar_tag)
+        buffer << char
+        if char == "*" && next_char == "/"
+          buffer << next_char
+          [index + 2, quote, line_comment, false, dollar_tag]
+        else
+          [index + 1, quote, line_comment, true, dollar_tag]
+        end
+      end
+
+      def scan_dollar_quote(sql, buffer, index, char, quote, line_comment, block_comment, dollar_tag)
+        if sql[index, dollar_tag.length] == dollar_tag
+          buffer << dollar_tag
+          [index + dollar_tag.length, quote, line_comment, block_comment, nil]
+        else
+          buffer << char
+          [index + 1, quote, line_comment, block_comment, dollar_tag]
+        end
+      end
+
+      def scan_quoted_string(sql, buffer, index, char, quote, line_comment, block_comment, dollar_tag)
+        buffer << char
+        if char == quote && sql[index + 1] == quote
+          buffer << sql[index + 1]
+          [index + 2, quote, line_comment, block_comment, dollar_tag]
+        elsif char == quote
+          [index + 1, nil, line_comment, block_comment, dollar_tag]
+        else
+          [index + 1, quote, line_comment, block_comment, dollar_tag]
+        end
+      end
+
+      def dollar_quote_tag_at(sql, index)
+        match = sql[index..]&.match(/\A\$[A-Za-z_][A-Za-z0-9_]*\$|\A\$\$/)
+        match&.[](0)
       end
 
       def missing_schema_migrations_table?(error)

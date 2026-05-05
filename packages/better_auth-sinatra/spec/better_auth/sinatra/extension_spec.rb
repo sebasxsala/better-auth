@@ -47,6 +47,32 @@ RSpec.describe "BetterAuth::Sinatra extension" do
     expect(JSON.parse(last_response.body)).to eq("ok" => true)
   end
 
+  it "does not duplicate SCRIPT_NAME in Rack request path for shared auth mounts" do
+    plugin = BetterAuth::Plugin.new(
+      id: "sinatra-request-url",
+      endpoints: {
+        request_url_probe: BetterAuth::Endpoint.new(path: "/request-url-probe", method: "GET") do |ctx|
+          {
+            path: ctx.request.path,
+            url: ctx.request.url
+          }
+        end
+      }
+    )
+    self.app = build_app(mount_path: "/api/auth", plugins: [plugin])
+
+    get "/request-url-probe", {}, {
+      "SCRIPT_NAME" => "/api/auth",
+      "PATH_INFO" => "/request-url-probe",
+      "HTTP_HOST" => "example.org"
+    }
+
+    expect(last_response.status).to eq(200)
+    data = JSON.parse(last_response.body)
+    expect(data.fetch("path")).to eq("/api/auth/request-url-probe")
+    expect(data.fetch("url")).to eq("http://example.org/api/auth/request-url-probe")
+  end
+
   it "dispatches plugin endpoints through the Sinatra mount" do
     plugin = BetterAuth::Plugin.new(
       id: "sinatra-plugin",
@@ -85,6 +111,42 @@ RSpec.describe "BetterAuth::Sinatra extension" do
     data = JSON.parse(last_response.body)
     expect(data.fetch("authenticated")).to eq(true)
     expect(data.fetch("user").fetch("email")).to eq("ada@example.com")
+  end
+
+  it "lets Sinatra helpers resolve the current user from the bearer plugin" do
+    self.app = build_app(plugins: [BetterAuth::Plugins.bearer])
+    sign_up_email("ada@example.com")
+    token_cookie = cookie_header(last_response["set-cookie"]).split("; ").find { |pair| pair.start_with?("better-auth.session_token=") }
+    signed_token = token_cookie.split("=", 2).last
+
+    clear_cookies
+    get "/dashboard", {}, "HTTP_AUTHORIZATION" => "Bearer #{signed_token}"
+
+    expect(last_response.status).to eq(200)
+    data = JSON.parse(last_response.body)
+    expect(data.fetch("authenticated")).to eq(true)
+    expect(data.fetch("user").fetch("email")).to eq("ada@example.com")
+  end
+
+  it "applies Better Auth response cookies emitted during helper session lookup" do
+    self.app = build_app
+    sign_up_email("ada@example.com")
+    original_cookie = cookie_header(last_response["set-cookie"])
+
+    post "/api/auth/sign-out", "{}", {
+      "CONTENT_TYPE" => "application/json",
+      "HTTP_ORIGIN" => "http://example.org",
+      "HTTP_COOKIE" => original_cookie
+    }
+    expect(last_response.status).to eq(200)
+
+    clear_cookies
+    get "/dashboard", {}, "HTTP_COOKIE" => original_cookie
+
+    expect(last_response.status).to eq(200)
+    expect(JSON.parse(last_response.body).fetch("authenticated")).to eq(false)
+    expect(last_response["set-cookie"]).to include("better-auth.session_token=")
+    expect(last_response["set-cookie"].downcase).to include("max-age=0")
   end
 
   it "does not reuse a helper session across requests without cookies" do

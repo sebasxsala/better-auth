@@ -71,10 +71,11 @@ sub-path.
 Requests that prefer JSON receive the same JSON error shape used by the core
 router.
 
-Custom Sinatra routes resolve sessions from Better Auth cookies. Bearer-heavy
-clients should prefer Better Auth API routes or application-specific auth
-middleware. Attaching Bearer or JWT validation to arbitrary app routes is not
-promised by `require_authentication` alone.
+Sinatra helpers resolve sessions through the core `get-session` API path, so
+Better Auth plugin hooks that affect session lookup, such as the bearer plugin,
+run for `current_user` and `require_authentication`. Helper session lookup may
+emit Better Auth `Set-Cookie` headers when stale cookies need to be cleared or
+session cookies need to be refreshed.
 
 ## Rake Tasks
 

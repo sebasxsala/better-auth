@@ -147,6 +147,31 @@ RSpec.describe BetterAuth::Sinatra::Migration do
     ])
   end
 
+  it "does not split semicolons inside quoted SQL strings" do
+    sql = "INSERT INTO notes (body) VALUES ('a;b');\nCREATE INDEX idx_notes_body ON notes (body);"
+
+    expect(described_class.statements(sql)).to eq([
+      "INSERT INTO notes (body) VALUES ('a;b')",
+      "CREATE INDEX idx_notes_body ON notes (body)"
+    ])
+  end
+
+  it "does not split semicolons inside PostgreSQL dollar-quoted blocks" do
+    sql = <<~SQL
+      DO $$
+      BEGIN
+        RAISE NOTICE 'a;b';
+      END
+      $$;
+      CREATE TABLE audit_log (id text PRIMARY KEY);
+    SQL
+
+    expect(described_class.statements(sql)).to eq([
+      "DO $$\nBEGIN\n  RAISE NOTICE 'a;b';\nEND\n$$",
+      "CREATE TABLE audit_log (id text PRIMARY KEY)"
+    ])
+  end
+
   it "supports SQL connections that expose query instead of exec or execute" do
     connection = BetterAuthSinatraFakeQueryConnection.new
 

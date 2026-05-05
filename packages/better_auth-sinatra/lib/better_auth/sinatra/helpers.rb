@@ -53,18 +53,35 @@ module BetterAuth
 
       def resolve_better_auth_session
         auth = better_auth_auth
-        auth.context.prepare_for_request!(request) if auth.context.respond_to?(:prepare_for_request!)
-        context = BetterAuth::Endpoint::Context.new(
-          path: request.path_info,
-          method: request.request_method,
-          query: request.GET,
-          body: {},
-          params: params,
-          headers: {"cookie" => request.env["HTTP_COOKIE"]},
-          context: auth.context,
-          request: request
+        result = auth.api.get_session(
+          headers: better_auth_request_headers,
+          return_headers: true
         )
-        BetterAuth::Session.find_current(context, disable_refresh: true)
+        apply_better_auth_response_headers(result[:headers] || result["headers"] || {})
+        result[:response] || result["response"]
+      end
+
+      def better_auth_request_headers
+        request.env.each_with_object({}) do |(key, value), headers|
+          case key
+          when "CONTENT_TYPE"
+            headers["content-type"] = value if value
+          when "CONTENT_LENGTH"
+            headers["content-length"] = value if value
+          else
+            next unless key.start_with?("HTTP_")
+
+            headers[key.delete_prefix("HTTP_").downcase.tr("_", "-")] = value
+          end
+        end
+      end
+
+      def apply_better_auth_response_headers(headers)
+        set_cookie = headers["set-cookie"] || headers["Set-Cookie"] || headers[:set_cookie]
+        return if set_cookie.to_s.empty?
+
+        existing = response.headers["set-cookie"].to_s
+        response.headers["set-cookie"] = [existing, set_cookie.to_s].reject(&:empty?).join("\n")
       end
 
       def better_auth_auth
