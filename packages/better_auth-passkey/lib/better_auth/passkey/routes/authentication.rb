@@ -84,6 +84,7 @@ module BetterAuth
             ctx.context.internal_adapter.delete_verification_by_identifier(verification_token)
             ctx.json({session: session, user: user})
           rescue WebAuthn::Error, ArgumentError => error
+            ctx.context.internal_adapter.delete_verification_by_identifier(verification_token) if verification_token
             ctx.context.logger&.error("Failed to verify authentication", error)
             raise APIError.new("BAD_REQUEST", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("AUTHENTICATION_FAILED"))
           end

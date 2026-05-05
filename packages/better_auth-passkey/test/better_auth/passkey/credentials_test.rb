@@ -41,6 +41,23 @@ class BetterAuthPasskeyCredentialsTest < Minitest::Test
     assert_equal "attestation", response.fetch("response").fetch("attestationObject")
   end
 
+  def test_attestation_response_uses_public_response_reader
+    response = Object.new
+    credential = Class.new do
+      define_method(:initialize) { |value| @value = value }
+
+      def response
+        @value
+      end
+
+      def instance_variable_get(_name)
+        raise "private state should not be read"
+      end
+    end.new(response)
+
+    assert_same response, BetterAuth::Passkey::Credentials.attestation_response(credential)
+  end
+
   def test_wire_shape_preserves_upstream_credential_id_key
     assert_equal(
       {"id" => "passkey-1", "credentialID" => "credential-one"},

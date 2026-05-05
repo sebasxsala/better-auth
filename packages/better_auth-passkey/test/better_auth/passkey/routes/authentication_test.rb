@@ -72,4 +72,47 @@ class BetterAuthPasskeyRoutesAuthenticationTest < Minitest::Test
     assert captured.fetch(:verification)
     assert_equal assertion.fetch("id"), captured.fetch(:client_data).fetch("id")
   end
+
+  def test_verify_authentication_invalidates_challenge_after_webauthn_error
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "bad-authentication-route@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    create_passkey(auth, user_id: user.fetch("id"), name: "Bad auth", credential_id: "bad-auth-credential")
+    authentication = auth.api.generate_passkey_authentication_options(return_headers: true)
+    verification = auth.context.adapter.find_many(model: "verification").last
+
+    error = assert_raises(BetterAuth::APIError) do
+      WebAuthn::Credential.stub(:from_get, ->(*) { raise WebAuthn::Error, "bad authentication" }) do
+        auth.api.verify_passkey_authentication(
+          headers: {"cookie" => cookie_header(authentication.fetch(:headers).fetch("set-cookie")), "origin" => ORIGIN},
+          body: {response: {id: "bad-auth-credential", response: {client_data_json: "bad"}}}
+        )
+      end
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("AUTHENTICATION_FAILED"), error.message
+    assert_nil auth.context.adapter.find_one(model: "verification", where: [{field: "id", value: verification.fetch("id")}])
+  end
+
+  def test_verify_authentication_rejects_expired_challenge
+    auth = build_auth
+    authentication = auth.api.generate_passkey_authentication_options(return_headers: true)
+    verification = auth.context.adapter.find_many(model: "verification").last
+    auth.context.adapter.update(
+      model: "verification",
+      where: [{field: "id", value: verification.fetch("id")}],
+      update: {expiresAt: Time.now - 1}
+    )
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_passkey_authentication(
+        headers: {"cookie" => cookie_header(authentication.fetch(:headers).fetch("set-cookie")), "origin" => ORIGIN},
+        body: {response: {id: "missing-credential", response: {client_data_json: "bad"}}}
+      )
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("CHALLENGE_NOT_FOUND"), error.message
+  end
 end
