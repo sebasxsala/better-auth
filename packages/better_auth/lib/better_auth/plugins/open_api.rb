@@ -271,7 +271,7 @@ module BetterAuth
       endpoints.each_with_object({}) do |(key, endpoint, tag), paths|
         next unless endpoint.path
         next if endpoint.metadata[:exclude_from_openapi] || endpoint.metadata[:SERVER_ONLY] || endpoint.metadata[:server_only]
-        next if endpoint.metadata[:hide] && !endpoint.metadata[:openapi]
+        next if endpoint.metadata[:hide] && !open_api_documented_hidden_endpoint?(key, endpoint, tag)
         next if disabled_paths.include?(endpoint.path)
         next if key == :set_password
 
@@ -285,6 +285,10 @@ module BetterAuth
 
     def open_api_path(path)
       path.split("/").map { |part| part.start_with?(":") ? "{#{part.delete_prefix(":")}}" : part }.join("/")
+    end
+
+    def open_api_documented_hidden_endpoint?(key, endpoint, tag)
+      tag == "Default" && [:ok, :error].include?(key) && endpoint.metadata[:openapi]
     end
 
     def open_api_operation(endpoint, method, tag)
