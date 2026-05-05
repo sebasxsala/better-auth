@@ -109,7 +109,7 @@ equivalent.
   <FeatureCard title="Sessions and cookies" status="Supported" body="Signed cookies, cache cookies, stateless defaults, chunking, deletion, revocation routes, secondary storage, dynamic domains, and Redis-backed session storage are implemented." />
   <FeatureCard title="CSRF and trusted origins" status="Supported" body="Origin checks, trusted origins, dynamic trusted origins, baseURL allowed hosts, proxy-aware IP handling, and callback validation are implemented." />
   <FeatureCard title="Database schema and hooks" status="Supported" body="Base schema, plugin schema merge, SQL and Rails migration generation, adapter hooks, and Better Auth logical field names are implemented." />
-  <FeatureCard title="OpenAPI" status="Supported" body="OpenAPI 3.1.1 metadata, route and model inventory, security schemes, servers, request bodies, path params, response schemas, plugin endpoint coverage, and reference HTML are implemented." />
+  <FeatureCard title="OpenAPI" status="Partial" body="The Ruby generator supports OpenAPI 3.1.1 metadata, route/model inventory, security schemes, servers, selected request/response schemas, plugin endpoint coverage, and reference HTML. Exact upstream snapshot parity is still in progress." />
 </div>
 
 ## Storage And Adapters
@@ -135,6 +135,7 @@ equivalent.
   <FeatureCard title="Custom session" status="Supported" body="Custom get-session shaping and optional multi-session list mutation." />
   <FeatureCard title="Device authorization" status="Supported" body="Device/user codes, polling, slow-down, approval, denial, token exchange, and verification URI behavior." />
   <FeatureCard title="Email OTP" status="Supported" body="Send, check, verify, sign-in, password-reset, change-email flows, attempts, storage modes, and rate limits." />
+  <FeatureCard title="Dub" status="Supported" body="Core plugin at packages/better_auth/lib/better_auth/plugins/dub.rb for dub_id lead tracking, optional OAuth linking, injected clients, and non-blocking tracking failures." />
   <FeatureCard title="Expo server integration" status="Supported" body="Server-side authorization proxy, origin override, and trusted deep-link cookie transfer." />
   <FeatureCard title="Generic OAuth" status="Supported" body="Custom OAuth sign-in, callback, link flows, DB/cookie state, dynamic params, issuer checks, and token/userinfo exchange." />
   <FeatureCard title="Have I Been Pwned" status="Supported" body="SHA-1 k-anonymity lookup and protected password routes." />
@@ -148,7 +149,7 @@ equivalent.
   <FeatureCard title="OIDC provider" status="Supported" body="Discovery, prompt/max-age, registration, consent, token flows, userinfo, logout, and client-secret storage modes." />
   <FeatureCard title="One tap" status="Supported" body="Google ID-token callback, account reuse/linking, disabled signup, and session cookies." />
   <FeatureCard title="One-time token" status="Supported" body="Generate/verify, single-use, expiration, cookie behavior, storage modes, and set-ott." />
-  <FeatureCard title="OpenAPI" status="Supported" body="Metadata, route inventory, models, security, request and response schemas, path parameters, and reference HTML. Coverage includes core and plugin endpoints." />
+  <FeatureCard title="OpenAPI" status="Partial" body="Generator support exists for metadata, route inventory, models, security, selected schemas, path parameters, plugin endpoints, and reference HTML. Exact upstream OpenAPI snapshot parity is still in progress." />
   <FeatureCard title="Organization" status="Supported" body="Org/member CRUD, invitations, teams, roles, hooks, permissions, and schema migrations." />
   <FeatureCard title="Passkey" status="Supported" body="WebAuthn registration/authentication, challenge cookies, credential management, and schema output." />
   <FeatureCard title="Phone number" status="Supported" body="OTP send/verify, sign-in/sign-up, updates, reset password, attempt limits, and validation hooks." />
@@ -170,7 +171,6 @@ equivalent.
 
 <div className="grid gap-3 md:grid-cols-2 not-prose my-6">
   <FeatureCard title="Test Utils" status="Not supported" body="There is no public BetterAuth::Plugins.test_utils Ruby plugin yet. Ruby packages use local test helpers and direct auth.api calls." />
-  <FeatureCard title="Dub" status="Not supported" body="No Ruby package or server plugin implementation exists in packages/." />
   <FeatureCard title="Community Plugins" status="Not supported" body="The upstream community plugin page lists JavaScript ecosystem plugins and is not a Ruby support promise." />
   <FeatureCard title="Agent Auth and i18n" status="Not supported" body="No Ruby package or server plugin implementation exists in this repository today." />
 </div>

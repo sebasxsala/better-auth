@@ -28,10 +28,11 @@ the full upstream surface. The implementation plan and parity notes live in:
 
 The short version:
 
-- Core Rack auth and Rails mounting are implemented.
-- Most server-side plugins have Ruby implementations with local tests.
-- Some protocol, adapter, SAML, and Stripe edge-case matrices
-  remain future polish.
+- Core Rack auth and Rails, Sinatra, and Hanami mounting are implemented.
+- Most server-side plugins have Ruby implementations with local tests, including
+  SSO, SCIM, Stripe, API key, OAuth Provider, and Dub.
+- OpenAPI generation is available, but exact upstream snapshot parity remains
+  future polish.
 
 ## Packages
 

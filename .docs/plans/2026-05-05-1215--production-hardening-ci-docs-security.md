@@ -84,7 +84,7 @@ GitHub Actions can filter when a workflow runs using `on.pull_request.paths` and
 
 and rely on package copies under `packages/**` when you bump versions in bulk — **then bumps that only edit `packages/better_auth-foo/.ruby-version` still match `packages/**`**. The main gap is **root-only `/.ruby-version`**: that is why the root `'.ruby-version'` line is the critical one.
 
-- [ ] **Step 1:** Add `'.ruby-version'`, `'docs/**'`, `'.docs/**'` to both `paths` arrays.
+- [x] **Step 1:** Add `'.ruby-version'`, `'docs/**'`, `'.docs/**'` to both `paths` arrays.
 - [ ] **Step 2:** Open a test PR that only touches root `.ruby-version` and confirm on the Checks tab that **`ci`** is scheduled.
 - [ ] **Step 3:** Conventional commit, e.g. `ci: expand workflow path filters for ruby version and docs`.
 
@@ -128,8 +128,8 @@ git commit -m "ci: run workflow on ruby-version and docs path changes"
 
 **Rationale:** Same test coverage as GH for those three gems; workspace `standardrb` will format them too.
 
-- [ ] **Step 1:** Edit `STANDARD_PATHS` and `:ci`.
-- [ ] **Step 2:** Run from repo root:
+- [x] **Step 1:** Edit `STANDARD_PATHS` and `:ci`.
+- [x] **Step 2:** Run from repo root:
 
 ```bash
 cd /Users/sebastiansala/projects/better-auth && bundle exec rake ci
@@ -137,7 +137,7 @@ cd /Users/sebastiansala/projects/better-auth && bundle exec rake ci
 
 **Expected:** Completes without errors (may take longer). If Postgres/MySQL/Redis/Mongo are not available locally, some packages may still fail—optionally document in root README.
 
-- [ ] **Step 3:** Replicate new paths in `task :lint` and `task "lint:fix"` (same `cd` blocks as `:ci`, or extract a helper later for DRY).
+- [x] **Step 3:** Replicate new paths in `task :lint` and `task "lint:fix"` (same `cd` blocks as `:ci`, or extract a helper later for DRY). Also mirrored the packages into `:install` and `:clean`.
 - [ ] **Step 4:** Commit `build: extend workspace rake ci to oauth-provider scim sso`.
 
 ---
@@ -152,7 +152,7 @@ cd /Users/sebastiansala/projects/better-auth && bundle exec rake ci
 sh "REDIS_INTEGRATION=1 BUNDLE_GEMFILE=Gemfile bundle exec rake test:integration"
 ```
 
-- [ ] **Step 1:** Implement the conditional with a short explanatory comment.
+- [x] **Step 1:** Implement the conditional with a short explanatory comment.
 - [ ] **Step 2:** With `docker run -p 6379:6379 redis:7-alpine`, run `REDIS_URL=redis://localhost:6379/0 bundle exec rake ci` and confirm integration runs.
 - [ ] **Step 3:** Commit `build: optionally run redis integration tests from workspace rake`.
 
@@ -182,12 +182,12 @@ end
 
 (Real implementation should reuse mocks from `better_auth-stripe/test/better_auth/plugins/stripe_test.rb` if those stub `stripe_client`.)
 
-- [ ] **Step 1:** Write a test that would pass today with bypass and must fail first.
-- [ ] **Step 2:** Run `cd packages/better_auth-stripe && bundle exec rake test` — expect FAIL.
-- [ ] **Step 3:** Replace `else payload` branch with explicit error.
+- [x] **Step 1:** Write a test that would pass today with bypass and must fail first.
+- [x] **Step 2:** Run focused Stripe webhook test — expected FAIL observed with no `APIError` raised.
+- [x] **Step 3:** Replace `else payload` branch with explicit error.
 - [ ] **Step 4:** Add missing/malformed signature cases using expected `Stripe::StripeError` if tests use real client — follow existing patterns.
-- [ ] **Step 5:** `bundle exec standardrb`, `bundle exec rake test`.
-- [ ] **Step 6:** Document BREAKING in `packages/better_auth-stripe/CHANGELOG.md` if any installs lack `#webhooks`.
+- [x] **Step 5:** `bundle exec standardrb`, `bundle exec rake test`.
+- [x] **Step 6:** Document BREAKING in `packages/better_auth-stripe/CHANGELOG.md` if any installs lack `#webhooks`.
 - [ ] **Step 7:** Commit `fix(stripe): require webhook signature verification path`.
 
 ---
@@ -206,9 +206,9 @@ digested = mode[:hash].call(provided_secret).to_s
 return Crypto.constant_time_compare(digested, stored_secret.to_s)
 ```
 
-- [ ] **Step 1:** Find tests covering `store_client_secret` Hash mode; if missing, add a minimal test with `mode: {hash: proc { |s| Digest::SHA256.hexdigest(s) }}`.
-- [ ] **Step 2:** Implement the change.
-- [ ] **Step 3:** `cd packages/better_auth && bundle exec rake test`
+- [x] **Step 1:** Find tests covering `store_client_secret` Hash mode; added focused regression coverage for the shared OAuthProtocol verifier.
+- [x] **Step 2:** Implement the change.
+- [x] **Step 3:** `cd packages/better_auth && bundle exec rake test`
 - [ ] **Step 4:** Commit `fix(oauth): use constant-time compare for custom hashed client secrets`.
 
 ---
@@ -225,9 +225,9 @@ return Crypto.constant_time_compare(digested, stored_secret.to_s)
 - **A (conservative):** Do not change session shape; document in `docs/content/docs/plugins/api-key.mdx` and README that **`session["token"]` holds the raw key** and the backing store must be safe (no large signed cookies, no logging).
 - **B:** Store only `record["id"]` or an irreversible fingerprint like `tokenFingerprint` if upstream routing only needs correlation — **only** if every code path reading session works without the raw key.
 
-- [ ] **Step 1:** Compare with upstream TS for an informed decision.
-- [ ] **Step 2:** Implement chosen option + regression tests under `packages/better_auth-api-key/test/`.
-- [ ] **Step 3:** CHANGELOG entry if user-visible behavior changes.
+- [x] **Step 1:** Compare with upstream TS for an informed decision. Upstream stores the raw key in `session.token`; Ruby intentionally diverges for lower secret exposure.
+- [x] **Step 2:** Implement chosen option + regression tests under `packages/better_auth-api-key/test/`. Chose **B**: keep session id and expose `tokenFingerprint`, not the raw API key.
+- [x] **Step 3:** CHANGELOG entry if user-visible behavior changes.
 
 ---
 
@@ -242,9 +242,9 @@ return Crypto.constant_time_compare(digested, stored_secret.to_s)
 
 **Radical option:** change default to `:hashed` or similar with a described migration → **semver minor** + upgrade guide.
 
-- [ ] **Step 1:** Explicit decision in PR description.
-- [ ] **Step 2:** Implement warnings or default change + changelog.
-- [ ] **Step 3:** Tests covering the new branch if applicable.
+- [x] **Step 1:** Explicit decision: chose the radical option because the library is not in external use yet.
+- [x] **Step 2:** Implement warnings or default change + changelog. Default is now `"hashed"`.
+- [x] **Step 3:** Tests covering the new branch if applicable.
 
 ---
 
@@ -256,8 +256,8 @@ return Crypto.constant_time_compare(digested, stored_secret.to_s)
 - Tweak **OpenAPI** card to separate “generator supported” vs “upstream OpenAPI snapshot parity”.
 - `docs/content/docs/introduction.mdx` — align tone with SSO/Stripe/OpenAPI rows given current truth in `.docs/features/upstream-parity-matrix.md`.
 
-- [ ] **Step 1:** Edit up to three files in one editorial PR.
-- [ ] **Step 2:** Human proofread via `git diff docs/`.
+- [x] **Step 1:** Edit up to three files in one editorial PR.
+- [x] **Step 2:** Human proofread via `git diff docs/`.
 - [ ] **Step 3:** Commit `docs: align supported-features and introduction with parity matrix`.
 
 ---
@@ -279,7 +279,7 @@ return Crypto.constant_time_compare(digested, stored_secret.to_s)
 
 - `.github/workflows/release.yml` (YAML comment above `verify-ci` step) or `CONTRIBUTING.md`
 
-- [ ] Explicit text: “If you rename the aggregate `ci` job in `ci.yml`, update the lookup in `release.yml`."
+- [x] Explicit text: “If you rename the aggregate `ci` job in `ci.yml`, update the lookup in `release.yml`."
 
 ---
 
