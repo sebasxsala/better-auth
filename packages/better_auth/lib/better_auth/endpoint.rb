@@ -12,9 +12,10 @@ module BetterAuth
       :metadata,
       :options,
       :use,
+      :disable_body,
       :handler
 
-    def initialize(path: nil, method: nil, body_schema: nil, query_schema: nil, params_schema: nil, headers_schema: nil, metadata: {}, use: [], &handler)
+    def initialize(path: nil, method: nil, body_schema: nil, query_schema: nil, params_schema: nil, headers_schema: nil, metadata: {}, use: [], disable_body: false, &handler)
       @path = path
       @methods = Array(method || "*").map { |value| value.to_s.upcase }
       @body_schema = body_schema
@@ -26,6 +27,7 @@ module BetterAuth
       apply_open_api_schemas!
       @options = endpoint_options
       @use = Array(use)
+      @disable_body = !!disable_body
       @handler = handler || ->(_ctx) {}
     end
 
@@ -57,6 +59,7 @@ module BetterAuth
         query: query_schema,
         params: params_schema,
         headers: headers_schema,
+        disableBody: disable_body,
         metadata: metadata
       }.compact
     end
@@ -249,19 +252,21 @@ module BetterAuth
         :body,
         :params,
         :headers,
+        :raw_body,
         :context,
         :request,
         :status,
         :returned,
         :response_headers
 
-      def initialize(path:, method:, query:, body:, params:, headers:, context:, request: nil)
+      def initialize(path:, method:, query:, body:, params:, headers:, context:, request: nil, raw_body: nil)
         @path = path
         @method = method.to_s.upcase
         @query = query || {}
         @body = body || {}
         @params = params || {}
         @headers = normalize_headers(headers || {})
+        @raw_body = raw_body
         @context = context
         @request = request
         @status = 200

@@ -85,6 +85,18 @@ class BetterAuthPluginsOpenAPITest < Minitest::Test
     refute_includes social_body.fetch(:required), "idToken"
   end
 
+  def test_open_api_uses_upstream_31_nullable_get_session_response_shape
+    auth = build_auth(plugins: [BetterAuth::Plugins.open_api])
+
+    schema = auth.api.generate_open_api_schema
+    get_session = schema.dig(:paths, "/get-session", :post, :responses, "200", :content, "application/json", :schema)
+
+    assert_equal ["object", "null"], get_session[:type]
+    assert_nil get_session[:nullable]
+    assert_equal({type: "object", "$ref": "#/components/schemas/Session"}, get_session.dig(:properties, :session))
+    assert_equal({type: "object", "$ref": "#/components/schemas/User"}, get_session.dig(:properties, :user))
+  end
+
   def test_core_route_open_api_metadata_lives_on_endpoints
     {
       account_info: "accountInfo",

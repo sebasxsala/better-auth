@@ -344,7 +344,7 @@ module BetterAuth
         raise APIError.new("UNAUTHORIZED", message: "invalid_client")
       end
 
-      def store_code(store, code:, client_id:, redirect_uri:, session:, scopes:, code_challenge: nil, code_challenge_method: nil, nonce: nil, reference_id: nil, auth_time: nil)
+      def store_code(store, code:, client_id:, redirect_uri:, session:, scopes:, code_challenge: nil, code_challenge_method: nil, nonce: nil, reference_id: nil, auth_time: nil, expires_in: 600)
         store[:codes][code] = {
           client_id: client_id,
           redirect_uri: redirect_uri,
@@ -355,7 +355,7 @@ module BetterAuth
           nonce: nonce,
           reference_id: reference_id,
           auth_time: auth_time || session_auth_time(session),
-          expires_at: Time.now + 600
+          expires_at: Time.now + expires_in.to_i
         }
       end
 
@@ -403,7 +403,7 @@ module BetterAuth
         true
       end
 
-      def issue_tokens(ctx, store, model:, client:, session:, scopes:, include_refresh: false, issuer: nil, jwt_audience: nil, access_token_expires_in: 3600, refresh_token_expires_in: 2_592_000, id_token_signer: nil, prefix: {}, audience: nil, grant_type: nil, custom_token_response_fields: nil, custom_access_token_claims: nil, custom_id_token_claims: nil, jwt_access_token: false, pairwise_secret: nil, nonce: nil, auth_time: nil, reference_id: nil, filter_id_token_claims_by_scope: false)
+      def issue_tokens(ctx, store, model:, client:, session:, scopes:, include_refresh: false, issuer: nil, jwt_audience: nil, access_token_expires_in: 3600, refresh_token_expires_in: 2_592_000, id_token_expires_in: 3600, id_token_signer: nil, prefix: {}, audience: nil, grant_type: nil, custom_token_response_fields: nil, custom_access_token_claims: nil, custom_id_token_claims: nil, jwt_access_token: false, use_jwt_plugin: false, pairwise_secret: nil, nonce: nil, auth_time: nil, reference_id: nil, filter_id_token_claims_by_scope: false)
         data = stringify_keys(session || {})
         user = stringify_keys(data["user"] || data[:user] || {})
         session_data = stringify_keys(data["session"] || data[:session] || {})
@@ -417,7 +417,7 @@ module BetterAuth
         scope = scope_string(scopes)
         expires_at = Time.now + access_token_expires_in.to_i
         access_token = if jwt_access_token && audience
-          build_jwt_access_token(ctx, client_data, user, session_data, scope, audience, issuer || issuer(ctx), expires_at, custom_access_token_claims, reference_id: token_reference_id)
+          build_jwt_access_token(ctx, client_data, user, session_data, scope, audience, issuer || issuer(ctx), expires_at, custom_access_token_claims, reference_id: token_reference_id, use_jwt_plugin: use_jwt_plugin)
         else
           apply_prefix(access_token_value, prefix, :access_token)
         end
@@ -478,7 +478,7 @@ module BetterAuth
         }
         response[:audience] = audience if audience
         response[:refresh_token] = refresh_token if refresh_token
-        response[:id_token] = id_token(user.merge("id" => subject), client_data["clientId"], issuer || issuer(ctx), jwt_audience || client_data["clientId"], ctx: ctx, signer: id_token_signer, session_id: session_data["id"], include_sid: !!client_data["enableEndSession"], nonce: nonce, auth_time: token_auth_time, custom_claims: custom_id_token_claims, scopes: parse_scopes(scope), client: client_data, filter_claims_by_scope: filter_id_token_claims_by_scope) if parse_scopes(scope).include?("openid")
+        response[:id_token] = id_token(user.merge("id" => subject), client_data["clientId"], issuer || issuer(ctx), jwt_audience || client_data["clientId"], ctx: ctx, signer: id_token_signer, session_id: session_data["id"], include_sid: !!client_data["enableEndSession"], nonce: nonce, auth_time: token_auth_time, custom_claims: custom_id_token_claims, scopes: parse_scopes(scope), client: client_data, filter_claims_by_scope: filter_id_token_claims_by_scope, expires_in: id_token_expires_in, use_jwt_plugin: use_jwt_plugin) if parse_scopes(scope).include?("openid")
         if custom_token_response_fields.respond_to?(:call)
           extra = custom_token_response_fields.call({grant_type: grant_type, user: user.empty? ? nil : user, scopes: parse_scopes(scope), metadata: stringify_keys(client_data["metadata"] || {})})
           response.merge!(stringify_keys(extra).reject { |key, _value| standard_token_response_field?(key) }.transform_keys(&:to_sym)) if extra.is_a?(Hash)
@@ -486,7 +486,7 @@ module BetterAuth
         response
       end
 
-      def refresh_tokens(ctx, store, model:, client:, refresh_token:, scopes: nil, issuer: nil, access_token_expires_in: 3600, refresh_token_expires_in: 2_592_000, id_token_signer: nil, prefix: {}, audience: nil, custom_token_response_fields: nil, custom_access_token_claims: nil, custom_id_token_claims: nil, jwt_access_token: false, pairwise_secret: nil, filter_id_token_claims_by_scope: false)
+      def refresh_tokens(ctx, store, model:, client:, refresh_token:, scopes: nil, issuer: nil, access_token_expires_in: 3600, refresh_token_expires_in: 2_592_000, id_token_expires_in: 3600, id_token_signer: nil, prefix: {}, audience: nil, custom_token_response_fields: nil, custom_access_token_claims: nil, custom_id_token_claims: nil, jwt_access_token: false, use_jwt_plugin: false, pairwise_secret: nil, filter_id_token_claims_by_scope: false)
         refresh_token_value = strip_prefix(refresh_token, prefix, :refresh_token)
         data = refresh_token_value ? store[:refresh_tokens][refresh_token_value] : nil
         raise APIError.new("BAD_REQUEST", message: "invalid_grant") unless data
@@ -527,7 +527,9 @@ module BetterAuth
           custom_access_token_claims: custom_access_token_claims,
           custom_id_token_claims: custom_id_token_claims,
           jwt_access_token: jwt_access_token,
+          use_jwt_plugin: use_jwt_plugin,
           pairwise_secret: pairwise_secret,
+          id_token_expires_in: id_token_expires_in,
           auth_time: data["authTime"],
           reference_id: data["referenceId"],
           filter_id_token_claims_by_scope: filter_id_token_claims_by_scope
@@ -544,13 +546,13 @@ module BetterAuth
         data
       end
 
-      def build_jwt_access_token(ctx, client, user, session, scope, audience, issuer_value, expires_at, custom_claims, reference_id: nil)
+      def build_jwt_access_token(ctx, client, user, session, scope, audience, issuer_value, expires_at, custom_claims, reference_id: nil, use_jwt_plugin: false)
         scopes = parse_scopes(scope)
         extra = if custom_claims.respond_to?(:call)
           custom_claims.call({user: user.empty? ? nil : user, scopes: scopes, resource: audience, reference_id: reference_id, metadata: stringify_keys(client["metadata"] || {})})
         end
         payload = (extra.is_a?(Hash) ? stringify_keys(extra) : {}).merge(
-          "sub" => user["id"],
+          "sub" => user["id"] || client["clientId"],
           "aud" => audience,
           "azp" => client["clientId"],
           "scope" => scope,
@@ -562,10 +564,15 @@ module BetterAuth
           "iat" => Time.now.to_i,
           "exp" => expires_at.to_i
         ).compact
+        if use_jwt_plugin
+          signed = sign_oauth_jwt(ctx, payload, issuer: issuer_value, audience: audience)
+          return signed if signed
+        end
+
         ::JWT.encode(payload, ctx.context.secret, "HS256")
       end
 
-      def userinfo(store, authorization, additional_claim: nil, prefix: {}, jwt_secret: nil)
+      def userinfo(store, authorization, additional_claim: nil, prefix: {}, jwt_secret: nil, ctx: nil, issuer: nil)
         if authorization.to_s.strip.empty?
           raise APIError.new(
             "UNAUTHORIZED",
@@ -575,7 +582,7 @@ module BetterAuth
         end
         token = authorization.to_s.delete_prefix("Bearer ").strip
         record = token_record(store, token, prefix: prefix)
-        return jwt_userinfo(token, jwt_secret, additional_claim: additional_claim) unless record
+        return jwt_userinfo(token, jwt_secret, additional_claim: additional_claim, ctx: ctx, issuer: issuer) unless record
         user = stringify_keys(record["user"])
         scopes = parse_scopes(record["scopes"])
         raise userinfo_openid_scope_error unless scopes.include?("openid")
@@ -600,8 +607,12 @@ module BetterAuth
         response
       end
 
-      def jwt_userinfo(token, jwt_secret, additional_claim: nil)
-        payload = ::JWT.decode(token, jwt_secret.to_s, true, algorithm: "HS256").first
+      def jwt_userinfo(token, jwt_secret, additional_claim: nil, ctx: nil, issuer: nil)
+        payload = if ctx
+          verify_oauth_jwt(ctx, token, issuer: issuer || issuer(ctx), hs256_secret: jwt_secret)
+        else
+          ::JWT.decode(token, jwt_secret.to_s, true, algorithm: "HS256").first
+        end
         scopes = parse_scopes(payload["scope"])
         raise userinfo_openid_scope_error unless scopes.include?("openid")
 
@@ -707,7 +718,7 @@ module BetterAuth
         end
       end
 
-      def id_token(user, client_id, issuer_value, audience, ctx: nil, signer: nil, session_id: nil, include_sid: false, nonce: nil, auth_time: nil, custom_claims: nil, scopes: [], client: {}, filter_claims_by_scope: false)
+      def id_token(user, client_id, issuer_value, audience, ctx: nil, signer: nil, session_id: nil, include_sid: false, nonce: nil, auth_time: nil, custom_claims: nil, scopes: [], client: {}, filter_claims_by_scope: false, expires_in: 3600, use_jwt_plugin: false)
         requested_scopes = parse_scopes(scopes)
         payload = {
           sub: user["id"],
@@ -733,10 +744,15 @@ module BetterAuth
         end
         return signer.call(ctx, payload) if signer.respond_to?(:call)
 
+        if use_jwt_plugin && ctx
+          signed = sign_oauth_jwt(ctx, payload, issuer: issuer_value, audience: audience)
+          return signed if signed
+        end
+
         Crypto.sign_jwt(
           payload,
           id_token_hs256_key(ctx, client_id, stringify_keys(client)["clientSecret"] || stringify_keys(client)["client_secret"]),
-          expires_in: 3600
+          expires_in: expires_in
         )
       end
 
@@ -745,6 +761,35 @@ module BetterAuth
 
         label = client_id.to_s.empty? ? "better-auth" : client_id.to_s
         OpenSSL::HMAC.hexdigest("SHA256", ctx.context.secret.to_s, "oidc.id_token.#{label}")
+      end
+
+      def jwt_plugin_options(ctx)
+        plugin = ctx.context.options.plugins.find { |entry| entry.id == "jwt" }
+        plugin&.options
+      end
+
+      def oauth_jwt_config(ctx, issuer:, audience:)
+        options = jwt_plugin_options(ctx)
+        return nil unless options
+
+        BetterAuth::Plugins.deep_merge(options, jwt: {issuer: issuer, audience: audience})
+      end
+
+      def sign_oauth_jwt(ctx, payload, issuer:, audience:)
+        config = oauth_jwt_config(ctx, issuer: issuer, audience: audience)
+        return nil unless config
+
+        BetterAuth::Plugins.sign_jwt_payload(ctx, stringify_keys(payload), config)
+      end
+
+      def verify_oauth_jwt(ctx, token, issuer:, hs256_secret:)
+        payload = ::JWT.decode(token.to_s, nil, false).first
+        audience = payload["aud"]
+        config = oauth_jwt_config(ctx, issuer: issuer, audience: audience.is_a?(Array) ? audience.first : audience)
+        verified = BetterAuth::Plugins.verify_jwt_token(ctx, token, config) if config
+        return verified if verified
+
+        ::JWT.decode(token, hs256_secret.to_s, true, algorithm: "HS256").first
       end
 
       def standard_token_response_field?(key)

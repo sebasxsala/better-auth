@@ -74,6 +74,33 @@ class BetterAuthRouterTest < Minitest::Test
     assert_equal({ok: true}, JSON.parse(body.join, symbolize_names: true))
   end
 
+  def test_disable_body_endpoint_receives_raw_body_without_parsing
+    captured = []
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      plugins: [
+        {
+          id: "test",
+          endpoints: {
+            raw: BetterAuth::Endpoint.new(path: "/raw", method: "POST", disable_body: true) do |ctx|
+              captured << {body: ctx.body, raw_body: ctx.raw_body}
+              {ok: true}
+            end
+          }
+        }
+      ]
+    )
+    payload = {"event" => "checkout.session.completed", "nested" => {"amount" => 123}}
+
+    status, _headers, body = auth.call(rack_env("POST", "/api/auth/raw", body: payload))
+
+    assert_equal 200, status
+    assert_equal({ok: true}, JSON.parse(body.join, symbolize_names: true))
+    assert_equal({}, captured.fetch(0).fetch(:body))
+    assert_equal JSON.generate(payload), captured.fetch(0).fetch(:raw_body)
+  end
+
   def test_rack_requests_prepare_context_before_endpoint_execution
     captured = []
     auth = BetterAuth.auth(
