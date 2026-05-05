@@ -7,14 +7,25 @@ class BetterAuthRailsFakeRelation
 
   attr_reader :records
   attr_reader :where_calls
+  attr_reader :or_calls
+  attr_reader :update_all_calls
+  attr_reader :delete_all_calls
 
   def initialize(records, where_calls = [])
     @records = records
     @where_calls = where_calls
+    @or_calls = []
+    @update_all_calls = []
+    @delete_all_calls = 0
   end
 
   def where(*args)
     where_calls << args
+    self
+  end
+
+  def or(other)
+    or_calls << other
     self
   end
 
@@ -46,11 +57,13 @@ class BetterAuthRailsFakeRelation
     records.length
   end
 
-  def update_all(*)
+  def update_all(*args)
+    update_all_calls << args.first
     records.length
   end
 
   def delete_all
+    @delete_all_calls += 1
     records.length
   end
 end
@@ -121,6 +134,18 @@ RSpec.describe BetterAuth::Rails::ActiveRecordAdapter do
     expect(user).to include("id" => "user-1", "email" => "ada@example.com", "emailVerified" => false)
   end
 
+  it "rejects truthy input:false fields on direct create unless IDs are forced" do
+    expect {
+      adapter.create(model: "user", data: {name: "Ada", email: "ada@example.com", emailVerified: true})
+    }.to raise_error(BetterAuth::APIError, /emailVerified is not allowed to be set/)
+  end
+
+  it "raises a schema error for missing required create fields before database constraints" do
+    expect {
+      adapter.create(model: "user", data: {name: "Ada"})
+    }.to raise_error(BetterAuth::APIError, /email is required/)
+  end
+
   it "preserves false where values for boolean predicates" do
     relation = BetterAuthRailsFakeRelation.new([])
     adapter.send(:model_class, "user").relation = relation
@@ -128,6 +153,122 @@ RSpec.describe BetterAuth::Rails::ActiveRecordAdapter do
     adapter.find_many(model: "user", where: [{"field" => "emailVerified", "value" => false}])
 
     expect(relation.where_calls).to include([{"email_verified" => false}])
+  end
+
+  it "escapes LIKE wildcards in contains predicates" do
+    relation = BetterAuthRailsFakeRelation.new([])
+    adapter.send(:model_class, "user").relation = relation
+
+    adapter.find_many(model: "user", where: [{field: "email", operator: "contains", value: "a%_b"}])
+
+    expect(relation.where_calls).to include(["email LIKE ? ESCAPE ?", "%a\\%\\_b%", "\\"])
+  end
+
+  it "combines OR where clauses into a single ActiveRecord relation" do
+    relation = BetterAuthRailsFakeRelation.new([])
+    adapter.send(:model_class, "user").relation = relation
+
+    adapter.find_many(
+      model: "user",
+      where: [
+        {field: "email", value: "ada@example.com"},
+        {field: "email", value: "grace@example.com", connector: "OR"}
+      ]
+    )
+
+    expect(relation.or_calls.length).to eq(1)
+  end
+
+  it "coerces date strings and JSON-like output values" do
+    plugin = BetterAuth::Plugin.new(
+      id: "typed",
+      schema: {
+        typedRecord: {
+          model_name: "typed_records",
+          fields: {
+            id: {type: "string", required: true},
+            metadata: {type: "json", required: false},
+            tags: {type: "string[]", required: false},
+            createdAt: {type: "date", required: true}
+          }
+        }
+      }
+    )
+    typed_config = BetterAuth::Configuration.new(secret: secret, database: :memory, plugins: [plugin])
+    typed_adapter = described_class.new(typed_config, connection: connection)
+    typed_adapter.send(:model_class, "typedRecord").relation = BetterAuthRailsFakeRelation.new(
+      [
+        BetterAuthRailsFakeRecord.new(
+          "id" => "typed-1",
+          "metadata" => "{\"enabled\":true}",
+          "tags" => "[\"ruby\",\"rails\"]",
+          "created_at" => "2026-05-04T12:00:00Z"
+        )
+      ]
+    )
+
+    record = typed_adapter.find_one(model: "typedRecord", where: [{field: "id", value: "typed-1"}])
+
+    expect(record.fetch("metadata")).to eq("enabled" => true)
+    expect(record.fetch("tags")).to eq(["ruby", "rails"])
+    expect(record.fetch("createdAt")).to be_a(Time)
+  end
+
+  it "updates every row matching a predicate and returns the first matched row" do
+    relation = BetterAuthRailsFakeRelation.new(
+      [
+        BetterAuthRailsFakeRecord.new("id" => "user-1", "email" => "ada@example.com", "email_verified" => false),
+        BetterAuthRailsFakeRecord.new("id" => "user-2", "email" => "ada@example.com", "email_verified" => false)
+      ]
+    )
+    adapter.send(:model_class, "user").relation = relation
+
+    updated = adapter.update(model: "user", where: [{field: "email", value: "ada@example.com"}], update: {name: "Ada"})
+
+    expect(updated).to include("id" => "user-1")
+    expect(relation.update_all_calls).to include(a_hash_including("name" => "Ada"))
+  end
+
+  it "deletes every row matching a predicate" do
+    relation = BetterAuthRailsFakeRelation.new(
+      [
+        BetterAuthRailsFakeRecord.new("id" => "user-1", "email" => "ada@example.com", "email_verified" => false),
+        BetterAuthRailsFakeRecord.new("id" => "user-2", "email" => "ada@example.com", "email_verified" => false)
+      ]
+    )
+    adapter.send(:model_class, "user").relation = relation
+
+    adapter.delete(model: "user", where: [{field: "email", value: "ada@example.com"}])
+
+    expect(relation.delete_all_calls).to eq(1)
+  end
+
+  it "honors custom generated IDs from advanced database options" do
+    generated_config = BetterAuth::Configuration.new(
+      secret: secret,
+      database: :memory,
+      advanced: {database: {generate_id: -> { "fixed-id" }}}
+    )
+    generated_adapter = described_class.new(generated_config, connection: connection)
+    generated_adapter.send(:model_class, "user").relation = BetterAuthRailsFakeRelation.new([])
+
+    user = generated_adapter.create(model: "user", data: {name: "Ada", email: "ada@example.com"})
+
+    expect(user.fetch("id")).to eq("fixed-id")
+  end
+
+  it "honors uuid generated IDs from advanced database options" do
+    generated_config = BetterAuth::Configuration.new(
+      secret: secret,
+      database: :memory,
+      advanced: {database: {generate_id: "uuid"}}
+    )
+    generated_adapter = described_class.new(generated_config, connection: connection)
+    generated_adapter.send(:model_class, "user").relation = BetterAuthRailsFakeRelation.new([])
+
+    user = generated_adapter.create(model: "user", data: {name: "Ada", email: "ada@example.com"})
+
+    expect(user.fetch("id")).to match(/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/)
   end
 
   it "wraps work in an ActiveRecord transaction" do

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-05
+
+### Fixed
+
+- Aligned Hanami route mounting, action helpers, install generator, and migration generator behavior with the shared Rack and schema semantics.
+- Hardened the Sequel adapter for upstream-shaped filtering, joins, falsey values, and limit behavior.
+
 ## [0.1.1] - 2026-04-29
 
 ### Fixed

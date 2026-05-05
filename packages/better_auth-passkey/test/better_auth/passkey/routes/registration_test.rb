@@ -82,6 +82,58 @@ class BetterAuthPasskeyRoutesRegistrationTest < Minitest::Test
     assert_equal BetterAuth::BASE_ERROR_CODES.fetch("SESSION_NOT_FRESH"), error.message
   end
 
+  def test_verify_registration_requires_fresh_session_by_default
+    auth = build_auth(session: {fresh_age: 1})
+    cookie = sign_up_cookie(auth, email: "stale-verify-registration-route@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    session = auth.context.adapter.find_many(model: "session", where: [{field: "userId", value: user.fetch("id")}]).first
+    auth.context.adapter.update(
+      model: "session",
+      where: [{field: "id", value: session.fetch("id")}],
+      update: {createdAt: Time.now}
+    )
+    client = WebAuthn::FakeClient.new(ORIGIN)
+    registration = auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie}, return_headers: true)
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+    auth.context.adapter.update(
+      model: "session",
+      where: [{field: "id", value: session.fetch("id")}],
+      update: {createdAt: Time.now - 120}
+    )
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_passkey_registration(
+        headers: {"cookie" => [cookie, cookie_header(registration.fetch(:headers).fetch("set-cookie"))].join("; "), "origin" => ORIGIN},
+        body: {response: response}
+      )
+    end
+
+    assert_equal 403, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES.fetch("SESSION_NOT_FRESH"), error.message
+  end
+
+  def test_verify_registration_maps_webauthn_error_to_bad_request_and_invalidates_challenge
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "bad-registration-route@example.com")
+    client = WebAuthn::FakeClient.new(ORIGIN)
+    registration = auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie}, return_headers: true)
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+    verification = auth.context.adapter.find_many(model: "verification").last
+
+    error = assert_raises(BetterAuth::APIError) do
+      WebAuthn::Credential.stub(:from_create, ->(*) { raise WebAuthn::Error, "bad registration" }) do
+        auth.api.verify_passkey_registration(
+          headers: {"cookie" => [cookie, cookie_header(registration.fetch(:headers).fetch("set-cookie"))].join("; "), "origin" => ORIGIN},
+          body: {response: response}
+        )
+      end
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("FAILED_TO_VERIFY_REGISTRATION"), error.message
+    assert_nil auth.context.adapter.find_one(model: "verification", where: [{field: "id", value: verification.fetch("id")}])
+  end
+
   def test_registration_extensions_are_omitted_when_absent
     auth = build_auth
     cookie = sign_up_cookie(auth, email: "no-registration-extensions@example.com")
@@ -129,5 +181,26 @@ class BetterAuthPasskeyRoutesRegistrationTest < Minitest::Test
     assert_equal "after-registration-route@example.com", captured.fetch(:after_user).fetch(:name)
     assert_equal response.fetch("id"), captured.fetch(:after_client_data).fetch("id")
     assert_equal "after-route-context", captured.fetch(:after_context)
+  end
+
+  def test_verify_registration_rejects_duplicate_credential_id
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "duplicate-registration-route@example.com")
+    client = WebAuthn::FakeClient.new(ORIGIN)
+    registration = auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie}, return_headers: true)
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    create_passkey(auth, user_id: user.fetch("id"), name: "Existing", credential_id: response.fetch("id"))
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_passkey_registration(
+        headers: {"cookie" => [cookie, cookie_header(registration.fetch(:headers).fetch("set-cookie"))].join("; "), "origin" => ORIGIN},
+        body: {response: response}
+      )
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("PREVIOUSLY_REGISTERED"), error.message
+    assert_equal 1, auth.context.adapter.find_many(model: "passkey", where: [{field: "credentialID", value: response.fetch("id")}]).length
   end
 end

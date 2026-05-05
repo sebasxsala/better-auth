@@ -85,7 +85,15 @@ Ruby uses hashes for the upstream TypeScript contracts:
 - `resolve_user` receives `{ ctx:, context: }` and must return at least `id` and `name`; it may also return `display_name` and `email`.
 - Registration `after_verification` receives `{ ctx:, verification:, user:, client_data:, context: }`.
 - Authentication `after_verification` receives `{ ctx:, verification:, client_data: }`.
+- Callback `verification` values are objects from the Ruby `webauthn` gem. They are not the TypeScript `VerifiedRegistrationResponse` or `VerifiedAuthenticationResponse` structs from upstream's Node implementation.
 - Passkey records use upstream wire keys including `userId`, `credentialID`, `publicKey`, `deviceType`, `backedUp`, `createdAt`, and optional `aaguid`.
+
+### Ruby vs TypeScript callback shapes
+
+Callback parity is behavioral at the HTTP JSON boundary, not a static export of
+the TypeScript interfaces from `@better-auth/passkey`. Treat
+`data[:verification]` as the Ruby `webauthn` verification result or hash-like
+object produced by this gem, not as a SimpleWebAuthn DTO.
 
 ## WebAuthn extensions
 
@@ -115,10 +123,12 @@ The Ruby plugin tracks Better Auth `v1.6.9` upstream behavior. A few wire-shape 
 - `excludeCredentials` entries (registration options) are emitted as `{id, transports?}` to match upstream's `@simplewebauthn/server` output. `allowCredentials` (authentication options) still includes `type: "public-key"` to mirror upstream's authentication wire shape.
 - `transports` is omitted entirely from credential descriptors when the stored value is missing or empty (rather than emitting an empty array).
 - The default storage table is named `passkeys` (plural) in the SQL adapters, mapped from the upstream `passkey` model. Custom SQL adapters that translate the `passkey` model name continue to work.
+- `credentialID` is unique in the Ruby schema. This is intentional hardening beyond upstream v1.6.9 and prevents the same WebAuthn credential from being stored more than once.
 - `rp_id` resolution falls back to `URI.parse(base_url).host` (port stripped). When `base_url` is empty or unparseable, `rp_id` defaults to `"localhost"`.
 - For passkey-first registration, the `after_verification` callback may return `{ user_id: nil }` or `{ user_id: "" }` to leave the resolved user unchanged. Returning any other non-empty-string value (integer, boolean, etc.) raises `RESOLVED_USER_INVALID`.
 - `update_passkey` accepts an empty-string `name` to match upstream `z.string()`. Missing or non-string `name` still raises `VALIDATION_ERROR`.
 - Cross-user `delete_passkey` raises `UNAUTHORIZED` with the `PASSKEY_NOT_FOUND` message, mirroring upstream's `requireResourceOwnership` middleware behavior when only `notFoundError` is configured.
+- Existing databases should deduplicate historical `credential_id` values before adding the unique constraint during migration.
 
 ## Notes
 

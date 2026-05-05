@@ -10,6 +10,7 @@ module BetterAuth
           BetterAuth::Endpoint.new(path: "/subscription/billing-portal", method: "POST") do |ctx|
             session = BetterAuth::Routes.current_session(ctx)
             body = BetterAuth::Plugins.normalize_hash(ctx.body)
+            BetterAuth::Stripe::Middleware.validate_trusted_urls!(ctx, body, return_url: "returnUrl")
             customer_type = BetterAuth::Plugins.stripe_customer_type!(body)
             reference_id = BetterAuth::Plugins.stripe_reference_id!(ctx, session, customer_type, body[:reference_id], config)
             BetterAuth::Plugins.stripe_authorize_reference!(ctx, session, reference_id, "billing-portal", customer_type, BetterAuth::Plugins.stripe_subscription_options(config), explicit: body.key?(:reference_id))

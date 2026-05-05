@@ -65,4 +65,29 @@ class BetterAuthAPIKeyListRouteTest < Minitest::Test
     assert_empty overflow[:apiKeys]
     assert_equal sorted[:total], overflow[:total]
   end
+
+  def test_list_route_returns_parsed_metadata_and_defers_legacy_metadata_migration
+    deferred = []
+    auth = build_api_key_auth(
+      enable_metadata: true,
+      default_key_length: 12,
+      advanced: {background_tasks: {handler: ->(task) { deferred << task }}}
+    )
+    cookie = sign_up_cookie(auth, email: "list-route-metadata-migration-key@example.com")
+    created = auth.api.create_api_key(headers: {"cookie" => cookie}, body: {name: "legacy", metadata: {plan: "free"}})
+    legacy = JSON.generate(JSON.generate({plan: "legacy"}))
+    auth.context.adapter.update(model: "apikey", where: [{field: "id", value: created[:id]}], update: {metadata: legacy})
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie})
+    entry = listed.fetch(:apiKeys).find { |key| key.fetch(:id) == created[:id] }
+    stored_before_task = auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: created[:id]}])
+
+    assert_equal({"plan" => "legacy"}, entry.fetch(:metadata))
+    assert_equal legacy, stored_before_task.fetch("metadata")
+    assert_equal 1, deferred.length
+
+    deferred.each(&:call)
+    stored_after_task = auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: created[:id]}])
+    assert_equal({"plan" => "legacy"}, JSON.parse(stored_after_task.fetch("metadata")))
+  end
 end

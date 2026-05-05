@@ -389,6 +389,72 @@ class BetterAuthPluginsSSOTest < Minitest::Test
     assert_equal 409, conflict.status_code
   end
 
+  def test_saml_sign_out_hook_deletes_saml_session_verification_records
+    auth = build_auth(saml: {enableSingleLogout: true})
+    cookie = sign_up_cookie(auth, "saml-signout@example.com")
+    token = cookie[/better-auth\.session_token=([^;]+)/, 1].to_s.rpartition(".").first
+    saml_session_key = "#{BetterAuth::Plugins::SSO_SAML_SESSION_KEY_PREFIX}saml:name-id"
+    lookup_key = "#{BetterAuth::Plugins::SSO_SAML_SESSION_BY_ID_KEY_PREFIX}#{token}"
+
+    auth.context.internal_adapter.create_verification_value(
+      identifier: saml_session_key,
+      value: JSON.generate({sessionToken: token}),
+      expiresAt: Time.now + 300
+    )
+    auth.context.internal_adapter.create_verification_value(
+      identifier: lookup_key,
+      value: saml_session_key,
+      expiresAt: Time.now + 300
+    )
+
+    auth.api.sign_out(headers: {"cookie" => cookie})
+
+    assert_nil auth.context.internal_adapter.find_verification_value(lookup_key)
+    assert_nil auth.context.internal_adapter.find_verification_value(saml_session_key)
+  end
+
+  def test_sso_after_hook_assigns_organization_by_verified_domain_after_generic_oauth_callback
+    callback_plugin = BetterAuth::Plugin.new(
+      id: "callback-test",
+      endpoints: {
+        callback_test: BetterAuth::Endpoint.new(path: "/callback/test", method: "GET") do |ctx|
+          user = ctx.context.internal_adapter.create_user(email: "member@example.com", name: "Domain Member", emailVerified: true)
+          session = ctx.context.internal_adapter.create_session(user.fetch("id"))
+          BetterAuth::Cookies.set_session_cookie(ctx, {session: session, user: user})
+          ctx.json({ok: true})
+        end
+      }
+    )
+    auth = build_auth(
+      domain_verification: {enabled: true},
+      plugins: [BetterAuth::Plugins.organization, BetterAuth::Plugins.sso(domain_verification: {enabled: true}), callback_plugin]
+    )
+    owner_cookie = sign_up_cookie(auth, "owner@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Domain Org", slug: "domain-org"})
+    owner = auth.context.internal_adapter.find_user_by_email("owner@example.com").fetch(:user)
+    auth.context.adapter.create(
+      model: "ssoProvider",
+      data: {
+        providerId: "domain-provider",
+        issuer: "https://idp.example.com",
+        domain: "example.com",
+        userId: owner.fetch("id"),
+        organizationId: organization.fetch("id"),
+        domainVerified: true
+      }
+    )
+
+    auth.api.callback_test
+    member = auth.context.internal_adapter.find_user_by_email("member@example.com").fetch(:user)
+    membership = auth.context.adapter.find_one(
+      model: "member",
+      where: [{field: "organizationId", value: organization.fetch("id")}, {field: "userId", value: member.fetch("id")}]
+    )
+
+    assert membership
+    assert_equal "member", membership.fetch("role")
+  end
+
   private
 
   def build_auth(plugin_options = nil, plugins: nil, **kwargs)

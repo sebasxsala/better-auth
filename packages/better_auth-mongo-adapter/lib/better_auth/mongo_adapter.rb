@@ -49,7 +49,8 @@ module BetterAuth
         pipeline << {"$project" => projection_for(model, select, join)} if select && !select.empty?
         pipeline << {"$sort" => {sort_field(model, sort_by) => sort_direction(sort_by)}} if sort_by
         pipeline << {"$skip" => offset.to_i} if offset
-        pipeline << {"$limit" => limit.to_i} if limit
+        effective_limit = limit.nil? ? default_find_many_limit : limit.to_i
+        pipeline << {"$limit" => effective_limit} if effective_limit.positive?
 
         collection_for(model)
           .aggregate(pipeline, session_options)
@@ -103,6 +104,26 @@ module BetterAuth
         return 0 unless row
 
         (row["total"] || row[:total] || 0).to_i
+      end
+
+      def ensure_indexes!
+        Schema.auth_tables(options).flat_map do |model, table|
+          table.fetch(:fields).filter_map do |field, attributes|
+            next if field == "id"
+            next unless attributes[:unique] || attributes[:index]
+
+            collection = collection_for(model)
+            key = storage_field(model, field)
+            index_options = attributes[:unique] ? {unique: true} : {}
+            collection.indexes.create_one({key => 1}, index_options)
+            {
+              collection: collection_name(model),
+              field: field,
+              keys: {key => 1},
+              unique: attributes[:unique] == true
+            }
+          end
+        end
       end
 
       def transaction
@@ -161,24 +182,40 @@ module BetterAuth
         clauses = Array(where)
         return {} if clauses.empty?
 
-        clauses.each_with_index.reduce(nil) do |filter, (clause, index)|
-          condition = condition_for(model, clause)
-          next condition if index.zero?
-
-          if fetch_key(clause, :connector).to_s.upcase == "OR"
-            {"$or" => [filter, condition]}
+        conditions = clauses.map do |clause|
+          connector = if fetch_key(clause, :connector).to_s.upcase == "OR"
+            "OR"
           else
-            {"$and" => [filter, condition]}
+            "AND"
           end
+          {condition: condition_for(model, clause), connector: connector}
         end
+        return conditions.first.fetch(:condition) if conditions.one?
+
+        result = {}
+        and_conditions = conditions.select { |entry| entry.fetch(:connector) == "AND" }.map { |entry| entry.fetch(:condition) }
+        or_conditions = conditions.select { |entry| entry.fetch(:connector) == "OR" }.map { |entry| entry.fetch(:condition) }
+        result["$and"] = and_conditions if and_conditions.any?
+        result["$or"] = or_conditions if or_conditions.any?
+        result
+      end
+
+      def default_find_many_limit
+        value = options.advanced.dig(:database, :default_find_many_limit)
+        return 100 if value.nil?
+
+        Integer(value)
+      rescue ArgumentError, TypeError
+        100
+      end
+
+      def array_operator_values(value)
+        value.is_a?(Array) ? value : [value]
       end
 
       def condition_for(model, clause)
         operator = (fetch_key(clause, :operator) || "eq").to_s.downcase
         value = fetch_key(clause, :value)
-        if operator == "in" && !value.is_a?(Array)
-          raise MongoAdapterError.new("UNSUPPORTED_OPERATOR", "Value must be an array")
-        end
 
         field = resolve_field(model, fetch_key(clause, :field))
         attributes = fields_for(model).fetch(field)
@@ -192,9 +229,9 @@ module BetterAuth
         when "eq"
           (insensitive && value.is_a?(String)) ? regex_condition(key, value, :eq, insensitive: true) : {key => store_value(field, value, attributes, strict_id: true)}
         when "in"
-          (insensitive && value.is_a?(Array)) ? insensitive_in_condition(key, value) : {key => {"$in" => Array(value).map { |entry| store_value(field, entry, attributes, strict_id: true) }}}
+          (insensitive && value.is_a?(Array)) ? insensitive_in_condition(key, value) : {key => {"$in" => array_operator_values(value).map { |entry| store_value(field, entry, attributes, strict_id: true) }}}
         when "not_in"
-          (insensitive && value.is_a?(Array)) ? insensitive_not_in_condition(key, value) : {key => {"$nin" => Array(value).map { |entry| store_value(field, entry, attributes, strict_id: true) }}}
+          (insensitive && value.is_a?(Array)) ? insensitive_not_in_condition(key, value) : {key => {"$nin" => array_operator_values(value).map { |entry| store_value(field, entry, attributes, strict_id: true) }}}
         when "ne"
           (insensitive && value.is_a?(String)) ? {key => {"$not" => regex_for(value, :eq, insensitive: true)}} : {key => {"$ne" => store_value(field, value, attributes, strict_id: true)}}
         when "gt", "gte", "lt", "lte"
@@ -242,9 +279,10 @@ module BetterAuth
           local_field = storage_field_for_join(model, config.fetch(:from))
           foreign_field = storage_field_for_join(join_model, config.fetch(:to))
           relation = config[:relation]
-          limit = config[:limit]
+          limit = config.key?(:limit) ? config[:limit] : nil
+          effective_limit = limit.nil? ? default_find_many_limit : limit.to_i
           unique = relation == "one-to-one" || config[:unique]
-          should_limit = !unique && limit && limit.to_i.positive?
+          should_limit = !unique && effective_limit.positive?
 
           lookup = if should_limit
             {
@@ -253,7 +291,7 @@ module BetterAuth
                 "let" => {"localFieldValue" => "$#{local_field}"},
                 "pipeline" => [
                   {"$match" => {"$expr" => {"$eq" => ["$#{foreign_field}", "$$localFieldValue"]}}},
-                  {"$limit" => limit.to_i}
+                  {"$limit" => effective_limit}
                 ],
                 "as" => join_model
               }

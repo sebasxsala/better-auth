@@ -10,6 +10,7 @@ module BetterAuth
           BetterAuth::Endpoint.new(path: "/subscription/success", method: "GET") do |ctx|
             query = BetterAuth::Plugins.normalize_hash(ctx.query)
             callback = query[:callback_url] || "/"
+            BetterAuth::Stripe::Middleware.validate_trusted_url!(ctx, callback, "callbackURL")
             checkout_session_id = query[:checkout_session_id]
             subscription_id = query[:subscription_id]
             if checkout_session_id

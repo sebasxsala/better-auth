@@ -7,9 +7,11 @@ module BetterAuth
     def oauth_introspect_endpoint(config)
       Endpoint.new(path: "/oauth2/introspect", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
         client = OAuthProtocol.authenticate_client!(ctx, "oauthClient", store_client_secret: config[:store_client_secret], prefix: config[:prefix])
+        client_id = OAuthProtocol.stringify_keys(client)["clientId"]
         body = OAuthProtocol.stringify_keys(ctx.body)
-        token = OAuthProtocol.find_token_by_hint(config[:store], body["token"].to_s, body["token_type_hint"], prefix: config[:prefix])
-        active = token && !token["revoked"] && (!token["expiresAt"] || token["expiresAt"] > Time.now)
+        token_value = body["token"].to_s.sub(/\ABearer\s+/i, "")
+        token = OAuthProtocol.find_token_by_hint(config[:store], token_value, body["token_type_hint"], prefix: config[:prefix])
+        active = token && token["clientId"].to_s == client_id.to_s && !token["revoked"] && (!token["expiresAt"] || token["expiresAt"] > Time.now)
         if active
           next ctx.json({
             active: true,
@@ -24,7 +26,7 @@ module BetterAuth
           })
         end
 
-        jwt = oauth_introspect_jwt_access_token(ctx, client, body["token"].to_s)
+        jwt = oauth_introspect_jwt_access_token(ctx, client, token_value)
         ctx.json(jwt || {active: false})
       end
     end
@@ -34,7 +36,7 @@ module BetterAuth
     end
 
     def oauth_introspect_jwt_access_token(ctx, client, token)
-      payload = ::JWT.decode(token, ctx.context.secret, true, algorithm: "HS256").first
+      payload = OAuthProtocol.verify_oauth_jwt(ctx, token, issuer: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx)), hs256_secret: ctx.context.secret)
       client_data = OAuthProtocol.stringify_keys(client)
       return nil unless payload["azp"] == client_data["clientId"]
 

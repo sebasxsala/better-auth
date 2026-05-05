@@ -883,6 +883,38 @@ class BetterAuthRoutesSocialTest < Minitest::Test
     assert_equal issued_code_verifier, callback_code_verifier
   end
 
+  def test_link_social_redirect_flow_passes_custom_scopes_to_provider
+    captured_scopes = nil
+    auth = build_auth(
+      social_providers: {
+        github: {
+          id: "github",
+          create_authorization_url: lambda do |data|
+            captured_scopes = data[:scopes]
+            "https://github.example/oauth?state=#{URI.encode_www_form_component(data[:state])}"
+          end,
+          validate_authorization_code: ->(_data) { raise "unexpected callback" },
+          get_user_info: ->(_tokens) { raise "unexpected user info" }
+        }
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "link-scopes@example.com")
+
+    result = auth.api.link_social(
+      headers: {"cookie" => cookie},
+      body: {
+        provider: "github",
+        callbackURL: "/linked",
+        disableRedirect: true,
+        scopes: ["repo", "user:email"]
+      }
+    )
+
+    assert_equal ["repo", "user:email"], captured_scopes
+    assert_equal false, result[:redirect]
+    assert_includes result[:url], "github.example/oauth"
+  end
+
   def test_link_social_redirect_flow_links_account_when_email_casing_differs
     auth = build_auth(
       social_providers: {

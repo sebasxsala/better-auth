@@ -6,11 +6,15 @@ module BetterAuth
 
     def oauth_consent_endpoint(config)
       Endpoint.new(path: "/oauth2/consent", method: "POST") do |ctx|
-        current_session = Routes.current_session(ctx)
+        current_session = Routes.current_session(ctx, allow_nil: true)
         body = OAuthProtocol.stringify_keys(ctx.body)
         consent = config[:store][:consents].delete(body["consent_code"].to_s)
         raise APIError.new("BAD_REQUEST", message: "invalid consent_code") unless consent
         raise APIError.new("BAD_REQUEST", message: "expired consent_code") if consent[:expires_at] <= Time.now
+        raise APIError.new("UNAUTHORIZED", message: "session required") unless current_session
+        unless current_session[:user]["id"].to_s == consent[:session][:user]["id"].to_s
+          raise APIError.new("FORBIDDEN", message: "consent session mismatch")
+        end
 
         query = consent[:query]
         if body["accept"] == false || body["accept"].to_s == "false"
@@ -24,7 +28,7 @@ module BetterAuth
           raise APIError.new("BAD_REQUEST", message: "invalid_scope")
         end
 
-        reference_id = oauth_consent_reference(config, current_session, granted_scopes) || consent[:reference_id]
+        reference_id = consent[:reference_id]
         oauth_store_consent(ctx, consent[:client], consent[:session], granted_scopes, reference_id)
         redirect = oauth_authorization_redirect(ctx, config, query, consent[:session], consent[:client], granted_scopes, reference_id: reference_id)
         ctx.json({redirectURI: redirect})
@@ -44,7 +48,8 @@ module BetterAuth
         code_challenge: query["code_challenge"],
         code_challenge_method: query["code_challenge_method"],
         nonce: query["nonce"],
-        reference_id: reference_id || client_reference_id
+        reference_id: reference_id || client_reference_id,
+        expires_in: config[:code_expires_in]
       )
       OAuthProtocol.redirect_uri_with_params(query["redirect_uri"], code: code, state: query["state"], iss: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx)))
     end

@@ -11,7 +11,6 @@ module BetterAuth
           issuer: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx)),
           authorization_endpoint: "#{base}/oauth2/authorize",
           token_endpoint: "#{base}/oauth2/token",
-          registration_endpoint: "#{base}/oauth2/register",
           introspection_endpoint: "#{base}/oauth2/introspect",
           revocation_endpoint: "#{base}/oauth2/revoke",
           response_types_supported: ["code"],
@@ -24,6 +23,7 @@ module BetterAuth
           authorization_response_iss_parameter_supported: true,
           scopes_supported: config.dig(:advertised_metadata, :scopes_supported) || config[:scopes]
         }
+        metadata[:registration_endpoint] = "#{base}/oauth2/register" if config[:allow_dynamic_client_registration]
         metadata[:jwks_uri] = oauth_jwks_uri(config) if oauth_jwks_uri(config)
         ctx.json(metadata, headers: oauth_metadata_headers)
       end
@@ -40,7 +40,6 @@ module BetterAuth
           issuer: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx)),
           authorization_endpoint: "#{base}/oauth2/authorize",
           token_endpoint: "#{base}/oauth2/token",
-          registration_endpoint: "#{base}/oauth2/register",
           introspection_endpoint: "#{base}/oauth2/introspect",
           revocation_endpoint: "#{base}/oauth2/revoke",
           response_types_supported: ["code"],
@@ -60,6 +59,7 @@ module BetterAuth
           prompt_values_supported: oauth_prompt_values,
           claims_supported: config.dig(:advertised_metadata, :claims_supported) || config[:claims] || []
         }
+        metadata[:registration_endpoint] = "#{base}/oauth2/register" if config[:allow_dynamic_client_registration]
         metadata[:jwks_uri] = oauth_jwks_uri(config) if oauth_jwks_uri(config)
         ctx.json(metadata, headers: oauth_metadata_headers)
       end
@@ -85,6 +85,8 @@ module BetterAuth
       return ["HS256"] if config[:disable_jwt_plugin]
 
       jwt_plugin = ctx.context.options.plugins.find { |plugin| plugin.id == "jwt" }
+      return ["HS256"] unless jwt_plugin
+
       alg = config.dig(:jwt, :jwks, :key_pair_config, :alg) ||
         jwt_plugin&.options&.dig(:jwks, :key_pair_config, :alg)
       alg ? [alg] : ["EdDSA"]

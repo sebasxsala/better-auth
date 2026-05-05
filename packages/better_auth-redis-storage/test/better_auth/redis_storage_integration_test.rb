@@ -179,6 +179,43 @@ class RedisStorageIntegrationTest < Minitest::Test
     assert_equal 1, stored.fetch("count")
   end
 
+  def test_scan_count_round_trip_lists_keys
+    storage = BetterAuth::RedisStorage.new(
+      client: @client,
+      key_prefix: "#{@prefix_root}:scan:",
+      scan_count: 50
+    )
+    storage.clear
+    storage.set("x", "1")
+    storage.set("y", "2")
+
+    assert_equal ["x", "y"], storage.list_keys.sort
+  ensure
+    storage&.clear
+  end
+
+  def test_atomic_clear_logically_hides_previous_generation
+    storage = BetterAuth::RedisStorage.new(
+      client: @client,
+      key_prefix: "#{@prefix_root}:atomic:",
+      scan_count: 50,
+      atomic_clear: true
+    )
+    storage.clear
+    storage.set("x", "1")
+
+    storage.clear
+    @client.set("#{@prefix_root}:atomic:v1:late", "stale")
+
+    assert_nil storage.get("x")
+    assert_nil storage.get("late")
+    assert_equal [], storage.list_keys
+    storage.set("x", "2")
+    assert_equal "2", storage.get("x")
+  ensure
+    storage&.clear
+  end
+
   private
 
   def isolated_storage(name)

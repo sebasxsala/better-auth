@@ -1,8 +1,14 @@
 # frozen_string_literal: true
 
+require "securerandom"
+require "json"
+require "time"
+
 module BetterAuth
   module Rails
     class ActiveRecordAdapter < BetterAuth::Adapters::Base
+      include BetterAuth::Adapters::JoinSupport
+
       begin
         require "active_record" unless defined?(::ActiveRecord)
       rescue LoadError
@@ -45,16 +51,16 @@ module BetterAuth
         model = model.to_s
         relation = relation_for(model, where: where, sort_by: sort_by, limit: limit, offset: offset, select: select, join: join)
         records = relation.map { |record| normalize_record(model, record, join: join) }
-        collection_join?(model, join) ? aggregate_collection_joins(records) : records
+        collection_join?(model, join) ? aggregate_collection_joins(model, records, join) : records
       end
 
       def update(model:, where:, update:)
         model = model.to_s
-        record = relation_for(model, where: where).first
-        return nil unless record
+        existing = find_one(model: model, where: where, select: ["id"])
+        return nil unless existing
 
-        record.update!(physical_attributes(model, transform_input(model, update, "update", true)))
-        normalize_record(model, record)
+        update_many(model: model, where: where, update: update)
+        find_one(model: model, where: [{field: "id", value: existing.fetch("id")}])
       end
 
       def update_many(model:, where:, update:, returning: false)
@@ -72,9 +78,7 @@ module BetterAuth
       end
 
       def delete(model:, where:)
-        model = model.to_s
-        record = relation_for(model, where: where).first
-        record&.destroy!
+        delete_many(model: model, where: where)
         nil
       end
 
@@ -117,12 +121,19 @@ module BetterAuth
       end
 
       def apply_where(model, relation, where)
-        Array(where).reduce(relation) do |scope, clause|
-          field = storage_key(fetch_key(clause, :field))
-          column = storage_field(model, field)
-          operator = (fetch_key(clause, :operator) || "eq").to_s
-          value = fetch_key(clause, :value)
-          apply_operator(scope, column, operator, value)
+        clauses = Array(where)
+        return relation if clauses.empty?
+
+        if model_class(model).respond_to?(:arel_table)
+          expression = clauses.each_with_index.reduce(nil) do |combined, (clause, index)|
+            current = where_expression(model, clause)
+            next current if index.zero?
+
+            (fetch_key(clause, :connector).to_s.upcase == "OR") ? combined.or(current) : combined.and(current)
+          end
+          relation.where(expression)
+        else
+          apply_where_with_relation_or(model, relation, clauses)
         end
       end
 
@@ -135,10 +146,49 @@ module BetterAuth
         when "gte" then scope.where("#{column} >= ?", value)
         when "lt" then scope.where("#{column} < ?", value)
         when "lte" then scope.where("#{column} <= ?", value)
-        when "contains" then scope.where("#{column} LIKE ?", "%#{value}%")
-        when "starts_with" then scope.where("#{column} LIKE ?", "#{value}%")
-        when "ends_with" then scope.where("#{column} LIKE ?", "%#{value}")
+        when "contains" then scope.where("#{column} LIKE ? ESCAPE ?", "%#{escape_like(value)}%", "\\")
+        when "starts_with" then scope.where("#{column} LIKE ? ESCAPE ?", "#{escape_like(value)}%", "\\")
+        when "ends_with" then scope.where("#{column} LIKE ? ESCAPE ?", "%#{escape_like(value)}", "\\")
         else scope.where(column => value)
+        end
+      end
+
+      def apply_where_with_relation_or(model, relation, clauses)
+        clauses.each_with_index.reduce(nil) do |combined, (clause, index)|
+          field = storage_key(fetch_key(clause, :field))
+          column = storage_field(model, field)
+          operator = (fetch_key(clause, :operator) || "eq").to_s
+          value = fetch_key(clause, :value)
+          current = apply_operator(relation, column, operator, value)
+          next current if index.zero?
+
+          (fetch_key(clause, :connector).to_s.upcase == "OR") ? combined.or(current) : apply_operator(combined, column, operator, value)
+        end
+      end
+
+      def where_expression(model, clause)
+        field = storage_key(fetch_key(clause, :field))
+        attributes = schema_for(model).fetch(:fields).fetch(field)
+        column = model_class(model).arel_table[storage_field(model, field)]
+        operator = (fetch_key(clause, :operator) || "eq").to_s
+        value = fetch_key(clause, :value)
+        mode = (fetch_key(clause, :mode) || "sensitive").to_s
+        insensitive = mode == "insensitive" && attributes[:type] == "string" && !value.nil?
+        predicate_column = insensitive ? lower(column) : column
+        predicate_value = insensitive ? lower_value(value) : value
+
+        case operator
+        when "in" then predicate_column.in(Array(predicate_value))
+        when "not_in" then predicate_column.not_in(Array(predicate_value))
+        when "ne" then predicate_column.not_eq(predicate_value)
+        when "gt" then column.gt(value)
+        when "gte" then column.gteq(value)
+        when "lt" then column.lt(value)
+        when "lte" then column.lteq(value)
+        when "contains" then predicate_column.matches("%#{escape_like(predicate_value)}%", "\\")
+        when "starts_with" then predicate_column.matches("#{escape_like(predicate_value)}%", "\\")
+        when "ends_with" then predicate_column.matches("%#{escape_like(predicate_value)}", "\\")
+        else predicate_column.eq(predicate_value)
         end
       end
 
@@ -162,6 +212,10 @@ module BetterAuth
 
           value_provided = input.key?(field)
           value = input[field]
+          if value_provided && attributes[:input] == false && value && !force_allow_id
+            raise APIError.new("BAD_REQUEST", message: "#{field} is not allowed to be set")
+          end
+
           if !value_provided && action == "create" && attributes.key?(:default_value)
             value = resolve_default(attributes[:default_value])
             value_provided = true
@@ -169,9 +223,12 @@ module BetterAuth
             value = resolve_default(attributes[:on_update])
             value_provided = true
           end
-          output[field] = value if value_provided
+          if !value_provided && action == "create" && attributes[:required]
+            raise APIError.new("BAD_REQUEST", message: "#{field} is required") unless field == "id"
+          end
+          output[field] = coerce_value(value, attributes) if value_provided
         end
-        output["id"] = SecureRandom.urlsafe_base64(16) if action == "create" && !output.key?("id")
+        output["id"] = generated_id if action == "create" && !output.key?("id")
         output
       end
 
@@ -187,7 +244,7 @@ module BetterAuth
         attributes = record.respond_to?(:attributes) ? record.attributes : record
         normalized = schema_for(model).fetch(:fields).each_with_object({}) do |(field, config), output|
           column = config[:field_name] || physical_name(field)
-          output[field] = attributes[column] if attributes.key?(column)
+          output[field] = coerce_output_value(attributes[column], config) if attributes.key?(column)
         end
         attach_joins(model, normalized, record, join)
       end
@@ -289,7 +346,9 @@ module BetterAuth
             from: reference.fetch(:field).to_s,
             to: foreign_key,
             collection: !unique,
-            owner: :base
+            owner: :base,
+            relation: unique ? "one-to-one" : "one-to-many",
+            unique: unique
           }
         end
 
@@ -306,16 +365,10 @@ module BetterAuth
           from: foreign_key,
           to: reference.fetch(:field).to_s,
           collection: false,
-          owner: :join
+          owner: :join,
+          relation: "one-to-one",
+          unique: true
         }
-      end
-
-      def reference_model_matches?(attributes, model)
-        reference = attributes[:references]
-        return false unless reference
-
-        reference_model = reference[:model] || reference["model"]
-        reference_model.to_s == model.to_s || reference_model.to_s == table_for(model)
       end
 
       def association_defined?(klass, association)
@@ -334,11 +387,7 @@ module BetterAuth
         physical_name(model).split("_").map(&:capitalize).join
       end
 
-      def collection_join?(model, join)
-        model == "user" && join&.keys&.any? { |join_model| join_model.to_s == "account" }
-      end
-
-      def aggregate_collection_joins(records)
+      def aggregate_collection_joins(_model, records, _join)
         records
       end
 
@@ -377,6 +426,62 @@ module BetterAuth
 
       def resolve_default(value)
         value.respond_to?(:call) ? value.call : value
+      end
+
+      def coerce_value(value, attributes)
+        return value if value.nil?
+        return Time.parse(value) if attributes[:type] == "date" && value.is_a?(String)
+
+        value
+      end
+
+      def coerce_output_value(value, attributes)
+        return value if value.nil?
+        return coerce_boolean(value) if attributes[:type] == "boolean"
+        return Time.parse(value) if attributes[:type] == "date" && value.is_a?(String)
+        return parse_json_value(value) if json_like?(attributes) && value.is_a?(String)
+
+        value
+      end
+
+      def coerce_boolean(value)
+        return value if value == true || value == false
+        return false if value == 0 || value.to_s == "0" || value.to_s.downcase == "f" || value.to_s.downcase == "false"
+        return true if value == 1 || value.to_s == "1" || value.to_s.downcase == "t" || value.to_s.downcase == "true"
+
+        value
+      end
+
+      def json_like?(attributes)
+        %w[json string[] number[]].include?(attributes[:type])
+      end
+
+      def parse_json_value(value)
+        JSON.parse(value)
+      rescue JSON::ParserError
+        value
+      end
+
+      def lower(node)
+        Arel::Nodes::NamedFunction.new("LOWER", [node])
+      end
+
+      def lower_value(value)
+        return value.map { |entry| entry.nil? ? entry : entry.to_s.downcase } if value.is_a?(Array)
+
+        value.to_s.downcase
+      end
+
+      def generated_id
+        generator = options.advanced.dig(:database, :generate_id) || options.advanced.dig(:database, :generateId)
+        return generator.call.to_s if generator.respond_to?(:call)
+        return SecureRandom.uuid if generator.to_s == "uuid"
+
+        SecureRandom.hex(16)
+      end
+
+      def escape_like(value)
+        value.to_s.gsub(/[\\%_]/) { |match| "\\#{match}" }
       end
     end
   end

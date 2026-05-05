@@ -18,6 +18,7 @@ class BetterAuthSSOSAMLStateTest < Minitest::Test
     end
 
     assert_equal 400, error.status_code
+    assert_instance_of BetterAuth::APIError, error
     assert_match(/callbackURL is required/, error.message)
   end
 

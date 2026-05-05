@@ -95,4 +95,161 @@ class BetterAuthAPIKeyAdapterTest < Minitest::Test
     storage.set(reference_key, "{")
     assert_equal [], BetterAuth::APIKey::Adapter.safe_parse_id_list(storage.get(reference_key))
   end
+
+  def test_reference_list_helpers_accept_raw_array_values_from_custom_storage
+    assert_equal ["first", "second"], BetterAuth::APIKey::Adapter.safe_parse_id_list(["first", "second"])
+  end
+
+  def test_populate_reference_batches_fallback_cache_writes_when_supported
+    storage = BatchTrackingStorage.new
+    auth = build_api_key_auth(storage: "secondary-storage", secondary_storage: storage, fallback_to_database: true, default_key_length: 12)
+    ctx = Struct.new(:context).new(auth.context)
+    now = Time.now
+    records = [
+      {
+        "id" => "first-key",
+        "key" => "hashed-first",
+        "referenceId" => "user-batch",
+        "createdAt" => now,
+        "updatedAt" => now,
+        "expiresAt" => nil
+      },
+      {
+        "id" => "second-key",
+        "key" => "hashed-second",
+        "referenceId" => "user-batch",
+        "createdAt" => now,
+        "updatedAt" => now,
+        "expiresAt" => nil
+      }
+    ]
+    config = BetterAuth::APIKey::Configuration.normalize(
+      storage: "secondary-storage",
+      fallback_to_database: true
+    )
+
+    BetterAuth::APIKey::Adapter.populate_reference(ctx, "user-batch", records, config)
+
+    assert_equal 1, storage.write_groups.length
+    assert_equal [
+      "api-key:hashed-first",
+      "api-key:by-id:first-key",
+      "api-key:hashed-second",
+      "api-key:by-id:second-key",
+      "api-key:by-ref:user-batch"
+    ], storage.write_groups.first
+  end
+
+  def test_list_for_reference_warns_on_corrupt_reference_index_json
+    storage = APIKeyTestSupport::MemoryStorage.new
+    ref = "user-corrupt"
+    storage.set(BetterAuth::APIKey::Adapter.storage_key_by_reference(ref), "{bad")
+
+    warnings = []
+    logger = Object.new
+    logger.define_singleton_method(:warn) { |msg| warnings << msg }
+
+    auth = build_api_key_auth(
+      storage: "secondary-storage",
+      secondary_storage: storage,
+      fallback_to_database: false,
+      default_key_length: 12
+    )
+    auth.context.define_singleton_method(:logger) { logger }
+
+    ctx = Struct.new(:context).new(auth.context)
+    config = BetterAuth::APIKey::Configuration.normalize({})[:configurations].first
+    config = config.merge(storage: "secondary-storage", fallback_to_database: false)
+
+    result = BetterAuth::APIKey::Adapter.list_for_reference(ctx, ref, config)
+
+    assert_equal [], result
+    assert_equal 1, warnings.length
+    assert_match(/Corrupt api-key reference index/i, warnings.first)
+  end
+
+  def test_deferred_update_record_logs_failures
+    deferred = []
+    errors = []
+    auth = build_api_key_auth(
+      defer_updates: true,
+      advanced: {background_tasks: {handler: ->(task) { deferred << task }}}
+    )
+    logger = Object.new
+    logger.define_singleton_method(:error) { |message, *| errors << message }
+    auth.context.define_singleton_method(:logger) { logger }
+    auth.context.adapter.define_singleton_method(:update) do |**|
+      raise StandardError, "simulated update failure"
+    end
+    ctx = Struct.new(:context).new(auth.context)
+    config = BetterAuth::APIKey::Configuration.normalize(defer_updates: true)
+    record = {"id" => "deferred-key", "remaining" => 2}
+
+    BetterAuth::APIKey::Adapter.update_record(ctx, record, {remaining: 1}, config, defer: true)
+    deferred.each(&:call)
+
+    assert_equal 1, errors.length
+    assert_match(/simulated update failure/, errors.first)
+  end
+
+  def test_deferred_record_delete_logs_failures
+    deferred = []
+    errors = []
+    auth = build_api_key_auth(
+      defer_updates: true,
+      advanced: {background_tasks: {handler: ->(task) { deferred << task }}}
+    )
+    logger = Object.new
+    logger.define_singleton_method(:error) { |message, *| errors << message }
+    auth.context.define_singleton_method(:logger) { logger }
+    auth.context.adapter.define_singleton_method(:delete) do |**|
+      raise StandardError, "simulated delete failure"
+    end
+    ctx = Struct.new(:context).new(auth.context)
+    config = BetterAuth::APIKey::Configuration.normalize(defer_updates: true)
+    record = {"id" => "deferred-delete-key", "key" => "hashed", "referenceId" => "user-id"}
+
+    BetterAuth::APIKey::Adapter.schedule_record_delete(ctx, record, config)
+    deferred.each(&:call)
+
+    assert_equal 1, errors.length
+    assert_match(/simulated delete failure/, errors.first)
+  end
+
+  class BatchTrackingStorage < APIKeyTestSupport::MemoryStorage
+    attr_reader :write_groups
+
+    def initialize
+      super
+      @write_groups = []
+      @current_group = nil
+    end
+
+    def set(key, value, ttl = nil)
+      record_write(key)
+      super
+    end
+
+    def delete(key)
+      record_write(key)
+      super
+    end
+
+    def batch
+      @current_group = []
+      yield
+      @write_groups << @current_group unless @current_group.empty?
+      @current_group = nil
+    end
+
+    private
+
+    def record_write(key)
+      if @current_group
+        @current_group << key
+      else
+        @write_groups << [key]
+      end
+    end
+  end
 end

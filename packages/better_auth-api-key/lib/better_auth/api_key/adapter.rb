@@ -61,10 +61,14 @@ module BetterAuth
         if config[:storage] == "secondary-storage"
           begin
             storage_instance = storage(config, ctx.context)
-            ids = JSON.parse((storage_instance&.get(storage_key_by_reference(reference_id)) || storage_instance&.get("api-key:user:#{reference_id}")).to_s)
+            raw_ids = storage_instance&.get(storage_key_by_reference(reference_id)) || storage_instance&.get("api-key:user:#{reference_id}")
+            ids = parse_id_list!(raw_ids)
             records = ids.filter_map { |id| find_by_id(ctx, id, config) }
             return records unless records.empty? && config[:fallback_to_database]
-          rescue JSON::ParserError, NoMethodError
+          rescue JSON::ParserError, NoMethodError => error
+            if ctx.context.respond_to?(:logger) && ctx.context.logger.respond_to?(:warn)
+              ctx.context.logger.warn("[API KEY PLUGIN] Corrupt api-key reference index for #{reference_id.inspect}: #{error.class}: #{error.message}")
+            end
             return [] unless config[:fallback_to_database]
           end
         end
@@ -88,7 +92,7 @@ module BetterAuth
 
         if defer && config[:defer_updates] && BetterAuth::Plugins.api_key_background_tasks?(ctx)
           scheduled = record.merge(update.transform_keys { |key| BetterAuth::Schema.storage_key(key) })
-          ctx.context.run_in_background(performer)
+          BetterAuth::APIKey::Utils.run_background_task(ctx, "Deferred API key update", performer)
           scheduled
         else
           performer.call
@@ -103,7 +107,7 @@ module BetterAuth
       def schedule_record_delete(ctx, record, config)
         task = -> { delete_record(ctx, record, config) }
         if config[:defer_updates] && BetterAuth::APIKey::Utils.background_tasks?(ctx)
-          ctx.context.run_in_background(task)
+          BetterAuth::APIKey::Utils.run_background_task(ctx, "Deferred API key delete", task)
         else
           task.call
         end
@@ -122,6 +126,11 @@ module BetterAuth
         end
         set(ctx, updated, config) if config[:storage] == "secondary-storage"
         updated
+      end
+
+      def legacy_metadata_migration_needed?(record)
+        parsed = BetterAuth::APIKey::Utils.decode_json(record["metadata"])
+        parsed.is_a?(Hash) && BetterAuth::APIKey::Utils.encode_json(parsed) != record["metadata"]
       end
 
       def storage(config, context = nil)
@@ -198,11 +207,19 @@ module BetterAuth
 
       def safe_parse_id_list(raw)
         return [] if raw.nil?
+        return raw.dup if raw.is_a?(Array)
+
+        parse_id_list!(raw)
+      rescue JSON::ParserError
+        []
+      end
+
+      def parse_id_list!(raw)
+        return [] if raw.nil?
+        return raw.dup if raw.is_a?(Array)
 
         parsed = JSON.parse(raw.to_s)
         parsed.is_a?(Array) ? parsed : []
-      rescue JSON::ParserError
-        []
       end
 
       def batch(storage_instance, &block)
@@ -217,17 +234,25 @@ module BetterAuth
         storage_instance = storage(config, ctx.context)
         return unless storage_instance
 
-        ids = []
-        records.each do |record|
-          serialized = JSON.generate(storage_record(record))
-          expires_at = BetterAuth::APIKey::Utils.normalize_time(record["expiresAt"])
-          ttl = expires_at ? [(expires_at - Time.now).to_i, 0].max : nil
-          storage_instance.set(storage_key_by_hash(record["key"]), serialized, ttl)
-          storage_instance.set(storage_key_by_id(record["id"]), serialized, ttl)
-          ids << record["id"]
+        batch(storage_instance) do
+          ids = []
+          records.each do |record|
+            serialized = JSON.generate(storage_record(record))
+            expires_at = BetterAuth::APIKey::Utils.normalize_time(record["expiresAt"])
+            ttl = expires_at ? [(expires_at - Time.now).to_i, 0].max : nil
+            storage_instance.set(storage_key_by_hash(record["key"]), serialized, ttl)
+            storage_instance.set(storage_key_by_id(record["id"]), serialized, ttl)
+            ids << record["id"]
+          end
+          reference_key = storage_key_by_reference(reference_id)
+          ids.empty? ? storage_instance.delete(reference_key) : storage_instance.set(reference_key, JSON.generate(ids))
         end
-        reference_key = storage_key_by_reference(reference_id)
-        ids.empty? ? storage_instance.delete(reference_key) : storage_instance.set(reference_key, JSON.generate(ids))
+      end
+
+      def batch_migrate_legacy_metadata(ctx, records, config)
+        return records unless config[:storage] == "database" || config[:fallback_to_database]
+
+        records.map { |record| migrate_legacy_metadata(ctx, record, config) }
       end
 
       def storage_record(record)

@@ -2,8 +2,11 @@
 
 require "json"
 require_relative "../../test_helper"
+require_relative "../../support/fake_mongo"
 
 class BetterAuthMongoDBAdapterTest < Minitest::Test
+  include BetterAuthMongoAdapterTestSupport
+
   SECRET = "test-secret-that-is-long-enough-for-validation"
 
   def setup
@@ -14,6 +17,47 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
 
   def test_mongodb_adapter_can_be_constructed_with_minimal_database
     assert_instance_of BetterAuth::Adapters::MongoDB, BetterAuth::Adapters::MongoDB.new(@config, database: @database)
+  end
+
+  def test_mongodb_adapter_ensures_schema_indexes_explicitly
+    plugin = {
+      id: "profile-indexes",
+      schema: {
+        profile: {
+          modelName: "profiles",
+          fields: {
+            ownerId: {type: "string", required: true, fieldName: "owner_ref", references: {model: "user", field: "id"}, index: true},
+            handle: {type: "string", required: true, fieldName: "profile_handle", unique: true}
+          }
+        }
+      }
+    }
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [plugin],
+      user: {
+        model_name: "people",
+        fields: {email: "email_address"}
+      },
+      rate_limit: {storage: "database"}
+    )
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: @database)
+
+    summary = adapter.ensure_indexes!
+
+    assert_includes summary, {collection: "people", field: "email", keys: {"email_address" => 1}, unique: true}
+    assert_includes summary, {collection: "session", field: "token", keys: {"token" => 1}, unique: true}
+    assert_includes summary, {collection: "session", field: "userId", keys: {"user_id" => 1}, unique: false}
+    assert_includes summary, {collection: "account", field: "userId", keys: {"user_id" => 1}, unique: false}
+    assert_includes summary, {collection: "verification", field: "identifier", keys: {"identifier" => 1}, unique: false}
+    assert_includes summary, {collection: "rateLimit", field: "key", keys: {"key" => 1}, unique: true}
+    assert_includes summary, {collection: "profiles", field: "ownerId", keys: {"owner_ref" => 1}, unique: false}
+    assert_includes summary, {collection: "profiles", field: "handle", keys: {"profile_handle" => 1}, unique: true}
+    refute summary.any? { |entry| entry.fetch(:keys).key?("_id") }
+    assert_equal [[{"email_address" => 1}, {unique: true}]], @database.collection("people").indexes.create_one_calls
+    assert_includes @database.collection("profiles").indexes.create_one_calls, [{"owner_ref" => 1}, {}]
+    assert_includes @database.collection("profiles").indexes.create_one_calls, [{"profile_handle" => 1}, {unique: true}]
   end
 
   def test_mongodb_adapter_maps_id_to_bson_id_and_returns_logical_fields
@@ -111,7 +155,7 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     matches = @adapter.find_many(
       model: "user",
       where: [
-        {field: "email", operator: "ends_with", value: "example.net"},
+        {field: "email", operator: "ends_with", value: "example.net", connector: "OR"},
         {field: "name", connector: "OR", value: "Grace"}
       ],
       sort_by: {field: "email", direction: "desc"},
@@ -120,6 +164,70 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
 
     assert_equal ["user-3", "user-2"], matches.map { |user| user["id"] }
     assert_equal 2, @adapter.count(model: "user", where: [{field: "email", operator: "ends_with", value: "example.com"}])
+  end
+
+  def test_mongodb_find_many_applies_default_limit_when_omitted
+    5.times do |index|
+      @adapter.create(model: "user", data: {id: "user-#{index}", name: "User #{index}", email: "user-#{index}@example.com"}, force_allow_id: true)
+    end
+
+    @adapter.find_many(model: "user", where: [])
+
+    pipeline = @database.collection("user").aggregate_pipelines.last.first
+    assert_equal({"$limit" => 100}, pipeline.last)
+
+    database = FakeMongoDatabase.new
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, advanced: {database: {default_find_many_limit: 3}})
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: database)
+    5.times do |index|
+      adapter.create(model: "user", data: {id: "limited-user-#{index}", name: "User #{index}", email: "limited-#{index}@example.com"}, force_allow_id: true)
+    end
+
+    matches = adapter.find_many(model: "user", where: [])
+
+    assert_equal 3, matches.length
+    assert_equal({"$limit" => 3}, database.collection("user").aggregate_pipelines.last.first.last)
+  end
+
+  def test_mongodb_join_one_to_many_uses_default_find_many_limit
+    database = FakeMongoDatabase.new
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, advanced: {database: {default_find_many_limit: 3}})
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: database)
+    user = adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    5.times do |index|
+      adapter.create(model: "session", data: {id: "session-#{index}", token: "token-#{index}", userId: user.fetch("id"), expiresAt: Time.now + 60}, force_allow_id: true)
+    end
+
+    found = adapter.find_one(model: "user", where: [{field: "id", value: user.fetch("id")}], join: {session: true})
+
+    assert_equal 3, found.fetch("session").length
+    lookup = database.collection("user").aggregate_pipelines.last.first.find { |stage| stage.key?("$lookup") }.fetch("$lookup")
+    assert_equal({"$limit" => 3}, lookup.fetch("pipeline").last)
+  end
+
+  def test_mongodb_where_connectors_use_upstream_and_or_buckets
+    @adapter.find_many(
+      model: "user",
+      where: [
+        {field: "email", operator: "ends_with", value: "example.com"},
+        {field: "name", connector: "OR", value: "Grace"},
+        {field: "emailVerified", value: false, connector: "AND"}
+      ]
+    )
+
+    match = @database.collection("user").aggregate_pipelines.last.first.first.fetch("$match")
+    assert_equal(
+      {
+        "$and" => [
+          {"email" => Regexp.new("example\\.com\\z")},
+          {"email_verified" => false}
+        ],
+        "$or" => [
+          {"name" => "Grace"}
+        ]
+      },
+      match
+    )
   end
 
   def test_mongodb_adapter_supports_case_insensitive_where_modes_and_regex_escaping
@@ -390,11 +498,46 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
 
     assert_equal 1, client.sessions.length
     session = client.sessions.first
-    assert_equal true, session.started
+    assert_equal false, session.started
     assert_equal true, session.committed
     assert_equal false, session.aborted
     assert_equal true, session.ended
     assert_equal session, database.collection("user").insert_options.first.fetch(:session)
+  end
+
+  def test_mongodb_adapter_fake_transaction_rolls_back_staged_mutations_and_records_session_options
+    database = FakeMongoDatabase.new
+    client = FakeMongoClient.new
+    adapter = BetterAuth::Adapters::MongoDB.new(@config, database: database, client: client)
+    adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    adapter.create(model: "user", data: {id: "user-2", name: "Grace", email: "grace@example.com"}, force_allow_id: true)
+
+    assert_raises(RuntimeError) do
+      adapter.transaction do |transaction_adapter|
+        transaction_adapter.create(model: "user", data: {id: "user-3", name: "Linus", email: "linus@example.com"}, force_allow_id: true)
+        transaction_adapter.update(model: "user", where: [{field: "id", value: "user-1"}], update: {name: "Changed"})
+        transaction_adapter.update_many(model: "user", where: [{field: "email", operator: "ends_with", value: "example.com"}], update: {emailVerified: true})
+        assert_equal 3, transaction_adapter.count(model: "user")
+        transaction_adapter.delete(model: "user", where: [{field: "id", value: "user-2"}])
+        assert_equal 2, transaction_adapter.count(model: "user")
+        raise "rollback"
+      end
+    end
+
+    collection = database.collection("user")
+    session = client.sessions.first
+    assert_equal true, session.aborted
+    assert_equal true, session.ended
+    assert_equal session, collection.insert_options.last.fetch(:session)
+    assert_equal session, collection.find_one_and_update_calls.first[2].fetch(:session)
+    assert_equal session, collection.update_many_calls.first[2].fetch(:session)
+    assert_equal session, collection.delete_one_calls.first[1].fetch(:session)
+    assert collection.aggregate_pipelines.any? { |_pipeline, options| options[:session] == session }
+    assert_equal ["user-1", "user-2"], collection.documents.map { |document| document.fetch("_id") }
+    assert_equal "Ada", adapter.find_one(model: "user", where: [{field: "id", value: "user-1"}]).fetch("name")
+    assert_equal false, adapter.find_one(model: "user", where: [{field: "id", value: "user-1"}]).fetch("emailVerified")
+    assert_equal "Grace", adapter.find_one(model: "user", where: [{field: "id", value: "user-2"}]).fetch("name")
+    assert_nil adapter.find_one(model: "user", where: [{field: "id", value: "user-3"}])
   end
 
   def test_mongodb_adapter_uses_schema_model_and_field_names
@@ -458,10 +601,11 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     adapter.find_many(model: "typedModel", where: [{field: "score", operator: "in", value: ["7", "8"]}])
     assert_equal({"score" => {"$in" => [7, 8]}}, @database.collection("typedModel").aggregate_pipelines.last.first.first.fetch("$match"))
 
-    error = assert_raises(BetterAuth::Adapters::MongoDB::MongoAdapterError) do
-      adapter.find_many(model: "typedModel", where: [{field: "score", operator: "in", value: "7"}])
-    end
-    assert_equal "UNSUPPORTED_OPERATOR", error.code
+    adapter.find_many(model: "typedModel", where: [{field: "score", operator: "in", value: "7"}])
+    assert_equal({"score" => {"$in" => [7]}}, @database.collection("typedModel").aggregate_pipelines.last.first.first.fetch("$match"))
+
+    adapter.find_many(model: "typedModel", where: [{field: "score", operator: "not_in", value: "8"}])
+    assert_equal({"score" => {"$nin" => [8]}}, @database.collection("typedModel").aggregate_pipelines.last.first.first.fetch("$match"))
   end
 
   def test_mongodb_adapter_infers_schema_driven_one_to_one_joins_and_empty_join_values
@@ -581,270 +725,5 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
 
   def cookie_header(set_cookie)
     set_cookie.lines.map { |line| line.split(";").first }.join("; ")
-  end
-
-  class FakeMongoDatabase
-    def initialize
-      @collections = {}
-    end
-
-    def collection(name)
-      @collections[name.to_s] ||= FakeMongoCollection.new(self)
-    end
-  end
-
-  class FakeMongoCollection
-    attr_reader :documents
-    attr_reader :insert_options
-    attr_reader :aggregate_pipelines
-    attr_reader :find_one_and_update_calls
-    attr_reader :update_many_calls
-    attr_reader :delete_one_calls
-    attr_reader :delete_many_calls
-
-    def initialize(database)
-      @database = database
-      @documents = []
-      @insert_options = []
-      @aggregate_pipelines = []
-      @find_one_and_update_calls = []
-      @update_many_calls = []
-      @delete_one_calls = []
-      @delete_many_calls = []
-    end
-
-    def insert_one(document, options = {})
-      @insert_options << options
-      @documents << deep_dup(document)
-      InsertResult.new(document.fetch("_id"))
-    end
-
-    def aggregate(pipeline, options = {})
-      @aggregate_pipelines << [deep_dup(pipeline), options]
-      Cursor.new(apply_pipeline(@documents.map { |document| deep_dup(document) }, pipeline))
-    end
-
-    def find_one_and_update(filter, update, options = {})
-      @find_one_and_update_calls << [deep_dup(filter), deep_dup(update), options]
-      document = @documents.find { |entry| matches_filter?(entry, filter) }
-      return nil unless document
-
-      document.merge!(deep_dup(update.fetch("$set")))
-      deep_dup(document)
-    end
-
-    def update_many(filter, update, options = {})
-      @update_many_calls << [deep_dup(filter), deep_dup(update), options]
-      count = 0
-      @documents.each do |document|
-        next unless matches_filter?(document, filter)
-
-        document.merge!(deep_dup(update.fetch("$set")))
-        count += 1
-      end
-      UpdateResult.new(count)
-    end
-
-    def delete_one(filter, options = {})
-      @delete_one_calls << [deep_dup(filter), options]
-      index = @documents.index { |document| matches_filter?(document, filter) }
-      @documents.delete_at(index) if index
-      DeleteResult.new(index ? 1 : 0)
-    end
-
-    def delete_many(filter, options = {})
-      @delete_many_calls << [deep_dup(filter), options]
-      before = @documents.length
-      @documents.reject! { |document| matches_filter?(document, filter) }
-      DeleteResult.new(before - @documents.length)
-    end
-
-    def all_documents
-      @documents.map { |document| deep_dup(document) }
-    end
-
-    def replace_documents(documents)
-      @documents = documents.map { |document| deep_dup(document) }
-    end
-
-    InsertResult = Struct.new(:inserted_id)
-    UpdateResult = Struct.new(:modified_count)
-    DeleteResult = Struct.new(:deleted_count)
-
-    class Cursor
-      def initialize(documents)
-        @documents = documents
-      end
-
-      def to_a
-        @documents.map { |document| Marshal.load(Marshal.dump(document)) }
-      end
-    end
-
-    private
-
-    def apply_pipeline(input, pipeline)
-      pipeline.reduce(input) do |documents, stage|
-        if stage.key?("$match")
-          documents.select { |document| matches_filter?(document, stage.fetch("$match")) }
-        elsif stage.key?("$lookup")
-          apply_lookup(documents, stage.fetch("$lookup"))
-        elsif stage.key?("$unwind")
-          apply_unwind(documents, stage.fetch("$unwind"))
-        elsif stage.key?("$project")
-          apply_project(documents, stage.fetch("$project"))
-        elsif stage.key?("$sort")
-          field, direction = stage.fetch("$sort").first
-          sorted = documents.sort_by { |document| document[field].nil? ? "" : document[field] }
-          (direction == -1) ? sorted.reverse : sorted
-        elsif stage.key?("$skip")
-          documents.drop(stage.fetch("$skip"))
-        elsif stage.key?("$limit")
-          documents.first(stage.fetch("$limit"))
-        elsif stage.key?("$count")
-          [{stage.fetch("$count") => documents.length}]
-        else
-          documents
-        end
-      end
-    end
-
-    def apply_lookup(documents, lookup)
-      foreign_documents = @database.collection(lookup.fetch("from")).documents
-      documents.map do |document|
-        matches = if lookup.key?("pipeline")
-          local_value = document[lookup.fetch("let").fetch("localFieldValue").delete_prefix("$")]
-          lookup.fetch("pipeline").reduce(foreign_documents.map { |entry| deep_dup(entry) }) do |result, stage|
-            if stage.key?("$match") && stage.fetch("$match").key?("$expr")
-              left, right = stage.dig("$match", "$expr", "$eq")
-              field = left.delete_prefix("$")
-              expected = (right == "$$localFieldValue") ? local_value : right
-              result.select { |entry| entry[field] == expected }
-            elsif stage.key?("$limit")
-              result.first(stage.fetch("$limit"))
-            else
-              result
-            end
-          end
-        else
-          local_value = document[lookup.fetch("localField")]
-          foreign_documents.select { |entry| entry[lookup.fetch("foreignField")] == local_value }.map { |entry| deep_dup(entry) }
-        end
-        document.merge(lookup.fetch("as") => matches)
-      end
-    end
-
-    def apply_unwind(documents, unwind)
-      field = unwind.fetch("path").delete_prefix("$")
-      documents.flat_map do |document|
-        value = document[field]
-        if value.is_a?(Array) && !value.empty?
-          value.map { |entry| document.merge(field => entry) }
-        elsif unwind.fetch("preserveNullAndEmptyArrays", false)
-          [document.merge(field => nil)]
-        else
-          []
-        end
-      end
-    end
-
-    def apply_project(documents, project)
-      documents.map do |document|
-        project.each_with_object({}) do |(field, enabled), projected|
-          projected[field] = document[field] if enabled == 1 && document.key?(field)
-        end
-      end
-    end
-
-    def matches_filter?(document, filter)
-      return true if filter.empty?
-      return filter.fetch("$and").all? { |entry| matches_filter?(document, entry) } if filter.key?("$and")
-      return filter.fetch("$or").any? { |entry| matches_filter?(document, entry) } if filter.key?("$or")
-      return filter.fetch("$nor").none? { |entry| matches_filter?(document, entry) } if filter.key?("$nor")
-      return filter.dig("$expr", "$eq") == [1, 0] if filter.key?("$expr")
-
-      filter.all? do |field, expected|
-        current = document[field.to_s]
-        matches_value?(current, expected)
-      end
-    end
-
-    def matches_value?(current, expected)
-      if expected.is_a?(Hash)
-        expected.all? do |operator, value|
-          case operator
-          when "$in"
-            value.any? { |entry| values_equal?(current, entry) }
-          when "$nin"
-            value.none? { |entry| values_equal?(current, entry) }
-          when "$ne"
-            !values_equal?(current, value)
-          when "$gt"
-            current > value
-          when "$gte"
-            current >= value
-          when "$lt"
-            current < value
-          when "$lte"
-            current <= value
-          when "$not"
-            !matches_value?(current, value)
-          else
-            false
-          end
-        end
-      elsif expected.is_a?(Regexp)
-        current.to_s.match?(expected)
-      else
-        values_equal?(current, expected)
-      end
-    end
-
-    def values_equal?(left, right)
-      left == right || left.to_s == right.to_s
-    end
-
-    def deep_dup(value)
-      Marshal.load(Marshal.dump(value))
-    end
-  end
-
-  class FakeMongoClient
-    attr_reader :sessions
-
-    def initialize
-      @sessions = []
-    end
-
-    def start_session
-      FakeMongoSession.new.tap { |session| sessions << session }
-    end
-  end
-
-  class FakeMongoSession
-    attr_reader :started, :committed, :aborted, :ended
-
-    def initialize
-      @started = false
-      @committed = false
-      @aborted = false
-      @ended = false
-    end
-
-    def start_transaction
-      @started = true
-    end
-
-    def commit_transaction
-      @committed = true
-    end
-
-    def abort_transaction
-      @aborted = true
-    end
-
-    def end_session
-      @ended = true
-    end
   end
 end

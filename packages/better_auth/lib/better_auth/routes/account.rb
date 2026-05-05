@@ -229,7 +229,29 @@ module BetterAuth
               }
             ],
             responses: {
-              "200" => OpenAPI.json_response("Provider user info", {type: "object"})
+              "200" => OpenAPI.json_response(
+                "Success",
+                OpenAPI.object_schema(
+                  {
+                    user: OpenAPI.object_schema(
+                      {
+                        id: {type: "string"},
+                        name: {type: "string"},
+                        email: {type: "string"},
+                        image: {type: "string"},
+                        emailVerified: {type: "boolean"}
+                      },
+                      required: ["id", "emailVerified"]
+                    ),
+                    data: {
+                      type: "object",
+                      properties: {},
+                      additionalProperties: true
+                    }
+                  },
+                  required: ["user", "data"]
+                ).merge(additionalProperties: false)
+              )
             }
           }
         }

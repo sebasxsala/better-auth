@@ -11,6 +11,9 @@ on:
       - 'Gemfile'
       - 'Rakefile'
       - 'docker-compose.yml'
+      - '.ruby-version'
+      - 'docs/**'
+      - '.docs/**'
       - '.github/workflows/ci.yml'
       - '.github/workflows/release.yml'
   push:
@@ -22,6 +25,9 @@ on:
       - 'Gemfile'
       - 'Rakefile'
       - 'docker-compose.yml'
+      - '.ruby-version'
+      - 'docs/**'
+      - '.docs/**'
       - '.github/workflows/ci.yml'
       - '.github/workflows/release.yml'
   merge_group:
@@ -287,6 +293,13 @@ jobs:
         env:
           REDIS_URL: redis://localhost:6379/0
         run: bundle exec rake test
+
+      - name: Run Redis integration tests
+        working-directory: packages/better_auth-redis-storage
+        env:
+          REDIS_INTEGRATION: "1"
+          REDIS_URL: redis://localhost:6379/0
+        run: bundle exec rake test:integration
 
   test-mongo-adapter:
     name: Test better_auth-mongo-adapter (MongoDB Adapter)

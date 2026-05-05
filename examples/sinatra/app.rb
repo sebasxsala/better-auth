@@ -6,8 +6,15 @@ require "better_auth"
 require "better_auth/sinatra"
 
 class App < Sinatra::Base
-  configure do
-    set :sessions, secret: ENV.fetch("SESSION_SECRET", "change-me-in-production")
+  register BetterAuth::Sinatra
+
+  set :environment, ENV.fetch("RACK_ENV", "development").to_sym
+
+  better_auth at: "/api/auth" do |config|
+    config.secret = ENV.fetch("BETTER_AUTH_SECRET", "change-me-sinatra-secret-12345678901234567890")
+    config.base_url = ENV.fetch("BETTER_AUTH_URL", "http://localhost:4567")
+    config.database = :memory
+    config.email_and_password = {enabled: true}
   end
 
   get "/" do
@@ -15,9 +22,8 @@ class App < Sinatra::Base
   end
 
   get "/protected" do
-    # Placeholder for a protected route.
-    # You can use BetterAuth::Sinatra helpers here once configured.
-    "This should be protected"
+    require_authentication
+    "Signed in as #{current_user.fetch("email")}"
   end
 end
 

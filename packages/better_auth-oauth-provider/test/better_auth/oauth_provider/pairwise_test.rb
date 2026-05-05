@@ -14,8 +14,8 @@ class OAuthProviderPairwiseTest < Minitest::Test
 
     tokens_a = issue_authorization_code_tokens(auth, cookie, client_a, scope: "openid", redirect_uri: "https://sector.example.com/a/callback")
     tokens_b = issue_authorization_code_tokens(auth, cookie, client_b, scope: "openid", redirect_uri: "https://sector.example.com/b/callback")
-    sub_a = JWT.decode(tokens_a[:id_token], client_a[:client_id], true, algorithm: "HS256").first.fetch("sub")
-    sub_b = JWT.decode(tokens_b[:id_token], client_b[:client_id], true, algorithm: "HS256").first.fetch("sub")
+    sub_a = decode_id_token(tokens_a[:id_token], client_a).fetch("sub")
+    sub_b = decode_id_token(tokens_b[:id_token], client_b).fetch("sub")
 
     assert_equal sub_a, sub_b
   end

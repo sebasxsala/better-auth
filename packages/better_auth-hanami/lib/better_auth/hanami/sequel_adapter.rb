@@ -1,19 +1,22 @@
 # frozen_string_literal: true
 
 require "securerandom"
+require "json"
 require "time"
 require "sequel"
 
 module BetterAuth
   module Hanami
     class SequelAdapter < BetterAuth::Adapters::Base
+      include BetterAuth::Adapters::JoinSupport
+
       attr_reader :connection
 
       def self.from_hanami(options, container: nil)
         if container.nil? && defined?(::Hanami) && ::Hanami.respond_to?(:app)
           container = ::Hanami.app
         end
-        return BetterAuth::Adapters::Memory.new(options) unless container
+        return memory_fallback(options) unless container
 
         from_container(container, options)
       end
@@ -24,7 +27,7 @@ module BetterAuth
         elsif container.respond_to?(:[]) && safe_fetch(container, "db.gateway")
           container["db.gateway"]
         end
-        return BetterAuth::Adapters::Memory.new(options) unless gateway
+        return memory_fallback(options) unless gateway
 
         connection = gateway.respond_to?(:connection) ? gateway.connection : gateway
         new(options, connection: connection)
@@ -34,6 +37,14 @@ module BetterAuth
         container[key]
       rescue KeyError
         nil
+      end
+
+      def self.memory_fallback(options)
+        Kernel.warn(
+          "[better_auth-hanami] SequelAdapter: using BetterAuth::Adapters::Memory " \
+          "(no Hanami container or db.gateway). Persisted auth data will not survive process restart."
+        )
+        BetterAuth::Adapters::Memory.new(options)
       end
 
       def initialize(options, connection:)
@@ -125,19 +136,21 @@ module BetterAuth
         column = storage_field(model, field)
         identifier = Sequel[column.to_sym]
         operator = (fetch_key(clause, :operator) || "eq").to_s
-        value = fetch_key(clause, :value)
+        attributes = schema_for(model).fetch(:fields).fetch(field)
+        raw_value = fetch_key(clause, :value)
+        value = coerce_where_value(raw_value, attributes)
 
         case operator
-        when "in" then {column.to_sym => Array(value)}
-        when "not_in" then Sequel.~(column.to_sym => Array(value))
+        when "in" then {column.to_sym => Array(raw_value).map { |entry| coerce_where_value(entry, attributes) }}
+        when "not_in" then Sequel.~(column.to_sym => Array(raw_value).map { |entry| coerce_where_value(entry, attributes) })
         when "ne" then Sequel.~(column.to_sym => value)
         when "gt" then identifier > value
         when "gte" then identifier >= value
         when "lt" then identifier < value
         when "lte" then identifier <= value
-        when "contains" then Sequel.like(identifier, "%#{value}%")
-        when "starts_with" then Sequel.like(identifier, "#{value}%")
-        when "ends_with" then Sequel.like(identifier, "%#{value}")
+        when "contains" then Sequel.like(identifier, "%#{escape_like(value)}%", escape: "\\")
+        when "starts_with" then Sequel.like(identifier, "#{escape_like(value)}%", escape: "\\")
+        when "ends_with" then Sequel.like(identifier, "%#{escape_like(value)}", escape: "\\")
         else {column.to_sym => value}
         end
       end
@@ -155,18 +168,55 @@ module BetterAuth
       def attach_joins(model, records, join)
         return records unless join
 
+        join_config = normalized_join(model, join)
         records.each do |record|
-          join.each_key do |join_model|
-            join_model = join_model.to_s
-            case [model.to_s, join_model]
-            when ["session", "user"], ["account", "user"]
-              record[join_model] = find_one(model: join_model, where: [{field: "id", value: record["userId"]}])
-            when ["user", "account"]
-              record[join_model] = find_many(model: "account", where: [{field: "userId", value: record["id"]}])
-            end
+          join_config.each do |join_model, config|
+            record[join_model] = joined_records(record, join_model, config)
           end
         end
         records
+      end
+
+      def joined_records(record, join_model, config)
+        local_value = record[config.fetch(:from)]
+        where = [{field: config.fetch(:to), value: local_value}]
+
+        if one_to_one_join?(config)
+          find_one(model: join_model, where: where)
+        else
+          records = find_many(model: join_model, where: where)
+          config[:limit] ? records.first(Integer(config[:limit])) : records
+        end
+      end
+
+      def one_to_one_join?(config)
+        config[:relation] == "one-to-one" || config[:unique] == true
+      end
+
+      def inferred_join_config(model, join_model)
+        foreign_keys = schema_for(join_model).fetch(:fields).select do |_field, attributes|
+          reference_model_matches?(attributes, model)
+        end
+        forward_join = true
+
+        if foreign_keys.empty?
+          foreign_keys = schema_for(model).fetch(:fields).select do |_field, attributes|
+            reference_model_matches?(attributes, join_model)
+          end
+          forward_join = false
+        end
+
+        raise Error, "No foreign key found for model #{join_model} and base model #{model} while performing join operation." if foreign_keys.empty?
+        raise Error, "Multiple foreign keys found for model #{join_model} and base model #{model} while performing join operation. Only one foreign key is supported." if foreign_keys.length > 1
+
+        foreign_key, attributes = foreign_keys.first
+        reference = attributes.fetch(:references)
+        if forward_join
+          unique = attributes[:unique] == true
+          {from: reference.fetch(:field).to_s, to: foreign_key, relation: unique ? "one-to-one" : "one-to-many", unique: unique}
+        else
+          {from: foreign_key, to: reference.fetch(:field).to_s, relation: "one-to-one", unique: true}
+        end
       end
 
       def transform_input(model, data, action, force_allow_id)
@@ -242,6 +292,7 @@ module BetterAuth
       def coerce_value(value, attributes)
         return value if value.nil?
         return Time.parse(value) if attributes[:type] == "date" && value.is_a?(String)
+        return JSON.generate(value) if json_like?(attributes) && !value.is_a?(String)
 
         value
       end
@@ -250,7 +301,34 @@ module BetterAuth
         return value if value.nil?
         return coerce_boolean(value) if attributes[:type] == "boolean"
         return Time.parse(value.to_s) if attributes[:type] == "date" && !value.is_a?(Time)
+        return parse_json_value(value) if json_like?(attributes) && value.is_a?(String)
 
+        value
+      end
+
+      def coerce_where_value(value, attributes)
+        return value if value.nil?
+
+        case attributes[:type]
+        when "boolean"
+          return coerce_value(false, attributes) if value == false || value == 0 || value.to_s.downcase == "false" || value.to_s == "0"
+          return coerce_value(true, attributes) if value == true || value == 1 || value.to_s.downcase == "true" || value.to_s == "1"
+        when "number"
+          return coerce_number(value)
+        when "date"
+          return Time.parse(value) if value.is_a?(String)
+        end
+
+        coerce_value(value, attributes)
+      end
+
+      def json_like?(attributes)
+        %w[json string[] number[]].include?(attributes[:type])
+      end
+
+      def parse_json_value(value)
+        JSON.parse(value)
+      rescue JSON::ParserError
         value
       end
 
@@ -260,6 +338,18 @@ module BetterAuth
         return true if value == 1 || value.to_s == "1" || value.to_s.downcase == "t" || value.to_s.downcase == "true"
 
         value
+      end
+
+      def coerce_number(value)
+        return value unless value.is_a?(String)
+        return value.to_i if /\A-?\d+\z/.match?(value)
+        return value.to_f if /\A-?\d+\.\d+\z/.match?(value)
+
+        value
+      end
+
+      def escape_like(value)
+        value.to_s.gsub(/[\\%_]/) { |match| "\\#{match}" }
       end
 
       def stringify_keys(data)

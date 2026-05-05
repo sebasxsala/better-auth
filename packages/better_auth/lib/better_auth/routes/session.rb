@@ -11,7 +11,7 @@ module BetterAuth
             operationId: "getSession",
             description: "Get the current session",
             responses: {
-              "200" => OpenAPI.json_response("Current session or null", OpenAPI.session_response_schema_pair.merge(nullable: true))
+              "200" => OpenAPI.json_response("Current session or null", OpenAPI.session_response_schema_pair.merge(type: ["object", "null"]))
             }
           }
         }

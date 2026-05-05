@@ -7,7 +7,7 @@ module BetterAuth
 
       def generate_relay_state(ctx, link = nil, additional_data = {})
         callback_url = BetterAuth::Plugins.sso_fetch(ctx.body, :callback_url)
-        raise APIError.new("BAD_REQUEST", message: "callbackURL is required") if callback_url.to_s.empty?
+        raise BetterAuth::APIError.new("BAD_REQUEST", message: "callbackURL is required") if callback_url.to_s.empty?
 
         extra = (additional_data == false) ? {} : (additional_data || {})
         BetterAuth::Plugins.sso_generate_saml_relay_state(

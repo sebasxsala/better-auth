@@ -86,7 +86,7 @@ module BetterAuth
     end
 
     def mcp_consent_endpoint(config)
-      Endpoint.new(path: "/oauth2/consent", method: "POST") do |ctx|
+      Endpoint.new(path: "/oauth2/consent", method: "POST", metadata: mcp_openapi("mcpOAuthConsent", "Handle MCP OAuth2 consent", "OAuth2 consent handled successfully", {type: "object", additionalProperties: true})) do |ctx|
         ctx.json(MCP.consent(ctx, config))
       end
     end
@@ -120,13 +120,21 @@ module BetterAuth
     end
 
     def mcp_introspect_endpoint(config)
-      Endpoint.new(path: "/oauth2/introspect", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
+      Endpoint.new(
+        path: "/oauth2/introspect",
+        method: "POST",
+        metadata: mcp_openapi("mcpOAuthIntrospect", "Introspect an MCP OAuth2 token", "OAuth2 token introspection result", mcp_introspection_schema).merge(allowed_media_types: ["application/x-www-form-urlencoded", "application/json"])
+      ) do |ctx|
         ctx.json(MCP.introspect(ctx, config))
       end
     end
 
     def mcp_revoke_endpoint(config)
-      Endpoint.new(path: "/oauth2/revoke", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
+      Endpoint.new(
+        path: "/oauth2/revoke",
+        method: "POST",
+        metadata: mcp_openapi("mcpOAuthRevoke", "Revoke an MCP OAuth2 token", "OAuth2 token revoked successfully", OpenAPI.object_schema({revoked: {type: "boolean"}}, required: ["revoked"])).merge(allowed_media_types: ["application/x-www-form-urlencoded", "application/json"])
+      ) do |ctx|
         ctx.json(MCP.revoke(ctx, config))
       end
     end
@@ -184,6 +192,23 @@ module BetterAuth
       OpenAPI.object_schema(
         {keys: {type: "array", items: {type: "object"}}},
         required: ["keys"]
+      )
+    end
+
+    def mcp_introspection_schema
+      OpenAPI.object_schema(
+        {
+          active: {type: "boolean"},
+          client_id: {type: ["string", "null"]},
+          scope: {type: ["string", "null"]},
+          sub: {type: ["string", "null"]},
+          iss: {type: ["string", "null"]},
+          iat: {type: ["number", "null"]},
+          exp: {type: ["number", "null"]},
+          sid: {type: ["string", "null"]},
+          aud: {type: ["string", "array", "null"], items: {type: "string"}}
+        },
+        required: ["active"]
       )
     end
   end

@@ -23,10 +23,16 @@ module BetterAuth
 
     def scim_token_matches?(ctx, config, token, stored)
       storage = config[:store_scim_token]
-      return Crypto.symmetric_decrypt(key: ctx.context.secret, data: stored) == token if storage == "encrypted"
-      return storage[:decrypt].call(stored) == token if storage.is_a?(Hash) && storage[:decrypt].respond_to?(:call)
+      return scim_token_string_matches?(Crypto.symmetric_decrypt(key: ctx.context.secret, data: stored), token) if storage == "encrypted"
+      return scim_token_string_matches?(storage[:decrypt].call(stored), token) if storage.is_a?(Hash) && storage[:decrypt].respond_to?(:call)
 
-      !token.to_s.empty? && scim_store_token(ctx, config, token) == stored
+      scim_token_string_matches?(scim_store_token(ctx, config, token), stored)
+    end
+
+    def scim_token_string_matches?(expected, provided)
+      expected = expected.to_s
+      provided = provided.to_s
+      !provided.empty? && expected.bytesize == provided.bytesize && Crypto.constant_time_compare(expected, provided)
     end
 
     def scim_decode_token(encoded)

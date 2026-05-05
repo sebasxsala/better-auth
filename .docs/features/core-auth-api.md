@@ -12,13 +12,13 @@ Upstream `betterAuth(options)` returns an auth object with a request handler, se
 
 ## Ruby Adaptation
 
-Ruby exposes snake_case public names: `context` instead of `$context`, and `error_codes` instead of `$ERROR_CODES`. `BetterAuth::Auth#call(env)` is Rack-compatible and delegates to the handler. The first handler is intentionally minimal until Phase 2 router work lands.
+Ruby exposes snake_case public names: `context` instead of `$context`, and `error_codes` instead of `$ERROR_CODES`. `BetterAuth::Auth#call(env)` is Rack-compatible and delegates to the router handler. Current core initialization wires the context, selected adapter, internal adapter, plugin registry, merged endpoints, direct `auth.api` facade, and Rack handler.
 
 ### Ruby-Specific Decisions
 
 - Secret handling follows the plan's stricter rule: missing secrets fail outside test environments, while upstream falls back to `DEFAULT_SECRET` and only rejects that default in production.
 - Public option keys are accepted as Ruby-style snake_case and normalized internally.
-- Trusted-origin matching ports upstream exact-origin, wildcard, custom-scheme, and relative-path behavior needed by Phase 1 tests.
+- Trusted-origin matching ports upstream exact-origin, wildcard, custom-scheme, relative-path, dynamic base URL, and trusted proxy behavior needed by current route/API tests.
 
 ## Implementation
 
@@ -42,4 +42,3 @@ Key test files:
 
 - `packages/better_auth/test/better_auth/auth_test.rb`
 - `packages/better_auth/test/better_auth/configuration_test.rb`
-

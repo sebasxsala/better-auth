@@ -35,6 +35,21 @@ RSpec.describe BetterAuth::Hanami::Generators::MigrationGenerator do
     expect(File.read(migrations.first)).to eq("# existing\n")
   end
 
+  it "overwrites an existing base migration when force is true" do
+    path = File.join(@destination, "config/db/migrate")
+    FileUtils.mkdir_p(path)
+    migration = File.join(path, "20260427000000_create_better_auth_tables.rb")
+    File.write(migration, "# existing\n")
+
+    result = described_class.new(destination_root: @destination).run(force: true)
+
+    migrations = Dir[File.join(@destination, "config/db/migrate/*_create_better_auth_tables.rb")]
+    expect(result).to eq(migration)
+    expect(migrations.length).to eq(1)
+    expect(File.read(migration)).to include("ROM::SQL.migration")
+    expect(File.read(migration)).to include("create_table :users")
+  end
+
   it "creates migrations with plugin schemas configured through BetterAuth::Hanami" do
     BetterAuth::Hanami.configure do |config|
       config.secret = "test-secret-that-is-long-enough-for-validation"

@@ -263,6 +263,10 @@ Request body:
 | `disableRedirect` / `disable_redirect` | `Boolean` | Adds a `redirect` flag to the response for client behavior. |
 | `scheduleAtPeriodEnd` / `schedule_at_period_end` | `Boolean` | Schedule the plan change at the end of the current billing period. |
 
+<Callout type="warning">
+`successUrl`, `cancelUrl`, `returnUrl`, and callback URLs must be relative paths or absolute URLs whose origin is configured in `trusted_origins`.
+</Callout>
+
 The plugin supports one active or trialing subscription per reference ID at a time. If the reference already has an active subscription, pass `subscriptionId` when changing plans so the existing Stripe subscription is updated instead of creating a separate checkout.
 
 <Callout type="info">
@@ -491,6 +495,9 @@ The plugin automatically handles these Stripe events:
 - `customer.subscription.deleted`: Marks a subscription canceled and clears pending schedules.
 
 You can also handle any Stripe event with `on_event`.
+The configured Stripe client must expose `webhooks.construct_event_async` or
+`webhooks.construct_event`; Ruby rejects webhook requests instead of processing
+unverified payloads when no verifier is available.
 
 ```ruby title="config/auth.rb"
 BetterAuth::Plugins.stripe(

@@ -43,10 +43,14 @@ module BetterAuth
 
         def update_routes
           path = File.join(destination_root, "config/routes.rb")
-          return unless File.exist?(path)
+          unless File.exist?(path)
+            Kernel.warn("[better_auth-hanami] InstallGenerator: #{path} not found; skipping routes wiring. Add Hanami routes manually.")
+            return
+          end
 
           content = File.read(path)
           content = content.gsub(%(require "better_auth/hanami/routing"), %(require "better_auth/hanami"))
+          content = dedupe_better_auth_requires(content)
           content = %(require "better_auth/hanami"\n) + content unless content.include?(%("better_auth/hanami"))
           content = content.sub("class Routes < Hanami::Routes\n", "class Routes < Hanami::Routes\n    include BetterAuth::Hanami::Routing\n") unless content.include?("include BetterAuth::Hanami::Routing")
           content = content.sub(/(include BetterAuth::Hanami::Routing\n)(?!\s*better_auth)/, "\\1    better_auth\n") unless content.match?(/^\s*better_auth\b/)
@@ -55,7 +59,10 @@ module BetterAuth
 
         def update_settings
           path = File.join(destination_root, "config/settings.rb")
-          return unless File.exist?(path)
+          unless File.exist?(path)
+            Kernel.warn("[better_auth-hanami] InstallGenerator: #{path} not found; skipping settings wiring. Add better_auth_secret and better_auth_url manually.")
+            return
+          end
 
           content = File.read(path)
           return if content.include?("setting :better_auth_secret")
@@ -64,8 +71,19 @@ module BetterAuth
             "    setting :better_auth_secret, constructor: Types::String.constrained(min_size: 32)",
             "    setting :better_auth_url, constructor: Types::String.optional"
           ].join("\n")
-          content = content.sub("class Settings < Hanami::Settings\n", "class Settings < Hanami::Settings\n#{insertion}\n")
+          content = content.sub(/(class[ \t]+Settings[ \t]*<[ \t]*Hanami::Settings[ \t]*\n)/, "\\1#{insertion}\n")
           File.write(path, content)
+        end
+
+        def dedupe_better_auth_requires(content)
+          previous = nil
+          content.lines.each_with_object([]) do |line, output|
+            stripped = line.strip
+            next if stripped == previous && stripped == %(require "better_auth/hanami")
+
+            output << line
+            previous = stripped
+          end.join
         end
 
         def provider_template

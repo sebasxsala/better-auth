@@ -90,6 +90,31 @@ module BetterAuth
       )
     end
 
+    def ref_schema(name, type: "object")
+      {type: type, "$ref": "#/components/schemas/#{name}"}
+    end
+
+    def array_schema(items)
+      {type: "array", items: items}
+    end
+
+    def nullable(type)
+      types = Array(type)
+      (types.include?("null") ? types : types + ["null"])
+    end
+
+    def query_parameter(name, required: false, schema: {type: "string"}, description: nil)
+      parameter = {name: name, in: "query", required: required, schema: schema}
+      parameter[:description] = description if description
+      parameter
+    end
+
+    def path_parameter(name, schema: {type: "string"}, description: nil)
+      parameter = {name: name, in: "path", required: true, schema: schema}
+      parameter[:description] = description if description
+      parameter
+    end
+
     def empty_request_body
       {
         content: {
@@ -243,10 +268,12 @@ module BetterAuth
 
     def open_api_paths(endpoints, options)
       disabled_paths = Array(options.disabled_paths).map(&:to_s)
-      endpoints.each_with_object({}) do |(_key, endpoint, tag), paths|
+      endpoints.each_with_object({}) do |(key, endpoint, tag), paths|
         next unless endpoint.path
-        next if endpoint.metadata[:hide] || endpoint.metadata[:SERVER_ONLY] || endpoint.metadata[:server_only]
+        next if endpoint.metadata[:exclude_from_openapi] || endpoint.metadata[:SERVER_ONLY] || endpoint.metadata[:server_only]
+        next if endpoint.metadata[:hide] && !open_api_documented_hidden_endpoint?(key, endpoint, tag)
         next if disabled_paths.include?(endpoint.path)
+        next if key == :set_password
 
         path = open_api_path(endpoint.path)
         paths[path] ||= {}
@@ -258,6 +285,10 @@ module BetterAuth
 
     def open_api_path(path)
       path.split("/").map { |part| part.start_with?(":") ? "{#{part.delete_prefix(":")}}" : part }.join("/")
+    end
+
+    def open_api_documented_hidden_endpoint?(key, endpoint, tag)
+      tag == "Default" && [:ok, :error].include?(key) && endpoint.metadata[:openapi]
     end
 
     def open_api_operation(endpoint, method, tag)
@@ -314,6 +345,8 @@ module BetterAuth
 
     def open_api_html(schema, config)
       nonce = config[:nonce] ? " nonce=\"#{config[:nonce]}\"" : ""
+      nonce_attr = config[:nonce] ? "nonce=\"#{config[:nonce]}\"" : ""
+      encoded_logo = open_api_encode_uri_component(open_api_logo)
       <<~HTML
         <!doctype html>
         <html>
@@ -323,12 +356,45 @@ module BetterAuth
             <meta name="viewport" content="width=device-width, initial-scale=1" />
           </head>
           <body>
-            <script id="api-reference" type="application/json">#{JSON.generate(schema)}</script>
-            <script#{nonce}>window.scalarTheme = "#{config[:theme]}";</script>
+            <script
+              id="api-reference"
+              type="application/json">
+            #{JSON.generate(schema)}
+            </script>
+            <script #{nonce_attr}>
+              var configuration = {
+                favicon: "data:image/svg+xml;utf8,#{encoded_logo}",
+                theme: "#{config[:theme] || "default"}",
+                metaData: {
+                  title: "Better Auth API",
+                  description: "API Reference for your Better Auth Instance",
+                }
+              }
+
+              document.getElementById('api-reference').dataset.configuration =
+                JSON.stringify(configuration)
+            </script>
             <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"#{nonce}></script>
           </body>
         </html>
       HTML
+    end
+
+    def open_api_logo
+      <<~SVG
+        <svg width="75" height="75" viewBox="0 0 75 75" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="75" height="75" rx="14" fill="#050505"/>
+          <path d="M19 50V25h15.5c5.5 0 9 2.6 9 6.6 0 2.7-1.6 4.7-4.1 5.7 3.2.9 5.2 3 5.2 6.1 0 4.2-3.7 6.6-9.6 6.6H19Zm7.1-14.8h7.2c2.1 0 3.2-.9 3.2-2.4s-1.1-2.4-3.2-2.4h-7.2v4.8Zm0 9.5h7.9c2.2 0 3.5-.9 3.5-2.5s-1.3-2.6-3.5-2.6h-7.9v5.1Z" fill="white"/>
+          <path d="M47 50V25h7.1v25H47Z" fill="white"/>
+        </svg>
+      SVG
+    end
+
+    def open_api_encode_uri_component(value)
+      value.to_s.bytes.map do |byte|
+        char = byte.chr
+        char.match?(/[A-Za-z0-9\-_.!~*'()]/) ? char : "%%%02X" % byte
+      end.join
     end
   end
 end

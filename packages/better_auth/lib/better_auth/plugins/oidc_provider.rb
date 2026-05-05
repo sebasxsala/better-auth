@@ -437,7 +437,16 @@ module BetterAuth
       Endpoint.new(
         path: "/oauth2/endsession",
         method: ["GET", "POST"],
-        metadata: oidc_openapi("oauth2EndSession", "RP-Initiated Logout endpoint", "Logout request handled").merge(allowed_media_types: ["application/x-www-form-urlencoded", "application/json"])
+        metadata: {
+          openapi: {
+            operationId: "oauth2EndSession",
+            description: "RP-Initiated Logout endpoint",
+            responses: {
+              "302" => {description: "Redirects after clearing the session cookie"}
+            }
+          },
+          allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]
+        }
       ) do |ctx|
         input_source = (ctx.method == "GET") ? ctx.query : ctx.body
         input = OAuthProtocol.stringify_keys(input_source)

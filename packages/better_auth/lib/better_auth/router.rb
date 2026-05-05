@@ -62,8 +62,9 @@ module BetterAuth
       return run_on_response_chain(method_not_allowed(allowed_methods)) unless endpoint.matches_method?(request.request_method)
       return run_on_response_chain(unsupported_media_type) unless allowed_media_type?(request, endpoint)
 
-      body = parse_body(request)
-      endpoint_context = build_endpoint_context(request, route_path, query, body, params)
+      raw_body = read_raw_body(request)
+      body = parse_body(request, raw_body: raw_body, disable_body: endpoint.disable_body)
+      endpoint_context = build_endpoint_context(request, route_path, query, body, params, raw_body)
       return run_on_response_chain(forbidden) if server_only?(endpoint)
 
       response = @origin_check.call(endpoint_context)
@@ -80,7 +81,7 @@ module BetterAuth
       response = rate_limiter.call(request, context, route_path)
       return run_on_response_chain(response) if response
 
-      endpoint_context = rebuild_endpoint_context(endpoint_context, request, route_path, params)
+      endpoint_context = rebuild_endpoint_context(endpoint_context, request, route_path, params, endpoint)
       result = API.new(context, endpoints).execute(endpoint, endpoint_context)
       response = result.response.is_a?(APIError) ? error_response(result.response, headers: result.headers) : result.to_rack_response
       run_on_response_chain(response)
@@ -161,12 +162,19 @@ module BetterAuth
       path.empty? ? "/" : path
     end
 
-    def parse_body(request)
-      return {} unless request.body
+    def read_raw_body(request)
+      return "" unless request.body
 
       request.body.rewind
       raw = request.body.read.to_s
       request.body.rewind
+      raw
+    end
+
+    def parse_body(request, raw_body:, disable_body: false)
+      return {} if disable_body
+
+      raw = raw_body.to_s
       return {} if raw.empty?
 
       if json_media_type?(request.media_type)
@@ -203,7 +211,7 @@ module BetterAuth
       request.GET
     end
 
-    def build_endpoint_context(request, path, query, body, params)
+    def build_endpoint_context(request, path, query, body, params, raw_body)
       Endpoint::Context.new(
         path: path,
         method: request.request_method,
@@ -212,12 +220,14 @@ module BetterAuth
         params: params,
         headers: headers_from(request.env),
         context: context,
-        request: request
+        request: request,
+        raw_body: raw_body
       )
     end
 
-    def rebuild_endpoint_context(previous_context, request, route_path, params)
-      fresh_context = build_endpoint_context(request, route_path, parse_query(request), parse_body(request), params)
+    def rebuild_endpoint_context(previous_context, request, route_path, params, endpoint)
+      raw_body = read_raw_body(request)
+      fresh_context = build_endpoint_context(request, route_path, parse_query(request), parse_body(request, raw_body: raw_body, disable_body: endpoint.disable_body), params, raw_body)
       fresh_context.headers = merge_hashes(previous_context.headers, fresh_context.headers)
       fresh_context.query = merge_hashes(previous_context.query, fresh_context.query)
       fresh_context.body = merge_hashes(previous_context.body, fresh_context.body)

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-05
+
+### Fixed
+
+- Aligned Active Record adapter filtering, joins, falsey values, and lookup semantics with core adapter behavior.
+- Hardened controller helper and trusted-origin behavior and passed versioned secrets through Rails configuration.
+- Added MySQL and PostgreSQL integration coverage for the adapter changes.
+
 ## [0.2.1] - 2026-04-29
 
 ### Fixed

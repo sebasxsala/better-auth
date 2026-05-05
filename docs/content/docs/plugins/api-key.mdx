@@ -30,6 +30,7 @@ auth = BetterAuth.auth(
 created = auth.api.create_api_key(headers: { "cookie" => request.env["HTTP_COOKIE"] }, body: { name: "CLI" })
 verified = auth.api.verify_api_key(body: { key: created[:key] })
 keys = auth.api.list_api_keys(headers: { "cookie" => request.env["HTTP_COOKIE"] })
+cleanup = auth.api.delete_all_expired_api_keys
 ```
 
 ## Routes
@@ -42,16 +43,18 @@ keys = auth.api.list_api_keys(headers: { "cookie" => request.env["HTTP_COOKIE"] 
 | `GET` | `/api-key/list` | `auth.api.list_api_keys` |
 | `POST` | `/api-key/update` | `auth.api.update_api_key` |
 | `POST` | `/api-key/delete` | `auth.api.delete_api_key` |
+| `POST` | `/api-key/delete-all-expired-api-keys` | `auth.api.delete_all_expired_api_keys` |
 
 ## Options
 
 Current Ruby options accepted by `BetterAuth::Plugins.api_key`:
 
 - `enable_session_for_api_keys`
+- `config_id`
 - `rate_limit`
 - `starting_characters_config`
-- `default_permissions`
 - `default_key_length`
+- `default_prefix`
 - `custom_api_key_validator`
 - `require_name`
 - `minimum_name_length`
@@ -67,8 +70,19 @@ Current Ruby options accepted by `BetterAuth::Plugins.api_key`:
 - `custom_storage`
 - `custom_api_key_getter`
 - `api_key_headers`
+- `permissions`
 - `references` (`"user"` or `"organization"`)
 - `defer_updates`
+
+For default permissions, pass `permissions: { default_permissions: ... }` to
+match the upstream `permissions.defaultPermissions` option while keeping Ruby
+snake_case keys.
+
+When `enable_session_for_api_keys` is enabled, Ruby creates an in-memory session
+for user-owned API keys but does not place the raw API key in
+`session["token"]`. The session includes `tokenFingerprint`, an irreversible
+SHA-256 fingerprint of the presented key, for correlation without persisting the
+secret.
 
 ## Plugin metadata
 

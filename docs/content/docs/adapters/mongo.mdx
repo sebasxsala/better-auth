@@ -40,7 +40,8 @@ auth = BetterAuth.auth(
     BetterAuth::Adapters::MongoDB.new(
       options,
       database: mongo_client.database,
-      client: mongo_client
+      client: mongo_client,
+      transaction: false
     )
   }
 )
@@ -49,11 +50,35 @@ auth = BetterAuth.auth(
 The lambda form lets Better Auth pass the final configuration into the adapter,
 including plugins, custom schemas, and advanced database options.
 
+The example disables transactions because standalone local MongoDB does not
+support multi-document transactions. Use the default transaction behavior, or
+pass `transaction: true`, only when your MongoDB deployment is replica-set
+capable.
+
 ## Schema generation & migration
 
 MongoDB does not require SQL schema generation or migration. The adapter writes
 documents using Better Auth storage field names, including custom model names,
 custom field names, plugin schemas, and `additional_fields`.
+
+Production deployments should still create indexes for unique and lookup
+fields. The adapter exposes `ensure_indexes!` as an explicit setup helper:
+
+```ruby title="setup/mongo_indexes.rb"
+adapter = BetterAuth::Adapters::MongoDB.new(
+  options,
+  database: mongo_client.database,
+  client: mongo_client,
+  transaction: false
+)
+
+adapter.ensure_indexes!
+```
+
+`ensure_indexes!` reads Better Auth schema metadata and requests indexes for
+fields marked `unique: true` or `index: true`, including plugin schemas and
+custom model or field names. It skips Mongo `_id` because MongoDB creates that
+index automatically.
 
 <table>
   <thead>
@@ -87,7 +112,8 @@ auth = BetterAuth.auth(
     BetterAuth::Adapters::MongoDB.new(
       options,
       database: mongo_client.database,
-      client: mongo_client
+      client: mongo_client,
+      transaction: false
     )
   }
 )
@@ -120,10 +146,16 @@ references are stored as native BSON UUID values and returned to Ruby callers as
 UUID strings. If you provide a callable custom id generator, the returned value
 is stored as-is.
 
+Ruby's adapters accept scalar values for `in` and `not_in` filters and coerce
+them to a one-element list. This is an intentional Ruby adapter-family
+adaptation; upstream's TypeScript adapter factory validates those filters
+before the Mongo adapter internals receive them.
+
 ## Additional Information
 
-- Transactions are enabled when a client is provided. If your MongoDB
-  deployment does not support transactions, pass `transaction: false`.
+- Transactions are enabled when a client is provided unless
+  `transaction: false` is passed. If your MongoDB deployment does not support
+  transactions, pass `transaction: false`.
 - MongoDB transactions require a replica set, even for a single local node.
 - Use `use_plural: true` when you want collection names from Better Auth schema
   `model_name` values instead of the default singular collection names.

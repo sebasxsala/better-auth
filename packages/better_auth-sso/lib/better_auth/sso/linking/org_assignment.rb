@@ -66,9 +66,6 @@ module BetterAuth
 
         def organization_plugin?(ctx)
           context = ctx.context
-          return context.hasPlugin("organization") if context.respond_to?(:hasPlugin)
-          return context.has_plugin?("organization") if context.respond_to?(:has_plugin?)
-
           plugins = context.options.respond_to?(:plugins) ? context.options.plugins : []
           plugins.any? { |plugin| plugin.respond_to?(:id) && plugin.id == "organization" }
         end

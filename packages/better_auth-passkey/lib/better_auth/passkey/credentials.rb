@@ -28,7 +28,7 @@ module BetterAuth
       end
 
       def attestation_response(credential)
-        credential.instance_variable_get(:@response)
+        credential.respond_to?(:response) ? credential.response : nil
       end
 
       def authenticator_data(credential)

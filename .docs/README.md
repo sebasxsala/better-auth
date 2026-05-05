@@ -15,6 +15,11 @@ Documentation for implemented features and plugins. Feature notes are also where
 - Testing approach
 - Usage examples
 
+### `backlog/`
+Cross-cutting product and upstream alignment notes. `upstream-product-alignment.md`
+is a parking lot for ideas that need product decisions, upstream coordination,
+or larger release planning before implementation.
+
 ### `postmortems/`
 Documentation for bug fixes and issues. Each file should explain:
 - What went wrong

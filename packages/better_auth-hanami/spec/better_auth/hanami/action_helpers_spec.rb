@@ -36,6 +36,28 @@ RSpec.describe BetterAuth::Hanami::ActionHelpers do
     expect(request.env["better_auth.session"]).to include(:session, :user)
   end
 
+  it "prepares auth context for the request before resolving session" do
+    BetterAuth::Hanami.configure do |config|
+      config.secret = secret
+      config.database = :memory
+      config.base_url = "http://localhost:2300"
+      config.email_and_password = {enabled: true}
+    end
+
+    auth = BetterAuth::Hanami.auth
+    signup_headers = sign_up_headers
+    prepared = false
+    allow(auth.context).to receive(:prepare_for_request!).and_wrap_original do |method, req|
+      prepared = true
+      method.call(req)
+    end
+
+    request = fake_request({}, cookie: cookie_header(signup_headers.fetch("set-cookie")))
+    action.current_user(request)
+
+    expect(prepared).to be(true)
+  end
+
   it "halts with unauthorized status when authentication is required and missing" do
     request = fake_request({"better_auth.session" => nil})
     response = Struct.new(:status).new

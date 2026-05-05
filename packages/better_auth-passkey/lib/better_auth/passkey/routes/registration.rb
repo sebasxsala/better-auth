@@ -44,7 +44,7 @@ module BetterAuth
             body = Utils.normalize_hash(ctx.body)
             Utils.require_key!(body, :response)
             require_session = config.dig(:registration, :require_session) != false
-            session = require_session ? BetterAuth::Routes.current_session(ctx, sensitive: true) : BetterAuth::Routes.current_session(ctx, allow_nil: true)
+            session = require_session ? BetterAuth::Routes.current_session(ctx, sensitive: true, fresh: true) : BetterAuth::Routes.current_session(ctx, allow_nil: true)
             origin = Utils.origin(config, ctx)
             raise APIError.new("BAD_REQUEST", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("FAILED_TO_VERIFY_REGISTRATION")) if origin.to_s.empty?
 
@@ -56,15 +56,32 @@ module BetterAuth
               raise APIError.new("BAD_REQUEST", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("CHALLENGE_NOT_FOUND"))
             end
             if session && challenge.fetch("userData").fetch("id") != session.fetch(:user).fetch("id")
+              ctx.context.internal_adapter.delete_verification_by_identifier(verification_token)
               raise APIError.new("UNAUTHORIZED", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY"))
             end
 
-            response = Credentials.webauthn_response(body[:response])
-            relying_party = Utils.relying_party(config, ctx, origin: origin)
-            credential = WebAuthn::Credential.from_create(response, relying_party: relying_party)
-            credential.verify(challenge.fetch("expectedChallenge"), user_verification: false)
-            authenticator_data = Credentials.authenticator_data(credential)
-            target_user_id = Utils.after_registration_verification_user_id(config, ctx, credential, challenge, response, session)
+            begin
+              response = Credentials.webauthn_response(body[:response])
+              relying_party = Utils.relying_party(config, ctx, origin: origin)
+              credential = WebAuthn::Credential.from_create(response, relying_party: relying_party)
+              credential.verify(challenge.fetch("expectedChallenge"), user_verification: false)
+              authenticator_data = Credentials.authenticator_data(credential)
+              target_user_id = Utils.after_registration_verification_user_id(config, ctx, credential, challenge, response, session)
+            rescue WebAuthn::Error, ArgumentError => error
+              ctx.context.internal_adapter.delete_verification_by_identifier(verification_token)
+              ctx.context.logger&.error("Failed to verify registration", error)
+              raise APIError.new("BAD_REQUEST", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("FAILED_TO_VERIFY_REGISTRATION"))
+            rescue APIError
+              ctx.context.internal_adapter.delete_verification_by_identifier(verification_token)
+              raise
+            end
+
+            existing_passkey = ctx.context.adapter.find_one(model: "passkey", where: [{field: "credentialID", value: credential.id}])
+            if existing_passkey
+              ctx.context.internal_adapter.delete_verification_by_identifier(verification_token)
+              raise APIError.new("BAD_REQUEST", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("PREVIOUSLY_REGISTERED"))
+            end
+
             data = ctx.context.adapter.create(
               model: "passkey",
               data: {
@@ -82,7 +99,10 @@ module BetterAuth
             )
             ctx.context.internal_adapter.delete_verification_by_identifier(verification_token)
             ctx.json(Credentials.wire(data))
-          rescue WebAuthn::Error => error
+          rescue APIError
+            raise
+          rescue => error
+            ctx.context.internal_adapter.delete_verification_by_identifier(verification_token) if verification_token
             ctx.context.logger&.error("Failed to verify registration", error)
             raise APIError.new("INTERNAL_SERVER_ERROR", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("FAILED_TO_VERIFY_REGISTRATION"))
           end

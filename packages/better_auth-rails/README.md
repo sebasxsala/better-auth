@@ -122,6 +122,30 @@ Rails configuration is a thin option builder for the core Rack auth object. The 
 
 Rails uses `BetterAuth::Rails::ActiveRecordAdapter` by default. The adapter uses whichever database adapter the Rails app is already configured with, including PostgreSQL and MySQL. To be explicit, set `config.database_adapter = :active_record`; for custom adapters, assign `config.database` directly.
 
+#### Secret rotation
+
+Rails can pass Better Auth secret rotation entries through the same `secrets` option as core:
+
+```ruby
+BetterAuth::Rails.configure do |config|
+  config.secret = Rails.application.secret_key_base
+  config.secrets = [
+    {version: 2, value: Rails.application.credentials.dig(:better_auth, :secret_v2)},
+    {version: 1, value: Rails.application.credentials.dig(:better_auth, :secret_v1)}
+  ].compact
+end
+```
+
+Core Better Auth also reads `BETTER_AUTH_SECRETS` when `secrets` is not configured directly.
+
+#### Trusted origins
+
+The generated initializer derives `trusted_origins` from `ENV["BETTER_AUTH_URL"]`. If that environment variable is unset, Rails passes an empty list. Browser clients should set trusted origins explicitly in deployment so origin checks and callback URLs do not depend on an empty environment value. See [`host-app-responsibilities.md`](../../.docs/features/host-app-responsibilities.md) for the boundary between Better Auth origin checks, browser CORS headers, and host-app CSRF policy.
+
+#### Option builder keys
+
+The Rails option builder accepts unknown keys so plugin and custom options can flow through to core Better Auth. That also means typos become option keys silently. Validate configuration names against the core docs or the Ruby option names when adding new settings.
+
 ### JavaScript Client
 
 Ruby Better Auth exposes the same HTTP route surface. Frontend apps should use the upstream Better Auth JavaScript client and point it at the Ruby server:
@@ -198,6 +222,8 @@ end
 - `current_user` - Returns the current Better Auth user hash
 - `authenticated?` - Returns true when a user is present
 - `require_authentication` - Halts with `head :unauthorized` and returns `false` when no user is present
+
+`ControllerHelpers` prepare the Better Auth context for the current Rails request before reading the session. Custom Rack middleware or controller code that bypasses `BetterAuth::Router` and reads sessions directly should call `prepare_for_request!` on the auth context first.
 
 ## Development
 

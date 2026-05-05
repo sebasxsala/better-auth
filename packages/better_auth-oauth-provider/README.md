@@ -57,6 +57,7 @@ tokens = auth.api.o_auth2_token(
 ```
 
 When `resource` is present and valid, access tokens are JWTs. Without `resource`, access tokens are opaque and introspectable.
+By default, valid JWT access-token audiences are the provider issuer URL and, when `openid` is granted, the UserInfo endpoint. Set `valid_audiences` to allow additional resource servers.
 
 ## Routes
 
@@ -105,11 +106,18 @@ Common options accepted by `BetterAuth::Plugins.oauth_provider`:
 - `allow_unauthenticated_client_registration`
 - `client_registration_default_scopes`
 - `client_registration_allowed_scopes`
+- `client_credential_grant_default_scopes`
 - `store_client_secret`
 - `prefix`
+- `code_expires_in`
+- `id_token_expires_in`
 - `refresh_token_expires_in`
+- `access_token_expires_in`
+- `m2m_access_token_expires_in`
+- `scope_expirations`
 - `advertised_metadata`
 - `valid_audiences`
+- `allow_public_client_prelogin`
 - `custom_token_response_fields`
 - `custom_access_token_claims`
 - `custom_user_info_claims`
@@ -158,7 +166,9 @@ Then drop the legacy access-token and consent columns. Rails apps using `better_
 
 ## Ruby Adaptations
 
-When the JWT plugin is registered, OIDC metadata advertises its configured `jwks.key_pair_config.alg`, defaulting to `EdDSA` like upstream. If `disable_jwt_plugin: true` is set, Ruby intentionally falls back to HS256 ID tokens signed with the Better Auth secret.
+When the JWT plugin is registered, JWT access tokens and ID tokens use the JWT plugin's configured `jwks.key_pair_config.alg`, defaulting to `EdDSA` like upstream. If the JWT plugin is not registered, or `disable_jwt_plugin: true` is set, Ruby intentionally falls back to HS256 for compatibility.
+
+Upstream `oauthProviderResourceClient` and MCP protected-resource helpers remain future API-boundary work for Ruby. This gem currently hardens authorization-server behavior only.
 
 Route OpenAPI metadata blocks from upstream TypeScript are intentionally not ported into this package. Use the Ruby `open_api` plugin for generated OpenAPI output.
 

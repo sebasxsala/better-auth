@@ -53,6 +53,25 @@ class BetterAuthMemoryAdapterTest < Minitest::Test
     assert_equal [unverified.fetch("id")], matches.map { |user| user.fetch("id") }
   end
 
+  def test_comparison_operators_do_not_match_nil_record_values
+    expired = @adapter.create(model: "verification", data: {identifier: "expired", value: "value", expiresAt: Time.now - 60})
+    future = @adapter.create(model: "verification", data: {identifier: "future", value: "value", expiresAt: Time.now + 60})
+    no_expiry = @adapter.create(model: "verification", data: {identifier: "no-expiry", value: "value", expiresAt: nil})
+
+    deleted = @adapter.delete_many(
+      model: "verification",
+      where: [
+        {field: "expiresAt", value: Time.now, operator: "lt"},
+        {field: "expiresAt", value: nil, operator: "ne"}
+      ]
+    )
+
+    assert_equal 1, deleted
+    assert_nil @adapter.find_one(model: "verification", where: [{field: "id", value: expired.fetch("id")}])
+    refute_nil @adapter.find_one(model: "verification", where: [{field: "id", value: future.fetch("id")}])
+    refute_nil @adapter.find_one(model: "verification", where: [{field: "id", value: no_expiry.fetch("id")}])
+  end
+
   def test_update_delete_many_and_transaction_rollback
     user = @adapter.create(model: "user", data: {name: "Ada", email: "ada@example.com"})
 

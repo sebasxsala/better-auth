@@ -72,6 +72,20 @@ class BetterAuthPluginsScimUsersTest < Minitest::Test
     assert_equal [user_a, user_b], users.fetch(:Resources)
   end
 
+  def test_scim_list_users_orders_by_user_name
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "sort-test"}).fetch(:scimToken)
+    headers = bearer(token)
+
+    auth.api.create_scim_user(headers: headers, body: {userName: "zebra@example.com"})
+    auth.api.create_scim_user(headers: headers, body: {userName: "alpha@example.com"})
+
+    listed = auth.api.list_scim_users(headers: headers)
+    names = listed.fetch(:Resources).map { |user| user.fetch(:userName) }
+    assert_equal %w[alpha@example.com zebra@example.com], names
+  end
+
   def test_scim_filters_only_user_name_and_rejects_unsupported_filters
     auth = build_auth
     cookie = sign_up_cookie(auth)
@@ -135,6 +149,21 @@ class BetterAuthPluginsScimUsersTest < Minitest::Test
       conflicting.api.create_scim_user(headers: bearer(db_token), body: {userName: "db-token@example.com"})
     end
     assert_equal 401, default_precedence_error.status_code
+  end
+
+  def test_scim_default_provider_rejects_wrong_token_length_safely
+    token_ok = Base64.urlsafe_encode64("secret-token:p", padding: false)
+    token_bad = Base64.urlsafe_encode64("different-length-xx:p", padding: false)
+    auth = build_auth(default_scim: [{providerId: "p", scimToken: "secret-token"}])
+
+    created = auth.api.create_scim_user(headers: bearer(token_ok), body: {userName: "ok@example.com"})
+    assert_equal "ok@example.com", created.fetch(:userName)
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.create_scim_user(headers: bearer(token_bad), body: {userName: "no@example.com"})
+    end
+    assert_equal 401, error.status_code
+    assert_equal "Invalid SCIM token", error.message
   end
 
   def test_scim_scopes_user_access_by_provider_and_deletes_users

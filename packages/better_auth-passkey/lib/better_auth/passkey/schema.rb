@@ -13,7 +13,7 @@ module BetterAuth
               name: {type: "string", required: false},
               publicKey: {type: "string", required: true},
               userId: {type: "string", references: {model: "user", field: "id"}, required: true, index: true},
-              credentialID: {type: "string", required: true, index: true},
+              credentialID: {type: "string", required: true, unique: true},
               counter: {type: "number", required: true},
               deviceType: {type: "string", required: true},
               backedUp: {type: "boolean", required: true},

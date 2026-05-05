@@ -47,18 +47,26 @@ storage = BetterAuth::RedisStorage.redisStorage(client: redis)
 storage = BetterAuth::RedisStorage.new(
   client: redis,
   key_prefix: "better-auth:",
-  scan_count: nil
+  scan_count: nil,
+  atomic_clear: false
 )
 ```
 
 `client` must respond to `get`, `set`, `setex`, `del`, and `keys`. It should
-also respond to `scan` when `scan_count:` is configured. This matches the
-interfaces exposed by the `redis` and `redis-namespace` gems.
+also respond to `scan` when `scan_count:` is configured, and to `incr` when
+`atomic_clear:` is enabled. This matches the interfaces exposed by the `redis`
+and `redis-namespace` gems.
 
 `key_prefix` defaults to `"better-auth:"`. Passing `nil` falls back to the
 default. Any other value, including the empty string, is honored verbatim.
 Redis databases are not isolation boundaries for shared clients; applications
 sharing a Redis instance should use distinct prefixes.
+
+> **Warning:** Passing `key_prefix: ""` puts Better Auth keys at the root of
+> the selected Redis logical namespace. `list_keys` and `clear` then match `*`,
+> so collisions across apps or tenants are possible and `clear` deletes every
+> key in that Redis database. Use an application-specific prefix unless the
+> Redis database is fully dedicated to Better Auth.
 
 `scan_count` is a Ruby-only opt-in for large Redis databases. By default the gem
 uses `KEYS "#{key_prefix}*"` to match upstream exactly. Set `scan_count:` to a
@@ -67,6 +75,23 @@ positive count such as `100`, `500`, or `1000` to use `SCAN` instead:
 ```ruby
 storage = BetterAuth::RedisStorage.new(client: redis, scan_count: 500)
 ```
+
+`atomic_clear` is a Ruby-only opt-in for applications that need `clear` to be
+logically atomic under concurrent writers:
+
+```ruby
+storage = BetterAuth::RedisStorage.new(
+  client: redis,
+  scan_count: 500,
+  atomic_clear: true
+)
+```
+
+When enabled, data keys are stored under a generation prefix such as
+`better-auth:v1:<key>`. Calling `clear` atomically increments the generation key
+so new reads and writes immediately move to the next generation. The previous
+generation is then deleted best-effort, but correctness does not depend on that
+physical cleanup finishing immediately.
 
 ## Behavior
 
@@ -82,13 +107,18 @@ storage.clear
 
 `listKeys` is available as a camelCase alias for upstream parity.
 
+`list_keys` returns every matching logical key but Redis does not guarantee key
+order for `KEYS` or `SCAN`. Sort the returned array in application code when a
+stable order matters.
+
 TTL handling for `set(key, value, ttl)`:
 
 | TTL value | Redis command |
 | --- | --- |
-| `nil`, non-numeric strings, `0`, negative numbers | `set(prefixed_key, value)` |
+| `nil`, non-numeric strings, `0`, negative numbers, non-finite numbers | `set(prefixed_key, value)` |
 | Positive `Integer` | `setex(prefixed_key, ttl, value)` |
-| Positive `Float` | `setex(prefixed_key, ttl.to_i, value)` |
+| Positive finite `Float` or other `Numeric` values `>= 1` | `setex(prefixed_key, ttl.to_i, value)` |
+| Positive finite `Float` or other `Numeric` values `< 1` | `set(prefixed_key, value)` |
 | Positive numeric `String` | `setex(prefixed_key, ttl.to_i, value)` |
 
 `set`, `delete`, and `clear` return `nil`, mirroring upstream's `Promise<void>`
@@ -98,6 +128,23 @@ contract in Ruby form. Tests and applications should assert stored values via
 `clear` intentionally differs from upstream when there are no matching keys:
 upstream calls `del(...keys)` even when `keys` is empty, while this Ruby gem
 skips `del` to avoid Redis `ERR wrong number of arguments for 'del'`.
+When keys do exist, `clear` deletes them in batches of
+`BetterAuth::RedisStorage::DELETE_CHUNK_SIZE` keys per `del` call to avoid very
+large Redis argument lists.
+
+With `atomic_clear: true`, `clear` increments a generation key with Redis
+`INCR`, making old generation keys immediately invisible to `get`, `set`,
+`delete`, `list_keys`, and Better Auth itself. Cleanup of the old generation is
+best-effort and uses `SCAN` when `scan_count:` is configured.
+
+Redis Cluster users should treat `list_keys` and `clear` as operationally
+constrained helpers. This adapter does not scan every cluster node, and
+multi-key `del` calls require keys to live in a compatible hash slot. Prefer a
+single-slot prefix strategy such as Redis hash tags when using these helpers in
+clustered deployments. `atomic_clear: true` improves the logical `clear`
+contract because correctness uses a single `INCR` generation key, but physical
+cleanup of old generations remains subject to the connected client's scan
+coverage.
 
 ## Better Auth Usage
 

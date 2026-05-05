@@ -12,7 +12,11 @@ module BetterAuth
         token, provider_id, organization_id = scim_decode_token(encoded)
         provider = scim_default_provider(config, provider_id, organization_id)
         if provider
-          raise scim_error("UNAUTHORIZED", "Invalid SCIM token") unless provider.fetch("scimToken") == token
+          stored = provider.fetch("scimToken").to_s
+          provided = token.to_s
+          unless scim_token_string_matches?(stored, provided)
+            raise scim_error("UNAUTHORIZED", "Invalid SCIM token")
+          end
         else
           provider = ctx.context.adapter.find_one(
             model: "scimProvider",

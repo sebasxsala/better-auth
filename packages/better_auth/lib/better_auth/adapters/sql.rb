@@ -7,6 +7,8 @@ require "time"
 module BetterAuth
   module Adapters
     class SQL < Base
+      include JoinSupport
+
       attr_reader :connection, :dialect
 
       def initialize(options, connection:, dialect:)
@@ -191,35 +193,6 @@ module BetterAuth
         end.join
       end
 
-      def normalized_join(model, join)
-        return {} unless join
-
-        join.each_with_object({}) do |(join_model, config), result|
-          join_model = join_model.to_s
-          result[join_model] = normalize_join_config(model.to_s, join_model, config)
-        end
-      end
-
-      def normalize_join_config(model, join_model, config)
-        if config.is_a?(Hash) && (config.key?(:on) || config.key?("on"))
-          on = config[:on] || config["on"]
-          from = storage_key(fetch_key(on, :from))
-          to = storage_key(fetch_key(on, :to))
-          relation = config[:relation] || config["relation"]
-          limit = config[:limit] || config["limit"]
-          return {from: from, to: to, relation: relation, limit: limit, unique: unique_join_field?(join_model, to)}
-        end
-
-        inferred = inferred_join_config(model, join_model)
-        if config.is_a?(Hash)
-          relation = config[:relation] || config["relation"]
-          limit = config[:limit] || config["limit"]
-          inferred = inferred.merge(relation: relation) if relation
-          inferred = inferred.merge(limit: limit) if limit
-        end
-        inferred
-      end
-
       def inferred_join_config(model, join_model)
         foreign_keys = schema_for(join_model).fetch(:fields).select do |_field, attributes|
           reference_model_matches?(attributes, model)
@@ -246,19 +219,6 @@ module BetterAuth
         end
       end
 
-      def reference_model_matches?(attributes, model)
-        reference = attributes[:references]
-        return false unless reference
-
-        reference_model = reference[:model] || reference["model"]
-        reference_model.to_s == model.to_s || reference_model.to_s == table_for(model)
-      end
-
-      def unique_join_field?(model, field)
-        field = storage_key(field)
-        field == "id" || schema_for(model).fetch(:fields).dig(field, :unique) == true
-      end
-
       def build_where(model, where, params)
         Array(where).each_with_index.map do |clause, index|
           field = storage_key(fetch_key(clause, :field))
@@ -277,13 +237,14 @@ module BetterAuth
             sql_operator = (operator == "not_in") ? "NOT IN" : "IN"
             "#{column} #{sql_operator} (#{placeholders})"
           when "contains", "starts_with", "ends_with"
+            escaped = escape_like(value)
             pattern = case operator
-            when "starts_with" then "#{value}%"
-            when "ends_with" then "%#{value}"
-            else "%#{value}%"
+            when "starts_with" then "#{escaped}%"
+            when "ends_with" then "%#{escaped}"
+            else "%#{escaped}%"
             end
             params << pattern
-            "#{column} LIKE #{placeholder(params.length)}"
+            "#{column} LIKE #{placeholder(params.length)} ESCAPE #{escape_literal}"
           else
             params << coerce_where_value(value, attributes)
             "#{column} #{sql_operator(operator)} #{placeholder(params.length)}"
@@ -379,12 +340,6 @@ module BetterAuth
         end
       end
 
-      def collection_join?(model, join)
-        normalized_join(model, join).any? do |_join_model, config|
-          config[:relation] != "one-to-one" && config[:unique] != true
-        end
-      end
-
       def aggregate_collection_joins(model, records, join)
         join_config = normalized_join(model, join)
         grouped = {}
@@ -448,6 +403,14 @@ module BetterAuth
         return SecureRandom.uuid if generator == "uuid"
 
         SecureRandom.hex(16)
+      end
+
+      def escape_like(value)
+        value.to_s.gsub(/[\\%_]/) { |match| "\\#{match}" }
+      end
+
+      def escape_literal
+        (dialect == :postgres) ? "'\\\\'" : "'\\'"
       end
 
       def resolve_default(default)

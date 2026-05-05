@@ -12,7 +12,10 @@ module BetterAuth
         oauth_rate_limit_rule(rate_limit, :introspect, "/oauth2/introspect", window: 60, max: 100),
         oauth_rate_limit_rule(rate_limit, :revoke, "/oauth2/revoke", window: 60, max: 30),
         oauth_rate_limit_rule(rate_limit, :register, "/oauth2/register", window: 60, max: 5),
-        oauth_rate_limit_rule(rate_limit, :userinfo, "/oauth2/userinfo", window: 60, max: 60)
+        oauth_rate_limit_rule(rate_limit, :userinfo, "/oauth2/userinfo", window: 60, max: 60),
+        oauth_rate_limit_rule(rate_limit, :continue, "/oauth2/continue", window: 60, max: 40),
+        oauth_rate_limit_rule(rate_limit, :consent, "/oauth2/consent", window: 60, max: 40),
+        oauth_rate_limit_rule(rate_limit, :end_session, "/oauth2/end-session", window: 60, max: 30)
       ].compact
     end
 

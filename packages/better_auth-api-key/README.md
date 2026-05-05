@@ -44,6 +44,31 @@ export const authClient = createAuthClient({
 
 Ruby does not expose a separate `apiKeyClient()` equivalent; the public Ruby surface is the server plugin and route contract.
 
+| Method | Path | Ruby API method |
+| --- | --- | --- |
+| `POST` | `/api-key/create` | `auth.api.create_api_key` |
+| `POST` | `/api-key/verify` | `auth.api.verify_api_key` |
+| `GET` | `/api-key/get` | `auth.api.get_api_key` |
+| `GET` | `/api-key/list` | `auth.api.list_api_keys` |
+| `POST` | `/api-key/update` | `auth.api.update_api_key` |
+| `POST` | `/api-key/delete` | `auth.api.delete_api_key` |
+| `POST` | `/api-key/delete-all-expired-api-keys` | `auth.api.delete_all_expired_api_keys` |
+
+## Operational notes
+
+Expired API key cleanup runs against the database when `storage` is `"database"`
+or `fallback_to_database` is true. Secondary-storage-only deployments should
+align Redis or KV TTLs with API key expiration because database cleanup does not
+purge secondary-only keys.
+
+The scheduled expired-key cleanup throttle is per Ruby process. It is not
+coordinated across web workers, hosts, or background job runners.
+
+When `defer_updates` is combined with `advanced.background_tasks.handler`, usage
+updates such as request counts, remaining limits, refill state, and scheduled
+cleanup can be reordered under concurrency. Use database transactions or
+deployment-level coordination if strict counters are required.
+
 ## Configuration
 
 ```ruby
@@ -164,6 +189,9 @@ upstream's `camelCase`. The mapping is fixed and intentionally lossless:
 Endpoint requests/responses always use the upstream `camelCase` field names, so
 TypeScript clients targeting `@better-auth/api-key/client` interoperate without
 configuration changes.
+
+The cleanup route is also exposed through `auth.api.delete_all_expired_api_keys`
+and returns `{success: true, error: nil}` on success.
 
 ## Organization-owned API keys
 

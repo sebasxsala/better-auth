@@ -53,35 +53,85 @@ class BetterAuthAPIKeyRoutesIndexTest < Minitest::Test
     assert_nil auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: second.fetch("id")}])
   end
 
+  def test_delete_expired_uses_adapter_delete_many_semantics
+    auth = build_api_key_auth(default_key_length: 12)
+    config = BetterAuth::APIKey::Configuration.normalize({})
+    now = Time.now
+
+    expired = auth.context.adapter.create(
+      model: "apikey",
+      data: base_api_key_row("expired", now - 120, reference_id: "r1")
+    )
+    future = auth.context.adapter.create(
+      model: "apikey",
+      data: base_api_key_row("future", now + 3600, reference_id: "r2")
+    )
+    no_expiry = auth.context.adapter.create(
+      model: "apikey",
+      data: base_api_key_row("no-expiry", nil, reference_id: "r3")
+    )
+
+    BetterAuth::APIKey::Routes.delete_expired(auth.context, config, bypass_last_check: true)
+
+    assert_nil auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: expired.fetch("id")}])
+    refute_nil auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: future.fetch("id")}])
+    refute_nil auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: no_expiry.fetch("id")}])
+  end
+
+  def test_deferred_schedule_cleanup_logs_failures
+    deferred = []
+    errors = []
+    auth = build_api_key_auth(
+      defer_updates: true,
+      advanced: {background_tasks: {handler: ->(task) { deferred << task }}}
+    )
+    logger = Object.new
+    logger.define_singleton_method(:error) { |message, *| errors << message }
+    auth.context.define_singleton_method(:logger) { logger }
+    auth.context.adapter.define_singleton_method(:delete_many) do |**|
+      raise StandardError, "simulated cleanup failure"
+    end
+    ctx = Struct.new(:context).new(auth.context)
+    config = BetterAuth::APIKey::Configuration.normalize(defer_updates: true)
+
+    BetterAuth::APIKey::Routes.schedule_cleanup(ctx, config)
+    deferred.each(&:call)
+
+    assert_equal 1, errors.length
+    assert_match(/simulated cleanup failure/, errors.first)
+  end
+
   private
 
   def create_expired_record(auth, key)
     now = Time.now
-    auth.context.adapter.create(
-      model: "apikey",
-      data: {
-        configId: "default",
-        createdAt: now,
-        updatedAt: now,
-        name: nil,
-        prefix: nil,
-        start: key[0, 6],
-        key: key,
-        enabled: true,
-        expiresAt: now - 60,
-        referenceId: "reference-id",
-        lastRefillAt: nil,
-        lastRequest: nil,
-        metadata: nil,
-        rateLimitMax: 10,
-        rateLimitTimeWindow: 86_400_000,
-        remaining: nil,
-        refillAmount: nil,
-        refillInterval: nil,
-        rateLimitEnabled: true,
-        requestCount: 0,
-        permissions: nil
-      }
-    )
+    auth.context.adapter.create(model: "apikey", data: base_api_key_row(key, now - 60, reference_id: "reference-id"))
+  end
+
+  def base_api_key_row(key_material, expires_at, reference_id:)
+    now = Time.now
+    {
+      configId: "default",
+      createdAt: now,
+      updatedAt: now,
+      name: nil,
+      prefix: nil,
+      start: key_material.to_s[0, 6],
+      key: key_material,
+      enabled: true,
+      expiresAt: expires_at,
+      referenceId: reference_id,
+      lastRefillAt: nil,
+      lastRequest: nil,
+      metadata: nil,
+      rateLimitMax: 10,
+      rateLimitTimeWindow: 86_400_000,
+      remaining: nil,
+      refillAmount: nil,
+      refillInterval: nil,
+      rateLimitEnabled: true,
+      requestCount: 0,
+      permissions: nil
+    }
   end
 end

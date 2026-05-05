@@ -43,7 +43,10 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
       "/oauth2/authorize",
       "/oauth2/introspect",
       "/oauth2/revoke",
-      "/oauth2/register"
+      "/oauth2/register",
+      "/oauth2/continue",
+      "/oauth2/consent",
+      "/oauth2/end-session"
     ], paths
     token_rule = rules.fetch(0)
     assert_equal 15, token_rule[:window]
@@ -799,21 +802,14 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
       body: {
         redirect_uris: ["https://resource.example/callback"],
         token_endpoint_auth_method: "client_secret_post",
-        grant_types: ["client_credentials"],
-        response_types: [],
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
         client_name: "Machine Client",
         scope: "profile email"
       }
     )
 
-    tokens = auth.api.o_auth2_token(
-      body: {
-        grant_type: "client_credentials",
-        client_id: client[:client_id],
-        client_secret: client[:client_secret],
-        scope: "profile email"
-      }
-    )
+    tokens = issue_authorization_code_tokens(auth, cookie, client, scope: "profile email")
 
     error = assert_raises(BetterAuth::APIError) do
       auth.api.o_auth2_user_info(headers: {"authorization" => "Bearer #{tokens[:access_token]}"})
@@ -991,6 +987,41 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
     assert_equal 400, cascade_error.status_code
   end
 
+  def test_refresh_token_rejects_authenticated_client_mismatch
+    auth = build_auth(scopes: ["openid", "offline_access"])
+    cookie = sign_up_cookie(auth)
+    client_a = auth.api.register_o_auth_client(
+      headers: {"cookie" => cookie},
+      body: {
+        redirect_uris: ["https://resource.example/callback"],
+        token_endpoint_auth_method: "client_secret_post",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        client_name: "Refresh Client A",
+        scope: "openid offline_access"
+      }
+    )
+    client_b = auth.api.register_o_auth_client(
+      headers: {"cookie" => cookie},
+      body: {
+        redirect_uris: ["https://resource.example/callback"],
+        token_endpoint_auth_method: "client_secret_post",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        client_name: "Refresh Client B",
+        scope: "openid offline_access"
+      }
+    )
+    tokens = issue_authorization_code_tokens(auth, cookie, client_a, scope: "openid offline_access")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.o_auth2_token(body: refresh_grant_body(client_b, tokens[:refresh_token]))
+    end
+
+    assert_equal 400, error.status_code
+    assert_match(/invalid_grant/i, error.message)
+  end
+
   def test_id_token_includes_nonce_and_preserves_auth_time_after_refresh
     auth = build_auth(scopes: ["openid", "offline_access"])
     cookie = sign_up_cookie(auth)
@@ -1007,7 +1038,7 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
     )
 
     tokens = issue_authorization_code_tokens(auth, cookie, client, scope: "openid offline_access", nonce: "nonce-123")
-    id_token = JWT.decode(tokens[:id_token], client[:client_id], true, algorithm: "HS256").first
+    id_token = decode_id_token(tokens[:id_token], client)
 
     assert_equal "nonce-123", id_token["nonce"]
     assert_kind_of Integer, id_token["auth_time"]
@@ -1021,12 +1052,32 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
         scope: "openid offline_access"
       }
     )
-    refreshed_id_token = JWT.decode(refreshed[:id_token], client[:client_id], true, algorithm: "HS256").first
+    refreshed_id_token = decode_id_token(refreshed[:id_token], client)
     assert_equal id_token["auth_time"], refreshed_id_token["auth_time"]
   end
 
+  def test_id_token_is_not_signed_with_public_client_id
+    auth = build_auth(scopes: ["openid"])
+    cookie = sign_up_cookie(auth)
+    client = auth.api.admin_create_o_auth_client(
+      body: {
+        redirect_uris: ["https://resource.example/callback"],
+        token_endpoint_auth_method: "client_secret_post",
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        scope: "openid"
+      }
+    )
+    tokens = issue_authorization_code_tokens(auth, cookie, client, scope: "openid")
+
+    assert_raises(JWT::VerificationError) do
+      JWT.decode(tokens[:id_token], client[:client_id], true, algorithm: "HS256")
+    end
+    assert_equal client[:client_id], decode_id_token(tokens[:id_token], client)["aud"]
+  end
+
   def test_token_endpoint_rejects_grants_not_registered_for_client
-    auth = build_auth
+    auth = build_auth(allow_public_client_prelogin: true)
     cookie = sign_up_cookie(auth)
     client = auth.api.register_o_auth_client(
       headers: {"cookie" => cookie},
@@ -1204,8 +1255,8 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
 
     tokens_a = issue_authorization_code_tokens(auth, cookie, client_a, scope: "openid", redirect_uri: "https://a.example/callback")
     tokens_b = issue_authorization_code_tokens(auth, cookie, client_b, scope: "openid", redirect_uri: "https://b.example/callback")
-    sub_a = JWT.decode(tokens_a[:id_token], client_a[:client_id], true, algorithm: "HS256").first.fetch("sub")
-    sub_b = JWT.decode(tokens_b[:id_token], client_b[:client_id], true, algorithm: "HS256").first.fetch("sub")
+    sub_a = decode_id_token(tokens_a[:id_token], client_a).fetch("sub")
+    sub_b = decode_id_token(tokens_b[:id_token], client_b).fetch("sub")
 
     refute_equal sub_a, sub_b
     refute_equal auth.context.adapter.find_one(model: "user", where: [{field: "email", value: "oauth-provider@example.com"}]).fetch("id"), sub_a
@@ -1473,7 +1524,7 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
   end
 
   def test_public_client_prelogin_returns_only_public_client_fields
-    auth = build_auth
+    auth = build_auth(allow_public_client_prelogin: true)
     cookie = sign_up_cookie(auth)
     client = auth.api.register_o_auth_client(
       headers: {"cookie" => cookie},
@@ -1488,8 +1539,17 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
         scope: "read"
       }
     )
+    signed_query = BetterAuth::Plugins.oauth_signed_query(
+      Struct.new(:context, keyword_init: true).new(context: auth.context),
+      {
+        client_id: client[:client_id],
+        redirect_uri: "https://resource.example/callback",
+        response_type: "code",
+        scope: "read"
+      }
+    )
 
-    public_client = auth.api.get_o_auth_client_public_prelogin(query: {client_id: client[:client_id]})
+    public_client = auth.api.get_o_auth_client_public_prelogin(body: {client_id: client[:client_id], oauth_query: signed_query})
 
     assert_equal client[:client_id], public_client[:client_id]
     assert_equal "Public View Client", public_client[:client_name]
@@ -1710,6 +1770,9 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
       /oauth2/revoke
       /oauth2/register
       /oauth2/userinfo
+      /oauth2/continue
+      /oauth2/consent
+      /oauth2/end-session
     ].find { |path| rule.fetch(:path_matcher).call(path) }
   end
 
@@ -1773,6 +1836,10 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
     }
   end
 
+  def decode_id_token(token, client)
+    JWT.decode(token, client[:client_secret], true, algorithm: "HS256").first
+  end
+
   def introspect_body(client, token)
     {
       token: token,
@@ -1795,7 +1862,7 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
 
   def pairwise_sub_for(auth, cookie, client, redirect_uri:)
     tokens = issue_authorization_code_tokens(auth, cookie, client, scope: "openid", redirect_uri: redirect_uri)
-    JWT.decode(tokens[:id_token], client[:client_id], true, algorithm: "HS256").first.fetch("sub")
+    decode_id_token(tokens[:id_token], client).fetch("sub")
   end
 
   def rack_env(method, path, body: nil)

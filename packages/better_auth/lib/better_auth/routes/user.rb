@@ -101,6 +101,7 @@ module BetterAuth
         path: "/set-password",
         method: "POST",
         metadata: {
+          exclude_from_openapi: true,
           openapi: {
             operationId: "setPassword",
             description: "Set a password for the current user",

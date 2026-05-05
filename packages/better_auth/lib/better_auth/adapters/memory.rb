@@ -172,13 +172,13 @@ module BetterAuth
         when "ne"
           current != comparable
         when "gt"
-          !comparable.nil? && current > comparable
+          !current.nil? && !comparable.nil? && current > comparable
         when "gte"
-          !comparable.nil? && current >= comparable
+          !current.nil? && !comparable.nil? && current >= comparable
         when "lt"
-          !comparable.nil? && current < comparable
+          !current.nil? && !comparable.nil? && current < comparable
         when "lte"
-          !comparable.nil? && current <= comparable
+          !current.nil? && !comparable.nil? && current <= comparable
         else
           current == comparable
         end

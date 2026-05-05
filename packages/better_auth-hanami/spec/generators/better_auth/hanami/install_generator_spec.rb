@@ -76,6 +76,65 @@ RSpec.describe BetterAuth::Hanami::Generators::InstallGenerator do
     expect(routes).not_to include(%(require "better_auth/hanami/routing"))
   end
 
+  it "deduplicates consecutive Better Auth Hanami requires after upgrading the old require" do
+    File.write(File.join(@destination, "config/routes.rb"), <<~RUBY)
+      # frozen_string_literal: true
+
+      require "better_auth/hanami/routing"
+      require "better_auth/hanami"
+
+      module Bookshelf
+        class Routes < Hanami::Routes
+        end
+      end
+    RUBY
+
+    described_class.new(destination_root: @destination).run
+
+    routes = File.read(File.join(@destination, "config/routes.rb"))
+    expect(routes.scan(%(require "better_auth/hanami")).length).to eq(1)
+  end
+
+  it "warns and skips route wiring when routes.rb is missing" do
+    File.delete(File.join(@destination, "config/routes.rb"))
+
+    expect(Kernel).to receive(:warn).with(/routes\.rb/)
+
+    described_class.new(destination_root: @destination).run
+  end
+
+  it "warns and skips settings wiring when settings.rb is missing" do
+    File.delete(File.join(@destination, "config/settings.rb"))
+
+    expect(Kernel).to receive(:warn).with(/settings\.rb/)
+
+    described_class.new(destination_root: @destination).run
+  end
+
+  it "inserts Better Auth settings after the Settings class line when a blank line follows" do
+    File.write(File.join(@destination, "config/settings.rb"), <<~RUBY)
+      # frozen_string_literal: true
+
+      module Bookshelf
+        class Settings < Hanami::Settings
+
+          setting :foo, default: 1
+        end
+      end
+    RUBY
+
+    described_class.new(destination_root: @destination).run
+
+    settings = File.read(File.join(@destination, "config/settings.rb"))
+    expect(settings).to include(<<~RUBY)
+      class Settings < Hanami::Settings
+          setting :better_auth_secret, constructor: Types::String.constrained(min_size: 32)
+          setting :better_auth_url, constructor: Types::String.optional
+
+          setting :foo, default: 1
+    RUBY
+  end
+
   it "does not overwrite an existing provider" do
     FileUtils.mkdir_p(File.join(@destination, "config/providers"))
     provider = File.join(@destination, "config/providers/better_auth.rb")

@@ -46,7 +46,7 @@ module BetterAuth
           user: user,
           session: {
             "id" => record["id"],
-            "token" => key,
+            "tokenFingerprint" => BetterAuth::Plugins.default_api_key_hasher(key),
             "userId" => reference_id,
             "userAgent" => ctx.headers["user-agent"],
             "ipAddress" => BetterAuth::RequestIP.client_ip(ctx.request || ctx.headers, ctx.context.options),

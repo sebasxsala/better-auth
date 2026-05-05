@@ -12,6 +12,8 @@ require_relative "../scim/scim_filters"
 require_relative "../scim/patch_operations"
 require_relative "../scim/scim_tokens"
 require_relative "../scim/middlewares"
+require_relative "../scim/provider_management"
+require_relative "../scim/validation"
 require_relative "../scim/routes"
 
 module BetterAuth
@@ -22,7 +24,7 @@ module BetterAuth
     singleton_class.remove_method(:scim) if singleton_class.method_defined?(:scim) || singleton_class.private_method_defined?(:scim)
 
     def scim(options = {})
-      config = {store_scim_token: "plain"}.merge(normalize_hash(options))
+      config = {store_scim_token: "hashed"}.merge(normalize_hash(options))
       Plugin.new(
         id: "scim",
         version: BetterAuth::SCIM::VERSION,

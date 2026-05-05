@@ -417,6 +417,28 @@ class BetterAuthPluginsStripeTest < Minitest::Test
     assert_equal "active", updated.fetch("status")
   end
 
+  def test_rack_webhook_verification_uses_raw_request_body
+    stripe = FakeStripeClient.new
+    stripe.webhooks_adapter = RawBodyWebhookVerifier.new(
+      expected_payload: JSON.generate({"type" => "invoice.paid"}),
+      event: {"type" => "invoice.paid"}
+    )
+    auth = build_auth(stripe_client: stripe, stripe_webhook_secret: "whsec_test")
+
+    status, _headers, body = auth.call(
+      rack_env(
+        "POST",
+        "/api/auth/stripe/webhook",
+        raw_body: JSON.generate({"type" => "invoice.paid"}),
+        headers: {"HTTP_STRIPE_SIGNATURE" => "valid"}
+      )
+    )
+
+    assert_equal 200, status
+    assert_equal({"success" => true}, JSON.parse(body.join))
+    assert_equal JSON.generate({"type" => "invoice.paid"}), stripe.webhooks_adapter.payloads.fetch(0)
+  end
+
   def test_webhook_creates_subscription_from_created_event_metadata
     stripe = FakeStripeClient.new
     auth = build_auth(stripe_client: stripe, stripe_webhook_secret: "whsec_test")
@@ -702,6 +724,16 @@ class BetterAuthPluginsStripeTest < Minitest::Test
     end
 
     assert_equal BetterAuth::Stripe::ERROR_CODES.fetch("STRIPE_WEBHOOK_SECRET_NOT_FOUND"), error.message
+  end
+
+  def test_webhook_rejects_client_without_construct_event
+    auth = build_auth(stripe_client: Object.new, stripe_webhook_secret: "whsec_test")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.stripe_webhook(headers: {"stripe-signature" => "valid"}, body: {type: "invoice.paid"})
+    end
+
+    assert_equal BetterAuth::Stripe::ERROR_CODES.fetch("FAILED_TO_CONSTRUCT_STRIPE_EVENT"), error.message
   end
 
   def test_webhook_rejects_null_constructed_event
@@ -1563,6 +1595,50 @@ class BetterAuthPluginsStripeTest < Minitest::Test
     assert_equal 1, stripe.customers.created.length
   end
 
+  def test_stripe_routes_reject_untrusted_redirect_urls
+    stripe = FakeStripeClient.new
+    auth = build_auth(stripe_client: stripe)
+    cookie = sign_up_cookie(auth, email: "untrusted-stripe-urls@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    auth.context.internal_adapter.update_user(user.fetch("id"), stripeCustomerId: "cus_untrusted_urls")
+    auth.context.adapter.create(
+      model: "subscription",
+      data: {
+        plan: "pro",
+        referenceId: user.fetch("id"),
+        stripeCustomerId: "cus_untrusted_urls",
+        stripeSubscriptionId: "sub_untrusted_urls",
+        status: "active",
+        periodEnd: Time.now + 3600
+      }
+    )
+    stripe.subscriptions.list_data = [stripe_subscription(id: "sub_untrusted_urls", customer: "cus_untrusted_urls", price_id: "price_pro")]
+
+    assert_untrusted_stripe_url do
+      auth.api.upgrade_subscription(headers: {"cookie" => cookie}, body: {plan: "pro", successUrl: "https://evil.example/success", cancelUrl: "/cancel"})
+    end
+    assert_untrusted_stripe_url do
+      auth.api.upgrade_subscription(headers: {"cookie" => cookie}, body: {plan: "pro", successUrl: "/success", cancelUrl: "https://evil.example/cancel"})
+    end
+    assert_untrusted_stripe_url do
+      auth.api.upgrade_subscription(headers: {"cookie" => cookie}, body: {plan: "basic", successUrl: "/success", cancelUrl: "/cancel", returnUrl: "https://evil.example/billing"})
+    end
+    assert_untrusted_stripe_url do
+      auth.api.create_billing_portal(headers: {"cookie" => cookie}, body: {returnUrl: "https://evil.example/portal"})
+    end
+    assert_untrusted_stripe_url do
+      auth.api.cancel_subscription(headers: {"cookie" => cookie}, body: {subscriptionId: "sub_untrusted_urls", returnUrl: "https://evil.example/cancel"})
+    end
+    assert_untrusted_stripe_url do
+      auth.api.subscription_success(headers: {"cookie" => cookie}, query: {callbackURL: "https://evil.example/success"})
+    end
+    assert_untrusted_stripe_url do
+      auth.api.cancel_subscription_callback(headers: {"cookie" => cookie}, query: {callbackURL: "https://evil.example/cancel", subscriptionId: "sub_untrusted_urls"})
+    end
+
+    assert_empty stripe.billing_portal.created
+  end
+
   private
 
   def build_auth(options = {})
@@ -1632,6 +1708,47 @@ class BetterAuthPluginsStripeTest < Minitest::Test
 
   def cookie_header(set_cookie)
     set_cookie.to_s.lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def assert_untrusted_stripe_url
+    error = assert_raises(BetterAuth::APIError) { yield }
+    assert_equal 403, error.status_code
+    assert_includes error.message, "Invalid"
+  end
+
+  def rack_env(method, path, raw_body:, headers: {})
+    path_info, query_string = path.split("?", 2)
+    {
+      "REQUEST_METHOD" => method,
+      "PATH_INFO" => path_info,
+      "QUERY_STRING" => query_string || "",
+      "SERVER_NAME" => "localhost",
+      "SERVER_PORT" => "3000",
+      "REMOTE_ADDR" => "127.0.0.1",
+      "rack.url_scheme" => "http",
+      "rack.input" => StringIO.new(raw_body),
+      "CONTENT_TYPE" => "application/json",
+      "CONTENT_LENGTH" => raw_body.bytesize.to_s
+    }.merge(headers)
+  end
+
+  class RawBodyWebhookVerifier
+    attr_reader :payloads
+
+    def initialize(expected_payload:, event:)
+      @expected_payload = expected_payload
+      @event = event
+      @payloads = []
+    end
+
+    def construct_event_async(payload, signature, secret)
+      payloads << payload
+      raise "expected raw body string" unless payload.is_a?(String)
+      raise "payload changed" unless payload == @expected_payload
+      raise "invalid signature" unless signature == "valid" && secret == "whsec_test"
+
+      @event
+    end
   end
 
   class FakeStripeClient

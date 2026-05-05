@@ -92,11 +92,37 @@ class BetterAuthSSORoutesSchemasTest < Minitest::Test
     assert_equal({type: "string", required: true}, fields.fetch(:issuer))
     assert_equal({type: "string", required: false}, fields.fetch(:oidcConfig))
     assert_equal({type: "string", required: false}, fields.fetch(:samlConfig))
-    assert_equal({type: "string", required: true}, fields.fetch(:userId))
+    assert_equal({type: "string", required: true, references: {model: "user", field: "id"}}, fields.fetch(:userId))
     assert_equal({type: "string", required: true, unique: true}, fields.fetch(:providerId))
     assert_equal({type: "string", required: true}, fields.fetch(:domain))
     assert_equal({type: "string", required: false}, fields.fetch(:organizationId))
     refute fields.key?(:domainVerified)
+  end
+
+  def test_plugin_schema_applies_upstream_field_mappings
+    schema = SCHEMAS.plugin_schema(
+      fields: {
+        issuer: "sso_issuer",
+        oidcConfig: "oidc_config",
+        samlConfig: "saml_config",
+        userId: "owner_id",
+        providerId: "provider_id",
+        organizationId: "org_id",
+        domain: "email_domain",
+        domainVerified: "domain_verified"
+      },
+      domainVerification: {enabled: true}
+    )
+    fields = schema.fetch(:ssoProvider).fetch(:fields)
+
+    assert_equal "sso_issuer", fields.fetch(:issuer).fetch(:field_name)
+    assert_equal "oidc_config", fields.fetch(:oidcConfig).fetch(:field_name)
+    assert_equal "saml_config", fields.fetch(:samlConfig).fetch(:field_name)
+    assert_equal "owner_id", fields.fetch(:userId).fetch(:field_name)
+    assert_equal "provider_id", fields.fetch(:providerId).fetch(:field_name)
+    assert_equal "org_id", fields.fetch(:organizationId).fetch(:field_name)
+    assert_equal "email_domain", fields.fetch(:domain).fetch(:field_name)
+    assert_equal "domain_verified", fields.fetch(:domainVerified).fetch(:field_name)
   end
 
   def test_plugin_schema_includes_domain_verified_when_domain_verification_is_enabled

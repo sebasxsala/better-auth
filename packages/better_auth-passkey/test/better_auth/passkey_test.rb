@@ -573,7 +573,9 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
 
     assert_includes sql, 'CREATE TABLE IF NOT EXISTS "passkeys"'
     assert_includes sql, '"credential_id" text NOT NULL'
+    assert_includes sql, 'UNIQUE ("credential_id")'
     assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_passkeys_on_user_id" ON "passkeys" ("user_id")'
+    refute_includes sql, "index_passkeys_on_credential_id"
   end
 
   def test_rejects_expired_challenge_and_delete_not_found_message

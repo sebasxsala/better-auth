@@ -34,6 +34,9 @@ module BetterAuth
       end
 
       def resolve_better_auth_session(request)
+        auth = BetterAuth::Hanami.auth
+        auth.context.prepare_for_request!(request) if auth.context.respond_to?(:prepare_for_request!)
+
         context = BetterAuth::Endpoint::Context.new(
           path: request_path(request),
           method: request_method(request),
@@ -41,7 +44,7 @@ module BetterAuth
           body: {},
           params: {},
           headers: {"cookie" => request_cookie(request)},
-          context: BetterAuth::Hanami.auth.context,
+          context: auth.context,
           request: request
         )
         BetterAuth::Session.find_current(context, disable_refresh: true)

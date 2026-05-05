@@ -2,6 +2,6 @@
 
 module BetterAuth
   module Sinatra
-    VERSION = "0.6.2"
+    VERSION = "0.7.0"
   end
 end

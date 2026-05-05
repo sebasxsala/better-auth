@@ -16,7 +16,14 @@ module BetterAuthMongoAdapterTestSupport
   end
 
   class FakeMongoCollection
-    attr_reader :documents, :insert_options, :aggregate_pipelines
+    attr_reader :documents
+    attr_reader :insert_options
+    attr_reader :aggregate_pipelines
+    attr_reader :find_one_and_update_calls
+    attr_reader :update_many_calls
+    attr_reader :delete_one_calls
+    attr_reader :delete_many_calls
+    attr_reader :indexes
 
     InsertResult = Struct.new(:inserted_id)
     UpdateResult = Struct.new(:modified_count)
@@ -27,6 +34,11 @@ module BetterAuthMongoAdapterTestSupport
       @documents = []
       @insert_options = []
       @aggregate_pipelines = []
+      @find_one_and_update_calls = []
+      @update_many_calls = []
+      @delete_one_calls = []
+      @delete_many_calls = []
+      @indexes = FakeMongoIndexes.new
     end
 
     def insert_one(document, options = {})
@@ -46,16 +58,18 @@ module BetterAuthMongoAdapterTestSupport
     end
 
     def find_one_and_update(filter, update, options = {})
-      document = @documents.find { |entry| matches_filter?(entry, filter) }
+      @find_one_and_update_calls << [deep_dup(filter), deep_dup(update), options]
+      document = writable_documents(options).find { |entry| matches_filter?(entry, filter) }
       return nil unless document
 
       document.merge!(deep_dup(update.fetch("$set")))
       deep_dup(document)
     end
 
-    def update_many(filter, update, _options = {})
+    def update_many(filter, update, options = {})
+      @update_many_calls << [deep_dup(filter), deep_dup(update), options]
       count = 0
-      @documents.each do |document|
+      writable_documents(options).each do |document|
         next unless matches_filter?(document, filter)
 
         document.merge!(deep_dup(update.fetch("$set")))
@@ -64,16 +78,28 @@ module BetterAuthMongoAdapterTestSupport
       UpdateResult.new(count)
     end
 
-    def delete_one(filter, _options = {})
-      index = @documents.index { |document| matches_filter?(document, filter) }
-      @documents.delete_at(index) if index
+    def delete_one(filter, options = {})
+      @delete_one_calls << [deep_dup(filter), options]
+      documents = writable_documents(options)
+      index = documents.index { |document| matches_filter?(document, filter) }
+      documents.delete_at(index) if index
       DeleteResult.new(index ? 1 : 0)
     end
 
-    def delete_many(filter, _options = {})
-      before = @documents.length
-      @documents.reject! { |document| matches_filter?(document, filter) }
-      DeleteResult.new(before - @documents.length)
+    def delete_many(filter, options = {})
+      @delete_many_calls << [deep_dup(filter), options]
+      documents = writable_documents(options)
+      before = documents.length
+      documents.reject! { |document| matches_filter?(document, filter) }
+      DeleteResult.new(before - documents.length)
+    end
+
+    def all_documents
+      @documents.map { |document| deep_dup(document) }
+    end
+
+    def replace_documents(documents)
+      @documents = documents.map { |document| deep_dup(document) }
     end
 
     class Cursor
@@ -86,14 +112,38 @@ module BetterAuthMongoAdapterTestSupport
       end
     end
 
+    class FakeMongoIndexes
+      attr_reader :create_one_calls
+
+      def initialize
+        @create_one_calls = []
+      end
+
+      def create_one(keys, options = {})
+        @create_one_calls << [deep_dup(keys), deep_dup(options)]
+      end
+
+      private
+
+      def deep_dup(value)
+        Marshal.load(Marshal.dump(value))
+      end
+    end
+
     private
 
     def visible_documents(options)
-      documents = @documents.map { |document| deep_dup(document) }
       session = transaction_session(options)
-      return documents unless session
+      documents = session ? session.documents_for(self) : @documents
 
-      documents + session.pending_documents_for(self)
+      documents.map { |document| deep_dup(document) }
+    end
+
+    def writable_documents(options)
+      session = transaction_session(options)
+      return @documents unless session
+
+      session.documents_for(self)
     end
 
     def transaction_session(options)
@@ -180,14 +230,21 @@ module BetterAuthMongoAdapterTestSupport
 
     def matches_filter?(document, filter)
       return true if filter.empty?
-      return filter.fetch("$and").all? { |entry| matches_filter?(document, entry) } if filter.key?("$and")
-      return filter.fetch("$or").any? { |entry| matches_filter?(document, entry) } if filter.key?("$or")
-      return filter.fetch("$nor").none? { |entry| matches_filter?(document, entry) } if filter.key?("$nor")
-      return filter.dig("$expr", "$eq") == [1, 0] if filter.key?("$expr")
 
       filter.all? do |field, expected|
-        current = document[field.to_s]
-        matches_value?(current, expected)
+        case field
+        when "$and"
+          expected.all? { |entry| matches_filter?(document, entry) }
+        when "$or"
+          expected.any? { |entry| matches_filter?(document, entry) }
+        when "$nor"
+          expected.none? { |entry| matches_filter?(document, entry) }
+        when "$expr"
+          expected.fetch("$eq") == [1, 0]
+        else
+          current = document[field.to_s]
+          matches_value?(current, expected)
+        end
       end
     end
 
@@ -258,7 +315,7 @@ module BetterAuthMongoAdapterTestSupport
       @committed = false
       @aborted = false
       @ended = false
-      @pending_inserts = Hash.new { |hash, collection| hash[collection] = [] }
+      @collection_states = {}
     end
 
     def start_transaction
@@ -266,16 +323,16 @@ module BetterAuthMongoAdapterTestSupport
     end
 
     def commit_transaction
-      @pending_inserts.each do |collection, documents|
-        documents.each { |document| collection.documents << Marshal.load(Marshal.dump(document)) }
+      @collection_states.each do |collection, documents|
+        collection.replace_documents(documents)
       end
-      @pending_inserts.clear
+      @collection_states.clear
       @committed = true
       @started = false
     end
 
     def abort_transaction
-      @pending_inserts.clear
+      @collection_states.clear
       @aborted = true
       @started = false
     end
@@ -288,12 +345,16 @@ module BetterAuthMongoAdapterTestSupport
       started
     end
 
+    def documents_for(collection)
+      @collection_states[collection] ||= collection.all_documents
+    end
+
     def insert(collection, document)
-      @pending_inserts[collection] << Marshal.load(Marshal.dump(document))
+      documents_for(collection) << Marshal.load(Marshal.dump(document))
     end
 
     def pending_documents_for(collection)
-      @pending_inserts[collection].map { |document| Marshal.load(Marshal.dump(document)) }
+      documents_for(collection).map { |document| Marshal.load(Marshal.dump(document)) }
     end
   end
 end
