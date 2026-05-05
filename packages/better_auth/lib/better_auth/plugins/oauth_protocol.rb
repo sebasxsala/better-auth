@@ -461,7 +461,9 @@ module BetterAuth
             "issuer" => issuer || issuer(ctx),
             "issuedAt" => Time.now
           }
-          ctx.context.adapter.create(model: model, data: record)
+          created_access = ctx.context.adapter.create(model: model, data: record)
+          created = stringify_keys(created_access || {})
+          record = record.merge("id" => created["id"]) if created["id"]
           stored_record = record.merge("user" => user, "session" => session_data, "client" => client_data)
           store[:tokens][access_token_value] = stored_record
           store[:tokens][access_token] = stored_record
@@ -493,6 +495,11 @@ module BetterAuth
           raise APIError.new("BAD_REQUEST", message: "invalid_grant")
         end
         raise APIError.new("BAD_REQUEST", message: "invalid_grant") if data["expiresAt"] && data["expiresAt"] <= Time.now
+
+        client_data = stringify_keys(client)
+        unless data["clientId"].to_s == client_data["clientId"].to_s
+          raise APIError.new("BAD_REQUEST", message: "invalid_grant")
+        end
 
         requested = scopes ? parse_scopes(scopes) : data["scopes"]
         unless requested.all? { |scope| data["scopes"].include?(scope) }
@@ -728,9 +735,16 @@ module BetterAuth
 
         Crypto.sign_jwt(
           payload,
-          client_id.to_s.empty? ? "better-auth" : client_id.to_s,
+          id_token_hs256_key(ctx, client_id, stringify_keys(client)["clientSecret"] || stringify_keys(client)["client_secret"]),
           expires_in: 3600
         )
+      end
+
+      def id_token_hs256_key(ctx, client_id, client_secret = nil)
+        return client_secret.to_s unless client_secret.to_s.empty?
+
+        label = client_id.to_s.empty? ? "better-auth" : client_id.to_s
+        OpenSSL::HMAC.hexdigest("SHA256", ctx.context.secret.to_s, "oidc.id_token.#{label}")
       end
 
       def standard_token_response_field?(key)
