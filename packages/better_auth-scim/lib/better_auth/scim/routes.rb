@@ -178,24 +178,37 @@ module BetterAuth
       Endpoint.new(path: "/scim/v2/Users", method: "GET", metadata: scim_hidden_metadata("List SCIM users.", SCIM_SUPPORTED_MEDIA_TYPES), use: [scim_auth_middleware(config)]) do |ctx|
         provider = ctx.context.scim_provider
         accounts = ctx.context.adapter.find_many(model: "account", where: [{field: "providerId", value: provider.fetch("providerId")}])
-        users_by_id = ctx.context.internal_adapter.list_users.each_with_object({}) { |user, result| result[user.fetch("id")] = user }
-        users = accounts.filter_map { |account| users_by_id[account.fetch("userId")] }
-        if provider["organizationId"]
-          member_ids = ctx.context.adapter.find_many(
-            model: "member",
-            where: [{field: "organizationId", value: provider.fetch("organizationId")}]
-          ).map { |member| member.fetch("userId") }
-          users = users.select { |user| member_ids.include?(user.fetch("id")) }
-        end
-        filter_field, filter_value = scim_parse_filter(ctx.query[:filter] || ctx.query["filter"]) if ctx.query[:filter] || ctx.query["filter"]
-        resources = users.filter_map do |user|
-          account = accounts.find { |entry| entry.fetch("userId") == user.fetch("id") }
-          resource = scim_user_resource(user, account, ctx.context.base_url)
-          next resource unless filter_field
+        account_user_ids = accounts.map { |account| account.fetch("userId") }.uniq
+        empty_list = {schemas: [SCIM_LIST_RESPONSE_SCHEMA], totalResults: 0, itemsPerPage: 0, startIndex: 1, Resources: []}
+        if account_user_ids.empty?
+          ctx.json(empty_list)
+        else
+          user_ids = account_user_ids
+          if provider["organizationId"]
+            user_ids = ctx.context.adapter.find_many(
+              model: "member",
+              where: [
+                {field: "organizationId", value: provider.fetch("organizationId")},
+                {field: "userId", value: account_user_ids, operator: "in"}
+              ]
+            ).map { |member| member.fetch("userId") }.uniq
+          end
 
-          (resource[filter_field.to_sym].to_s.downcase == filter_value.to_s.downcase) ? resource : nil
+          if user_ids.empty?
+            ctx.json(empty_list)
+          else
+            where = [{field: "id", value: user_ids, operator: "in"}]
+            if ctx.query[:filter] || ctx.query["filter"]
+              _filter_field, filter_value = scim_parse_filter(ctx.query[:filter] || ctx.query["filter"])
+              where << {field: "email", value: filter_value.to_s.downcase, operator: "eq"}
+            end
+
+            users = ctx.context.internal_adapter.list_users(where: where, sort_by: {field: "email", direction: "asc"})
+            accounts_by_user = accounts.each_with_object({}) { |account, result| result[account.fetch("userId")] ||= account }
+            resources = users.map { |user| scim_user_resource(user, accounts_by_user[user.fetch("id")], ctx.context.base_url) }
+            ctx.json({schemas: [SCIM_LIST_RESPONSE_SCHEMA], totalResults: resources.length, itemsPerPage: resources.length, startIndex: 1, Resources: resources})
+          end
         end
-        ctx.json({schemas: [SCIM_LIST_RESPONSE_SCHEMA], totalResults: resources.length, itemsPerPage: resources.length, startIndex: 1, Resources: resources})
       end
     end
 

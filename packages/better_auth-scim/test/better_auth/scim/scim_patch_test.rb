@@ -110,6 +110,30 @@ class BetterAuthPluginsScimPatchTest < Minitest::Test
     end
   end
 
+  def test_scim_patch_given_name_three_word_display_name_matches_upstream_split
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "okta"}).fetch(:scimToken)
+    headers = bearer(token)
+    created = auth.api.create_scim_user(
+      headers: headers,
+      body: {userName: "three@example.com", name: {formatted: "Anne Marie Smith"}}
+    )
+
+    auth.api.patch_scim_user(
+      headers: headers,
+      params: {userId: created.fetch(:id)},
+      body: {
+        schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        Operations: [{op: "replace", path: "/name/givenName", value: "Pat"}]
+      },
+      return_status: true
+    )
+    patched = auth.api.get_scim_user(headers: headers, params: {userId: created.fetch(:id)})
+
+    assert_equal "Pat Marie Smith", patched.fetch(:displayName)
+  end
+
   def test_scim_patch_supports_upstream_name_subattributes_and_nested_path_variants
     %w[replace add].each do |operation|
       auth = build_auth

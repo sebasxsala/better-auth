@@ -47,3 +47,7 @@ The plugin exposes upstream-style surface metadata:
 - `BetterAuth::Plugins.scim.version` returns the gem SCIM version.
 - `BetterAuth::Plugins.scim.client` returns the Ruby client-plugin descriptor (`scim-client`) for integrations that inspect plugin parity metadata.
 - SCIM protocol routes are hidden from generated OpenAPI output, matching upstream `HIDE_METADATA`; provider management routes remain visible.
+
+## Production recommendations
+
+- In the accounts table (`accounts` or the configured table name), use a unique composite index on `(providerId, accountId)` to prevent duplicate SCIM accounts under concurrent provisioning. The gem does not create this constraint automatically because index syntax and migrations depend on your database adapter and application.
