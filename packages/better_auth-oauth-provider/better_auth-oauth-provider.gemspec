@@ -9,7 +9,12 @@ Gem::Specification.new do |spec|
   spec.email = ["sebastian.sala.tech@gmail.com"]
 
   spec.summary = "OAuth provider plugin package for Better Auth Ruby"
-  spec.description = "Adds OAuth 2.0 provider metadata, client registration, authorization, token, introspection, revocation, and userinfo routes for Better Auth Ruby."
+  spec.description = [
+    "Adds OAuth 2.0 provider metadata, client registration, authorization, and token routes for Better Auth Ruby.",
+    "Includes introspection and revocation routes.",
+    "Also provides userinfo routes.",
+    "Better Auth Ruby is an independent modern authentication framework for Ruby inspired by Better Auth."
+  ].join(" ")
   spec.homepage = "https://github.com/sebasxsala/better-auth"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"

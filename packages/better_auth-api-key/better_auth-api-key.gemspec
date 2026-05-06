@@ -9,7 +9,12 @@ Gem::Specification.new do |spec|
   spec.email = ["sebastian.sala.tech@gmail.com"]
 
   spec.summary = "API key plugin package for Better Auth Ruby"
-  spec.description = "Adds API key creation, verification, management, quotas, metadata, permissions, storage modes, and API-key-backed sessions for Better Auth Ruby."
+  spec.description = [
+    "Adds API key creation, verification, management, quotas, metadata, and permissions for Better Auth Ruby.",
+    "Includes storage modes.",
+    "Also supports API-key-backed sessions.",
+    "Better Auth Ruby is an independent modern authentication framework for Ruby inspired by Better Auth."
+  ].join(" ")
   spec.homepage = "https://github.com/sebasxsala/better-auth"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"

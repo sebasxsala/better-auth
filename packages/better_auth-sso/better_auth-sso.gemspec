@@ -9,7 +9,10 @@ Gem::Specification.new do |spec|
   spec.email = ["sebastian.sala.tech@gmail.com"]
 
   spec.summary = "SSO plugin package for Better Auth Ruby"
-  spec.description = "Adds SSO provider management, OIDC SSO, and SAML SSO integration for Better Auth Ruby."
+  spec.description = [
+    "Adds SSO provider management, OIDC SSO, and SAML SSO integration for Better Auth Ruby.",
+    "Better Auth Ruby is an independent modern authentication framework for Ruby inspired by Better Auth."
+  ].join(" ")
   spec.homepage = "https://github.com/sebasxsala/better-auth"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"

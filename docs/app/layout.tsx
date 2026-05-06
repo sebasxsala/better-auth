@@ -16,7 +16,7 @@ export const metadata = createMetadata({
 		template: "%s | Better Auth Ruby",
 		default: "Better Auth Ruby",
 	},
-	description: "The most comprehensive authentication framework for Ruby.",
+	description: "A modern authentication framework for Ruby, inspired by Better Auth.",
 	metadataBase: baseUrl,
 });
 

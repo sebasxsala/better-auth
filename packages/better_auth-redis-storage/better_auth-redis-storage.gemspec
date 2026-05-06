@@ -9,7 +9,11 @@ Gem::Specification.new do |spec|
   spec.email = ["sebastian.sala.tech@gmail.com"]
 
   spec.summary = "Redis secondary storage package for Better Auth Ruby"
-  spec.description = "Adds a Redis-backed secondary storage adapter for Better Auth Ruby sessions and rate limiting."
+  spec.description = [
+    "Adds a Redis-backed secondary storage adapter for Better Auth Ruby.",
+    "Better Auth Ruby is an independent modern authentication framework for Ruby inspired by Better Auth.",
+    "Includes sessions and rate limiting support."
+  ].join(" ")
   spec.homepage = "https://github.com/sebasxsala/better-auth"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"

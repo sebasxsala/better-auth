@@ -9,7 +9,11 @@ Gem::Specification.new do |spec|
   spec.email = ["sebastian.sala.tech@gmail.com"]
 
   spec.summary = "Comprehensive authentication framework for Ruby/Rack"
-  spec.description = "Better Auth is a comprehensive, framework-agnostic authentication library for Ruby. It provides a complete set of features out of the box with a plugin ecosystem."
+  spec.description = [
+    "Better Auth Ruby is an independent, modern authentication framework for Ruby, inspired by Better Auth.",
+    "It is not affiliated with, maintained by, or endorsed by the Better Auth project.",
+    "It provides a framework-agnostic Rack core, auth routes, sessions, adapters, and a plugin system."
+  ].join(" ")
   spec.homepage = "https://github.com/sebasxsala/better-auth"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"

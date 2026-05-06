@@ -9,7 +9,11 @@ Gem::Specification.new do |spec|
   spec.email = ["sebastian.sala.tech@gmail.com"]
 
   spec.summary = "Hanami adapter for Better Auth"
-  spec.description = "Hanami integration for Better Auth Ruby. Provides route mounting, ROM/Sequel persistence, migrations, helpers, and generators."
+  spec.description = [
+    "Hanami integration for Better Auth Ruby.",
+    "Better Auth Ruby is an independent modern authentication framework for Ruby inspired by Better Auth.",
+    "Provides route mounting, ROM/Sequel persistence, migrations, helpers, and generators."
+  ].join(" ")
   spec.homepage = "https://github.com/sebasxsala/better-auth"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"

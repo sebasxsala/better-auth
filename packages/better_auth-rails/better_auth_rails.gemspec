@@ -9,7 +9,10 @@ Gem::Specification.new do |spec|
   spec.email = ["sebastian.sala.tech@gmail.com"]
 
   spec.summary = "Alias for better_auth-rails"
-  spec.description = "Please use better_auth-rails instead."
+  spec.description = [
+    "Compatibility alias for better_auth-rails, the Rails integration for Better Auth Ruby.",
+    "Better Auth Ruby is independent and not affiliated with, maintained by, or endorsed by the Better Auth project."
+  ].join(" ")
   spec.homepage = "https://github.com/sebasxsala/better-auth"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"

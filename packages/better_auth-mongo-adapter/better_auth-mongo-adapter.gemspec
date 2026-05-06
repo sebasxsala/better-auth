@@ -9,7 +9,11 @@ Gem::Specification.new do |spec|
   spec.email = ["sebastian.sala.tech@gmail.com"]
 
   spec.summary = "MongoDB adapter package for Better Auth Ruby"
-  spec.description = "Adds a MongoDB database adapter for Better Auth Ruby without requiring MongoDB dependencies in the core gem."
+  spec.description = [
+    "Adds a MongoDB database adapter for Better Auth Ruby.",
+    "Better Auth Ruby is an independent modern authentication framework for Ruby inspired by Better Auth.",
+    "Keeps MongoDB dependencies out of the core gem."
+  ].join(" ")
   spec.homepage = "https://github.com/sebasxsala/better-auth"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"

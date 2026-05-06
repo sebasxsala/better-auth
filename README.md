@@ -1,5 +1,9 @@
 # Better Auth Ruby
 
+A modern authentication framework for Ruby, inspired by Better Auth.
+
+> This project is independent and is not affiliated with, maintained by, or endorsed by the Better Auth project.
+
 Ruby server packages for [Better Auth](https://github.com/better-auth/better-auth).
 The core is Rack-first, with adapters for Rails, Sinatra, and Hanami, plus
 Ruby packages for selected Better Auth plugins.
